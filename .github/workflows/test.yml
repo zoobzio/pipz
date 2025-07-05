@@ -1,0 +1,34 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+    
+    - name: Test pipz core
+      run: |
+        go test -v -race -coverprofile=coverage.out ./...
+        go tool cover -func=coverage.out
+    
+    - name: Test demos
+      working-directory: ./demo
+      run: |
+        make ci-full
+    
+    - name: Benchmark
+      working-directory: ./demo
+      run: |
+        go test ./processors -bench=. -benchmem -benchtime=100ms
