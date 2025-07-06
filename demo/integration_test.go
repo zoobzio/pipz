@@ -139,6 +139,9 @@ func TestPipelineVersioning(t *testing.T) {
 
 // TestChainComposition tests combining multiple contracts
 func TestChainComposition(t *testing.T) {
+	// Define key types
+	type EnrichmentKey string
+	
 	// Define const keys
 	const validatorKey examples.ValidatorKey = "test"
 	const enrichmentKey EnrichmentKey = "test"
@@ -151,7 +154,6 @@ func TestChainComposition(t *testing.T) {
 	)
 
 	// Create a second contract for enrichment
-	type EnrichmentKey string
 	enrichmentContract := pipz.GetContract[examples.Order](enrichmentKey)
 	enrichmentContract.Register(func(o examples.Order) ([]byte, error) {
 		// Add some metadata

@@ -22,6 +22,152 @@ user, err := contract.Process(userData)
 
 No singletons to inject. No interfaces to implement. Just types.
 
+## Why pipz?
+
+### The Problem: Scattered Business Logic
+
+Every codebase eventually looks like this:
+
+```go
+// Middleware hell - repeated in every handler
+func handleAPIRequest(w http.ResponseWriter, r *http.Request) {
+    // Auth check scattered everywhere
+    token := r.Header.Get("Authorization")
+    if token == "" {
+        http.Error(w, "Unauthorized", 401)
+        return
+    }
+    
+    // Rate limiting logic duplicated
+    user := getUserFromToken(token)
+    if isRateLimited(user) {
+        http.Error(w, "Rate limited", 429)
+        return
+    }
+    
+    // Logging scattered across handlers
+    log.Printf("API Request: %s %s", r.Method, r.URL.Path)
+    
+    // Finally... actual business logic
+    processRequest(w, r)
+}
+// Copy-pasted everywhere with slight variations 😢
+```
+
+### The Solution: Pipeline-Driven Architecture
+
+```go
+// Register once at startup
+const apiMiddleware MiddlewareKey = "api-v1"
+contract := pipz.GetContract[Request](apiMiddleware)
+contract.Register(
+    pipz.Apply(authenticate),  // Check auth token
+    pipz.Apply(rateLimit),     // Apply rate limits
+    pipz.Effect(logRequest),   // Log the request
+)
+
+// Use everywhere - one clean line
+func handleAPIRequest(w http.ResponseWriter, r *http.Request) {
+    request, err := contract.Process(buildRequest(r))
+    if err != nil {
+        http.Error(w, err.Error(), getStatusCode(err))
+        return
+    }
+    // Clean business logic with authenticated, rate-limited request
+    processRequest(w, request)
+}
+```
+
+**Result**: No more scattered conditionals. No more copy-paste middleware. Just clean, reusable, type-safe pipelines.
+
+### But Wait, There's More: Error Handling
+
+What happens when your clean middleware fails? Traditional code scatters error handling logic everywhere too:
+
+```go
+// Error handling hell - repeated everywhere
+func chargeCard(p Payment) (Payment, error) {
+    err := processCharge(p)
+    if err != nil {
+        // Scattered error logic in every function
+        if strings.Contains(err.Error(), "insufficient funds") {
+            sendEmail(p.CustomerEmail, "Payment declined")
+            logToAudit("insufficient_funds", p)
+            return p, err
+        }
+        if strings.Contains(err.Error(), "network") {
+            alertOpsTeam("payment_network_down")
+            tryBackupProvider(p)
+            return p, err
+        }
+        // More scattered error handling...
+    }
+    return p, nil
+}
+```
+
+**With pipz**: Error handling becomes just another pipeline!
+
+```go
+// Error handling pipeline - completely separate from payment logic
+const errorKey PaymentErrorKey = "v1"
+errorContract := pipz.GetContract[PaymentError](errorKey)
+errorContract.Register(
+    pipz.Apply(categorizeError),     // Determine error type
+    pipz.Apply(notifyCustomer),      // Send appropriate notifications  
+    pipz.Apply(attemptRecovery),     // Try backup strategies
+    pipz.Effect(alertOpsTeam),       // Alert operations if needed
+    pipz.Effect(auditLog),           // Compliance logging
+)
+
+// Inside your payment processor - NO IMPORTS of error handling needed!
+func chargeCard(p Payment) (Payment, error) {
+    err := processCharge(p)
+    if err != nil {
+        // Discover error pipeline using just types
+        errorContract := pipz.GetContract[PaymentError](errorKey)
+        result, _ := errorContract.Process(PaymentError{
+            Payment: p,
+            OriginalError: err,
+        })
+        return p, result.FinalError  // Might be nil if recovered!
+    }
+    return p, nil
+}
+```
+
+**The breakthrough**: Your payment processor has **zero imports** of error handling code. Different teams can own different pipelines. Error handling logic is completely separated from business logic.
+
+### This Pattern Scales to Everything
+
+Once you see it, you can't unsee it. **Every scattered conditional in your codebase is a pipeline waiting to happen:**
+
+```go
+// A/B testing? Pipeline.
+const testKey ExperimentKey = "checkout-flow-v2"
+experiment := pipz.GetContract[User](testKey)
+
+// Data validation? Pipeline.  
+const validationKey ValidationKey = "user-onboarding"
+validator := pipz.GetContract[SignupForm](validationKey)
+
+// Multi-tenant logic? Different pipelines per tenant.
+const tenantKey TenantKey = "enterprise-customer-123"
+processor := pipz.GetContract[Order](tenantKey)
+
+// Testing? Just another universe.
+const testKey PaymentKey = "test"
+testContract := pipz.GetContract[Payment](testKey)
+testContract.Register(
+    pipz.Apply(validatePayment),    // Real validation
+    pipz.Apply(checkFraud),         // Real business logic
+    pipz.Apply(mockChargeCard),     // Mock external API
+)
+// No mocking frameworks needed!
+```
+
+> 💡 **See [USE_CASES.md](USE_CASES.md) for complete examples including multi-tenant systems, A/B testing, data validation pipelines, testing patterns, and more.**
+
 ## Installation
 
 ```bash
@@ -43,10 +189,10 @@ type User struct {          // Data type to process
 }
 ```
 
-2. **Write processor functions** - Simple functions that work with your types:
+2. **Write processor functions** - Just normal Go functions! No special interfaces or pipz imports needed:
 
 ```go
-// Validation - check without modifying
+// Validation functions: check data, return error if invalid
 func checkEmail(u User) error {
     if !strings.Contains(u.Email, "@") {
         return fmt.Errorf("invalid email: %s", u.Email)
@@ -54,13 +200,13 @@ func checkEmail(u User) error {
     return nil
 }
 
-// Transformation - always modify
+// Transform functions: always modify and return new data
 func normalizeEmail(u User) User {
     u.Email = strings.ToLower(u.Email)
     return u
 }
 
-// Conditional modification
+// Business logic functions: pure logic, no pipz knowledge
 func applyDiscount(u User) User {
     u.Discount = 0.10  // 10% off
     return u
@@ -71,7 +217,9 @@ func isVIP(u User) bool {
 }
 ```
 
-3. **Register using adapters** - Do this once at startup:
+**Key insight**: These are just regular Go functions that work with your domain types. They don't import pipz, don't know about pipelines, and can be unit tested independently!
+
+3. **Wrap with adapters and register** - Adapters tell pipz how to use your functions:
 
 ```go
 const validationKey ValidationKey = "v1"
@@ -86,6 +234,12 @@ contract.Register(
     }),
 )
 ```
+
+**What just happened?**
+- `pipz.Validate(checkEmail)` wraps your `func(User) error` 
+- `pipz.Transform(normalizeEmail)` wraps your `func(User) User`
+- `pipz.Mutate(applyDiscount, isVIP)` wraps your transform + condition functions
+- `pipz.Effect(...)` wraps functions that do side effects
 
 **Behind the scenes**: pipz handles all serialization. Your functions work with concrete types, not bytes!
 
@@ -515,9 +669,43 @@ All operations are thread-safe:
 
 ### Important Behaviors
 
-- **Contract Registration**: Registering processors to an existing contract **overwrites** the previous pipeline
+- **Contract Registration**: Registering processors to an existing contract **appends** to the existing pipeline
 - **Error Handling**: If any processor fails, the chain stops and returns the original input value with the error
 - **Isolation**: Each contract's processors are completely isolated via gob copying
+
+## Performance
+
+pipz is designed for real-world performance. Here are the key characteristics:
+
+### Quick Performance Summary
+
+| Scenario | Throughput | Use Case |
+|----------|------------|----------|
+| Read-only validation | ~244k ops/sec | Input validation, auth checks |
+| Single transformation | ~138k ops/sec | Data normalization, enrichment |
+| Multi-step pipeline | ~73k ops/sec | Business rule chains |
+| Complex validation | ~15k ops/sec | Order processing, form validation |
+
+### Performance Features
+
+✅ **Minimal overhead**: ~200-500ns per operation  
+✅ **Smart caching**: Pipeline lookup is near-zero cost after first access  
+✅ **Read-only optimization**: Validation processors avoid serialization overhead  
+✅ **Predictable scaling**: Performance scales linearly with pipeline complexity  
+
+### When pipz is Fast
+
+- **Validation pipelines**: Read-only processors are highly optimized
+- **Small to medium data**: Serialization overhead is minimal
+- **Cached contracts**: Reusing contract references eliminates lookup costs
+
+### Real-World Impact
+
+**Web APIs**: 50-200μs additional latency per request (negligible)  
+**Batch processing**: 10k-100k records/sec depending on complexity  
+**Memory usage**: 2-5KB additional per operation
+
+> 📊 **See [benchmarks/README.md](benchmarks/README.md) for detailed performance analysis, optimization tips, and profiling guides.**
 
 ## Best Practices
 
