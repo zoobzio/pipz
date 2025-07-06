@@ -15,10 +15,15 @@ func TestTypeUniverseIsolation(t *testing.T) {
 	type PremiumKey string
 	type TestKey string
 
+	// Define const keys
+	const standardKey StandardKey = "v1"
+	const premiumKey PremiumKey = "v1"
+	const testKey TestKey = "v1"
+
 	// Create three different pipelines with the same key value
-	standardContract := pipz.GetContract[StandardKey, examples.Payment](StandardKey("v1"))
-	premiumContract := pipz.GetContract[PremiumKey, examples.Payment](PremiumKey("v1"))
-	testContract := pipz.GetContract[TestKey, examples.Payment](TestKey("v1"))
+	standardContract := pipz.GetContract[examples.Payment](standardKey)
+	premiumContract := pipz.GetContract[examples.Payment](premiumKey)
+	testContract := pipz.GetContract[examples.Payment](testKey)
 
 	// Register different processors for each
 	var standardProcessed, premiumProcessed, testProcessed bool
@@ -94,14 +99,18 @@ func TestTypeUniverseIsolation(t *testing.T) {
 func TestPipelineVersioning(t *testing.T) {
 	type PaymentKey string
 
+	// Define const keys
+	const paymentKeyV1 PaymentKey = "v1"
+	const paymentKeyV2 PaymentKey = "v2"
+
 	// Register v1 pipeline - simple validation
-	v1 := pipz.GetContract[PaymentKey, examples.Payment](PaymentKey("v1"))
+	v1 := pipz.GetContract[examples.Payment](paymentKeyV1)
 	v1.Register(
 		pipz.Apply(examples.ValidatePayment),
 	)
 
 	// Register v2 pipeline - validation + fraud check
-	v2 := pipz.GetContract[PaymentKey, examples.Payment](PaymentKey("v2"))
+	v2 := pipz.GetContract[examples.Payment](paymentKeyV2)
 	v2.Register(
 		pipz.Apply(examples.ValidatePayment),
 		pipz.Apply(examples.CheckFraud),
@@ -130,8 +139,12 @@ func TestPipelineVersioning(t *testing.T) {
 
 // TestChainComposition tests combining multiple contracts
 func TestChainComposition(t *testing.T) {
+	// Define const keys
+	const validatorKey examples.ValidatorKey = "test"
+	const enrichmentKey EnrichmentKey = "test"
+
 	// Create individual contracts
-	validationContract := pipz.GetContract[examples.ValidatorKey, examples.Order](examples.ValidatorKey("test"))
+	validationContract := pipz.GetContract[examples.Order](validatorKey)
 	validationContract.Register(
 		pipz.Apply(examples.ValidateOrderID),
 		pipz.Apply(examples.ValidateItems),
@@ -139,7 +152,7 @@ func TestChainComposition(t *testing.T) {
 
 	// Create a second contract for enrichment
 	type EnrichmentKey string
-	enrichmentContract := pipz.GetContract[EnrichmentKey, examples.Order](EnrichmentKey("test"))
+	enrichmentContract := pipz.GetContract[examples.Order](enrichmentKey)
 	enrichmentContract.Register(func(o examples.Order) ([]byte, error) {
 		// Add some metadata
 		if o.CustomerID == "" {
@@ -178,7 +191,7 @@ func TestChainComposition(t *testing.T) {
 // TestConcurrentPipelines verifies thread safety
 func TestConcurrentPipelines(t *testing.T) {
 	const key examples.PaymentKey = "concurrent"
-	contract := pipz.GetContract[examples.PaymentKey, examples.Payment](key)
+	contract := pipz.GetContract[examples.Payment](key)
 
 	var counter int
 	contract.Register(func(p examples.Payment) ([]byte, error) {

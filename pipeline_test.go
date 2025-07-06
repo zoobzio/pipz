@@ -19,12 +19,17 @@ func TestGetContract(t *testing.T) {
 		Value string
 	}
 	
+	const (
+		testV1Key TestKey = "test-v1"
+		v1Key     TestKey = "v1"
+		v2Key     TestKey = "v2"
+	)
+	
 	t.Run("SingletonBehavior", func(t *testing.T) {
-		key := TestKey("test-v1")
 		
 		// Get contract twice
-		contract1 := GetContract[TestKey, TestData](key)
-		contract2 := GetContract[TestKey, TestData](key)
+		contract1 := GetContract[TestData](testV1Key)
+		contract2 := GetContract[TestData](testV1Key)
 		
 		// They should have the same registry key
 		if contract1.String() != contract2.String() {
@@ -33,8 +38,8 @@ func TestGetContract(t *testing.T) {
 	})
 	
 	t.Run("DifferentKeysGetDifferentContracts", func(t *testing.T) {
-		contract1 := GetContract[TestKey, TestData](TestKey("v1"))
-		contract2 := GetContract[TestKey, TestData](TestKey("v2"))
+		contract1 := GetContract[TestData](v1Key)
+		contract2 := GetContract[TestData](v2Key)
 		
 		if contract1.String() == contract2.String() {
 			t.Error("Different keys should get different registry keys")
@@ -48,8 +53,8 @@ func TestProcess(t *testing.T) {
 		Count int
 	}
 	
-	key := ProcessKey("process-test")
-	contract := GetContract[ProcessKey, ProcessData](key)
+	const processTestKey ProcessKey = "process-test"
+	contract := GetContract[ProcessData](processTestKey)
 	
 	// Register a simple incrementing processor
 	contract.Register(func(data ProcessData) ([]byte, error) {

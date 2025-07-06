@@ -11,7 +11,7 @@ import (
 func TestValidationPipeline(t *testing.T) {
 	// Register validation pipeline
 	const testKey examples.ValidatorKey = "test"
-	contract := pipz.GetContract[examples.ValidatorKey, examples.Order](testKey)
+	contract := pipz.GetContract[examples.Order](testKey)
 	
 	err := contract.Register(
 		pipz.Apply(examples.ValidateOrderID),

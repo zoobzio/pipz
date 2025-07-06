@@ -85,7 +85,7 @@ func chargeCard(p Payment) ([]byte, error) {
 	// Simulate different payment scenarios
 	if p.Amount > p.CardLimit {
 		// Trigger error pipeline for insufficient funds
-		errorContract := pipz.GetContract[PaymentErrorKey, PaymentError](PaymentErrorHandlerV1)
+		errorContract := pipz.GetContract[PaymentError](PaymentErrorHandlerV1)
 		result, _ := errorContract.Process(PaymentError{
 			Payment:       p,
 			OriginalError: fmt.Errorf("insufficient funds: limit=%.2f", p.CardLimit),
@@ -99,7 +99,7 @@ func chargeCard(p Payment) ([]byte, error) {
 	// Simulate network error with primary provider
 	if p.Provider == "primary" && p.Amount > 500 {
 		// Trigger error pipeline for network issues
-		errorContract := pipz.GetContract[PaymentErrorKey, PaymentError](PaymentErrorHandlerV1)
+		errorContract := pipz.GetContract[PaymentError](PaymentErrorHandlerV1)
 		result, _ := errorContract.Process(PaymentError{
 			Payment:       p,
 			OriginalError: fmt.Errorf("network timeout: primary provider unavailable"),
@@ -265,7 +265,7 @@ func runErrorsDemo(cmd *cobra.Command, args []string) {
 	
 	pp.SubSection("🔧 The Pattern: Error Handling as a Pipeline")
 	pp.Code("go", `// Main payment pipeline
-paymentContract := pipz.GetContract[PaymentKey, Payment](PaymentContractV1)
+paymentContract := pipz.GetContract[Payment](PaymentContractV1)
 paymentContract.Register(
     validatePayment,
     checkFraud,
@@ -274,7 +274,7 @@ paymentContract.Register(
 )
 
 // Error handling pipeline - just another pipeline!
-errorContract := pipz.GetContract[PaymentErrorKey, PaymentError](PaymentErrorHandlerV1)
+errorContract := pipz.GetContract[PaymentError](PaymentErrorHandlerV1)
 errorContract.Register(
     categorizeError,      // Determine error type
     notifyCustomer,       // Send appropriate notifications
@@ -289,7 +289,7 @@ func chargeCard(p Payment) ([]byte, error) {
     err := processCharge(p)
     if err != nil {
         // Discover error pipeline using just types!
-        errorContract := pipz.GetContract[PaymentErrorKey, PaymentError](PaymentErrorHandlerV1)
+        errorContract := pipz.GetContract[PaymentError](PaymentErrorHandlerV1)
         result, _ := errorContract.Process(PaymentError{
             Payment: p,
             OriginalError: err,
@@ -311,12 +311,12 @@ func chargeCard(p Payment) ([]byte, error) {
 	pp.SubSection("Step 1: Register Both Pipelines")
 	
 	// Payment pipeline
-	paymentContract := pipz.GetContract[PaymentKey, Payment](PaymentContractV1)
+	paymentContract := pipz.GetContract[Payment](PaymentContractV1)
 	paymentContract.Register(validatePayment, checkFraud, chargeCard, updatePaymentStatus)
 	pp.Success("✓ Payment pipeline registered")
 	
 	// Error handling pipeline
-	errorContract := pipz.GetContract[PaymentErrorKey, PaymentError](PaymentErrorHandlerV1)
+	errorContract := pipz.GetContract[PaymentError](PaymentErrorHandlerV1)
 	errorContract.Register(categorizeError, notifyCustomer, attemptRecovery, updateMonitoring, createAuditRecord)
 	pp.Success("✓ Error handling pipeline registered")
 	
@@ -410,7 +410,7 @@ func chargeCard(p Payment) ([]byte, error) {
 	
 	pp.Info("You can have different error pipelines for different scenarios:")
 	pp.Code("go", `// Timeout errors get aggressive retry logic
-timeoutContract := pipz.GetContract[TimeoutErrorKey, PaymentError](TimeoutHandlerV1)
+timeoutContract := pipz.GetContract[PaymentError](TimeoutHandlerV1)
 timeoutContract.Register(
     exponentialBackoff,
     circuitBreaker,
@@ -418,7 +418,7 @@ timeoutContract.Register(
 )
 
 // Fraud errors get security treatment
-fraudContract := pipz.GetContract[FraudErrorKey, PaymentError](FraudHandlerV1)
+fraudContract := pipz.GetContract[PaymentError](FraudHandlerV1)
 fraudContract.Register(
     lockAccount,
     notifySecurityTeam,

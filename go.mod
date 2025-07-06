@@ -1,4 +1,4 @@
-module github.com/zoobzio/pipz
+module pipz
 
 go 1.23.1
 

@@ -143,7 +143,8 @@ func runTestingDemo(cmd *cobra.Command, args []string) {
 	
 	pp.SubSection("🔧 The Pattern: Test vs Production Universes")
 	pp.Code("go", `// Production pipeline
-prodContract := pipz.GetContract[EmailServiceKey, EmailMessage](EmailServiceKey("prod"))
+const prodKey EmailServiceKey = "prod"
+prodContract := pipz.GetContract[EmailMessage](prodKey)
 prodContract.Register(
     validateEmail,    // Real validation
     sanitizeContent,  // Real sanitization
@@ -152,7 +153,8 @@ prodContract.Register(
 )
 
 // Test pipeline - same types, different universe!
-testContract := pipz.GetContract[EmailServiceKey, EmailMessage](EmailServiceKey("test"))
+const testKey EmailServiceKey = "test"
+testContract := pipz.GetContract[EmailMessage](testKey)
 testContract.Register(
     validateEmail,    // Reuse real validation
     sanitizeContent,  // Reuse real sanitization
@@ -170,13 +172,17 @@ testContract.Register(
 	// Register pipelines
 	pp.SubSection("Step 1: Register Both Pipelines")
 	
+	// Define const keys
+	const prodKey EmailServiceKey = "prod"
+	const testKey EmailServiceKey = "test"
+	
 	// Production pipeline
-	prodContract := pipz.GetContract[EmailServiceKey, EmailMessage](EmailServiceKey("prod"))
+	prodContract := pipz.GetContract[EmailMessage](prodKey)
 	prodContract.Register(validateEmail, sanitizeContent, applyTemplate, sendViaProvider)
 	pp.Success("✓ Production pipeline registered")
 	
 	// Test pipeline
-	testContract := pipz.GetContract[EmailServiceKey, EmailMessage](EmailServiceKey("test"))
+	testContract := pipz.GetContract[EmailMessage](testKey)
 	testContract.Register(validateEmail, sanitizeContent, testTemplate, mockSend)
 	pp.Success("✓ Test pipeline registered")
 	
@@ -297,7 +303,8 @@ testContract.Register(
 	pp.SubSection("🔧 Advanced Testing Patterns")
 	
 	pp.Code("go", `// Pattern 1: Partial mocking
-hybridContract := pipz.GetContract[EmailServiceKey, EmailMessage](EmailServiceKey("hybrid"))
+const hybridKey EmailServiceKey = "hybrid"
+hybridContract := pipz.GetContract[EmailMessage](hybridKey)
 hybridContract.Register(
     validateEmail,    // Real
     sanitizeContent,  // Real
@@ -306,21 +313,24 @@ hybridContract.Register(
 )
 
 // Pattern 2: Failure injection
-errorContract := pipz.GetContract[EmailServiceKey, EmailMessage](EmailServiceKey("error-test"))
+const errorKey EmailServiceKey = "error-test"
+errorContract := pipz.GetContract[EmailMessage](errorKey)
 errorContract.Register(
     validateEmail,
     alwaysFail,  // Inject failures to test error handling
 )
 
 // Pattern 3: Performance testing
-perfContract := pipz.GetContract[EmailServiceKey, EmailMessage](EmailServiceKey("perf"))
+const perfKey EmailServiceKey = "perf"
+perfContract := pipz.GetContract[EmailMessage](perfKey)
 perfContract.Register(
     skipValidation,  // Remove slow steps
     mockSend,        // No external calls
 )
 
 // Pattern 4: Snapshot testing
-snapshotContract := pipz.GetContract[EmailServiceKey, EmailMessage](EmailServiceKey("snapshot"))
+const snapshotKey EmailServiceKey = "snapshot"
+snapshotContract := pipz.GetContract[EmailMessage](snapshotKey)
 snapshotContract.Register(
     validateEmail,
     sanitizeContent,

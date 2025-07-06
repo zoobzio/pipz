@@ -75,9 +75,9 @@ type HighRiskMerchantKey string
 
 // All three can use the SAME key value "v1"
 // But they create COMPLETELY SEPARATE pipelines!
-standard := pipz.GetContract[StandardMerchantKey, Transaction](StandardContractV1)
-premium  := pipz.GetContract[PremiumMerchantKey, Transaction](PremiumContractV1)
-highRisk := pipz.GetContract[HighRiskMerchantKey, Transaction](HighRiskContractV1)`)
+standard := pipz.GetContract[Transaction](StandardContractV1)
+premium  := pipz.GetContract[Transaction](PremiumContractV1)
+highRisk := pipz.GetContract[Transaction](HighRiskContractV1)`)
 	
 	pp.Info("")
 	pp.Info("🧠 Understanding the Magic:")
@@ -90,21 +90,21 @@ highRisk := pipz.GetContract[HighRiskMerchantKey, Transaction](HighRiskContractV
 	
 	// Register standard merchant pipeline
 	pp.Info("📦 Standard Merchant Pipeline:")
-	standardContract := pipz.GetContract[StandardMerchantKey, Transaction](StandardContractV1)
+	standardContract := pipz.GetContract[Transaction](StandardContractV1)
 	standardContract.Register(validateStandardAmount, checkStandardVelocity, notifyStandardMerchant)
 	pp.Success("  ✓ Registered: $10k limit, 10 txn/hr, T+2 settlement")
 	
 	// Register premium merchant pipeline
 	pp.Info("")
 	pp.Info("⭐ Premium Merchant Pipeline:")
-	premiumContract := pipz.GetContract[PremiumMerchantKey, Transaction](PremiumContractV1)
+	premiumContract := pipz.GetContract[Transaction](PremiumContractV1)
 	premiumContract.Register(validatePremiumAmount, checkPremiumVelocity, prioritySettle, notifyPremium)
 	pp.Success("  ✓ Registered: $100k limit, 100 txn/hr, same-day settlement")
 	
 	// Register high-risk merchant pipeline
 	pp.Info("")
 	pp.Info("⚠️  High-Risk Merchant Pipeline:")
-	highRiskContract := pipz.GetContract[HighRiskMerchantKey, Transaction](HighRiskContractV1)
+	highRiskContract := pipz.GetContract[Transaction](HighRiskContractV1)
 	highRiskContract.Register(validate3DS, checkBlocklist, manualReview, holdFunds)
 	pp.Success("  ✓ Registered: 3DS required, blocklist check, 7-day hold")
 	
@@ -180,17 +180,19 @@ highRisk := pipz.GetContract[HighRiskMerchantKey, Transaction](HighRiskContractV
 	pp.Info("Let's prove these pipelines are completely isolated...")
 	
 	pp.Code("go", `// Try to access standard pipeline with premium key type
-wrongPipeline := pipz.GetContract[PremiumMerchantKey, Transaction](
-    PremiumMerchantKey("standard-key-value")
-)
+const wrongKey PremiumMerchantKey = "standard-key-value"
+wrongPipeline := pipz.GetContract[Transaction](wrongKey)
 // This gets a DIFFERENT pipeline (or empty one)!`)
 	
 	// Demonstrate isolation
 	pp.Info("")
 	pp.Info("🧪 Experiment: What if we use wrong key type?")
 	
+	// Define const key for test
+	const wrongKey PremiumMerchantKey = "some-other-value"
+	
 	// This creates a NEW, EMPTY pipeline
-	wrongPipeline := pipz.GetContract[PremiumMerchantKey, Transaction](PremiumMerchantKey("some-other-value"))
+	wrongPipeline := pipz.GetContract[Transaction](wrongKey)
 	testTxn := Transaction{Amount: 1000}
 	result, err := wrongPipeline.Process(testTxn)
 	
@@ -205,20 +207,26 @@ wrongPipeline := pipz.GetContract[PremiumMerchantKey, Transaction](
 type CustomerAKey string  // Customer A's pipeline type
 type CustomerBKey string  // Customer B's pipeline type
 
+const customerAKey CustomerAKey = "prod"
+const customerBKey CustomerBKey = "prod"
+
 // Both can use "prod" but get different pipelines
-customerA := GetContract[CustomerAKey, Order](CustomerAKey("prod"))
-customerB := GetContract[CustomerBKey, Order](CustomerBKey("prod"))`)
+customerA := GetContract[Order](customerAKey)
+customerB := GetContract[Order](customerBKey)`)
 	
 	pp.SubSection("A/B Testing")
 	pp.Code("go", `// Test different processing strategies
 type StrategyAKey string
 type StrategyBKey string
 
+const strategyAKey StrategyAKey = "v1"
+const strategyBKey StrategyBKey = "v1"
+
 // Route 50% of traffic to each
 if rand.Float32() < 0.5 {
-    pipeline := GetContract[StrategyAKey, Data](StrategyAKey("v1"))
+    pipeline := GetContract[Data](strategyAKey)
 } else {
-    pipeline := GetContract[StrategyBKey, Data](StrategyBKey("v1"))
+    pipeline := GetContract[Data](strategyBKey)
 }`)
 	
 	pp.SubSection("API Versioning")
@@ -227,10 +235,14 @@ type APIv1Key string
 type APIv2Key string
 type APIv3Key string
 
+const apiv1Key APIv1Key = "prod"
+const apiv2Key APIv2Key = "prod"
+const apiv3Key APIv3Key = "prod"
+
 // Each version has its own pipeline
-v1 := GetContract[APIv1Key, Request](APIv1Key("prod"))
-v2 := GetContract[APIv2Key, Request](APIv2Key("prod"))
-v3 := GetContract[APIv3Key, Request](APIv3Key("prod"))`)
+v1 := GetContract[Request](apiv1Key)
+v2 := GetContract[Request](apiv2Key)
+v3 := GetContract[Request](apiv3Key)`)
 	
 	pp.SubSection("🎯 Key Insights")
 	

@@ -43,11 +43,11 @@ func typeName[T any]() string {
 }
 
 // Signature returns a unique signature string for the contract identified by
-// key type K, key value, and data type T. Each type is cached independently,
+// data type T, key type K, and key value. Each type is cached independently,
 // allowing efficient reuse across different combinations. The signature format
-// is "K:keyValue:T" where K and T are the string representations of the types.
-func Signature[K comparable, T any](key K) string {
-	keyType := typeName[K]()
+// is "T:K:keyValue" where T and K are the string representations of the types.
+func Signature[T any, K comparable](key K) string {
 	valueType := typeName[T]()
-	return fmt.Sprintf("%s:%v:%s", keyType, key, valueType)
+	keyType := typeName[K]()
+	return fmt.Sprintf("%s:%s:%v", valueType, keyType, key)
 }

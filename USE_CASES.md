@@ -73,7 +73,8 @@ func validateTotal(o Order) (Order, error) {
 }
 
 // Usage
-validationContract := pipz.GetContract[ValidatorKey, Order](ValidatorKey("v1"))
+const validatorKey ValidatorKey = "v1"
+validationContract := pipz.GetContract[Order](validatorKey)
 validationContract.Register(
     pipz.Apply(validateOrderID),
     pipz.Apply(validateItems),
@@ -123,7 +124,8 @@ func redactSensitive(a AuditableData) (AuditableData, error) {
 }
 
 // Usage
-auditContract := pipz.GetContract[AuditKey, AuditableData](AuditKey("v1"))
+const auditKey AuditKey = "v1"
+auditContract := pipz.GetContract[AuditableData](auditKey)
 auditContract.Register(
     pipz.Apply(checkPermissions),
     pipz.Apply(logAccess),
@@ -201,7 +203,8 @@ func enrichData(ctx TransformContext) (TransformContext, error) {
 }
 
 // Usage
-transformContract := pipz.GetContract[TransformKey, TransformContext](TransformKey("csv-to-db"))
+const transformKey TransformKey = "csv-to-db"
+transformContract := pipz.GetContract[TransformContext](transformKey)
 transformContract.Register(
     pipz.Apply(parseCSV),
     pipz.Apply(validateEmail),
@@ -231,7 +234,7 @@ type WorkflowData struct {
 // Create separate contracts for each stage
 func setupWorkflow() *pipz.Chain[WorkflowData] {
     // Validation stage
-    validationContract := pipz.GetContract[WorkflowStage, WorkflowData](ValidationStage)
+    validationContract := pipz.GetContract[WorkflowData](ValidationStage)
     validationContract.Register(
         pipz.Apply(func(w WorkflowData) (WorkflowData, error) {
             if w.User.Email == "" {
@@ -243,7 +246,7 @@ func setupWorkflow() *pipz.Chain[WorkflowData] {
     )
 
     // Enrichment stage
-    enrichmentContract := pipz.GetContract[WorkflowStage, WorkflowData](EnrichmentStage)
+    enrichmentContract := pipz.GetContract[WorkflowData](EnrichmentStage)
     enrichmentContract.Register(
         pipz.Apply(func(w WorkflowData) (WorkflowData, error) {
             w.Metadata["enriched_at"] = time.Now()
@@ -254,7 +257,7 @@ func setupWorkflow() *pipz.Chain[WorkflowData] {
     )
 
     // Persistence stage
-    persistenceContract := pipz.GetContract[WorkflowStage, WorkflowData](PersistenceStage)
+    persistenceContract := pipz.GetContract[WorkflowData](PersistenceStage)
     persistenceContract.Register(
         pipz.Apply(func(w WorkflowData) (WorkflowData, error) {
             // Simulate database save
@@ -331,7 +334,8 @@ func logRequest(r Request) (Request, error) {
 }
 
 // Usage
-middlewareContract := pipz.GetContract[MiddlewareKey, Request](MiddlewareKey("api-v1"))
+const middlewareKey MiddlewareKey = "api-v1"
+middlewareContract := pipz.GetContract[Request](middlewareKey)
 middlewareContract.Register(
     pipz.Apply(authenticate),
     pipz.Apply(rateLimit),
@@ -367,7 +371,8 @@ func chargeCard(p Payment) ([]byte, error) {
     err := processCharge(p)
     if err != nil {
         // Discover and use error pipeline - NO IMPORTS NEEDED!
-        errorContract := pipz.GetContract[PaymentErrorKey, PaymentError](PaymentErrorKey("v1"))
+        const errorKey PaymentErrorKey = "v1"
+        errorContract := pipz.GetContract[PaymentError](errorKey)
         result, _ := errorContract.Process(PaymentError{
             Payment:       p,
             OriginalError: err,
@@ -403,14 +408,16 @@ func attemptRecovery(e PaymentError) ([]byte, error) {
 }
 
 // Register pipelines
-paymentContract := pipz.GetContract[PaymentKey, Payment](PaymentKey("v1"))
+const paymentKey PaymentKey = "v1"
+paymentContract := pipz.GetContract[Payment](paymentKey)
 paymentContract.Register(
     pipz.Apply(validatePayment),
     pipz.Apply(chargeCard),
     pipz.Apply(updateStatus),
 )
 
-errorContract := pipz.GetContract[PaymentErrorKey, PaymentError](PaymentErrorKey("v1"))
+const errorKey PaymentErrorKey = "v1"
+errorContract := pipz.GetContract[PaymentError](errorKey)
 errorContract.Register(
     pipz.Apply(categorizeError),
     pipz.Apply(notifyCustomer),
@@ -447,11 +454,13 @@ type Payment struct {
 }
 
 // Version A: MVP - Just charge the card
-vA := pipz.GetContract[PaymentKey, Payment](PaymentKey("A"))
+const paymentKeyA PaymentKey = "A"
+vA := pipz.GetContract[Payment](paymentKeyA)
 vA.Register(pipz.Apply(chargeCard))
 
 // Version B: Add validation
-vB := pipz.GetContract[PaymentKey, Payment](PaymentKey("B"))
+const paymentKeyB PaymentKey = "B"
+vB := pipz.GetContract[Payment](paymentKeyB)
 vB.Register(
     pipz.Apply(validateAmount),
     pipz.Apply(chargeCard),
@@ -459,7 +468,8 @@ vB.Register(
 )
 
 // Version C: Enterprise features
-vC := pipz.GetContract[PaymentKey, Payment](PaymentKey("C"))
+const paymentKeyC PaymentKey = "C"
+vC := pipz.GetContract[Payment](paymentKeyC)
 vC.Register(
     pipz.Apply(validateAmount),
     pipz.Apply(checkVelocity),
@@ -489,7 +499,7 @@ func processPayment(payment Payment) (Payment, error) {
 
 Pipeline versioning isn't a framework feature - it's a natural consequence of type universes:
 
-- **Same Types, Different Universes**: `PaymentKey("A")`, `PaymentKey("B")`, and `PaymentKey("C")` create completely isolated pipelines
+- **Same Types, Different Universes**: `paymentKeyA`, `paymentKeyB`, and `paymentKeyC` create completely isolated pipelines
 - **Zero Coupling**: Modify version C without touching A or B
 - **Simultaneous Operation**: All versions run concurrently with no interference
 - **Gradual Complexity**: Each version can build on lessons learned without risk
@@ -520,7 +530,8 @@ type EmailMessage struct {
 }
 
 // Production pipeline
-prodContract := pipz.GetContract[EmailServiceKey, EmailMessage](EmailServiceKey("prod"))
+const prodEmailKey EmailServiceKey = "prod"
+prodContract := pipz.GetContract[EmailMessage](prodEmailKey)
 prodContract.Register(
     pipz.Apply(validateEmail),
     pipz.Apply(sanitizeContent),
@@ -529,7 +540,8 @@ prodContract.Register(
 )
 
 // Test pipeline - same types, different universe!
-testContract := pipz.GetContract[EmailServiceKey, EmailMessage](EmailServiceKey("test"))
+const testEmailKey EmailServiceKey = "test"
+testContract := pipz.GetContract[EmailMessage](testEmailKey)
 testContract.Register(
     pipz.Apply(validateEmail),    // Reuse real validation
     pipz.Apply(sanitizeContent),  // Reuse real sanitization
@@ -545,7 +557,8 @@ func TestEmailValidation(t *testing.T) {
 }
 
 // Advanced patterns
-hybridContract := pipz.GetContract[EmailServiceKey, EmailMessage](EmailServiceKey("hybrid"))
+const hybridEmailKey EmailServiceKey = "hybrid"
+hybridContract := pipz.GetContract[EmailMessage](hybridEmailKey)
 hybridContract.Register(
     pipz.Apply(validateEmail),    // Real validation
     pipz.Apply(sanitizeContent),  // Real sanitization

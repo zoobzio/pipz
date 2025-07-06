@@ -97,11 +97,12 @@ func runAllDemos(cmd *cobra.Command, args []string) {
 	
 	pp.SubSection("How It Works")
 	pp.Code("go", `// 1. Register a pipeline ONCE
-contract := pipz.GetContract[KeyType, DataType](KeyType("v1"))
+const myKey KeyType = "v1"
+contract := pipz.GetContract[DataType](myKey)
 contract.Register(step1, step2, step3)
 
 // 2. Access from ANYWHERE using just types
-contract := pipz.GetContract[KeyType, DataType](KeyType("v1"))
+contract := pipz.GetContract[DataType](myKey)
 result, err := contract.Process(data)`)
 	
 	pp.Info("")

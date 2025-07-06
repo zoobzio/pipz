@@ -11,22 +11,22 @@ import (
 type Processor[T any] func(T) ([]byte, error)
 
 // Contract provides a type-safe interface to the byte-based processor registry.
-// It uses generic types K and T to create unique pipeline identifiers,
-// where K represents the contract's domain and T represents the data type.
+// It uses generic types T and K to create unique pipeline identifiers,
+// where T represents the data type and K represents the contract's domain.
 // Contracts handle automatic serialization and deserialization using gob encoding.
-type Contract[K comparable, T any] struct {
+type Contract[T any, K comparable] struct {
 	key         K
 	registryKey string
 }
 
 // GetContract retrieves or creates a Contract with the specified key and type parameters.
-// The contract's registry key is computed from the type names of K and T combined
+// The contract's registry key is computed from the type names of T and K combined
 // with the key value, ensuring global uniqueness for each contract instance.
 // Multiple calls with the same types and key value return contracts that access
 // the same underlying pipeline.
-func GetContract[K comparable, T any](key K) *Contract[K, T] {
-	registryKey := Signature[K, T](key)
-	return &Contract[K, T]{
+func GetContract[T any, K comparable](key K) *Contract[T, K] {
+	registryKey := Signature[T, K](key)
+	return &Contract[T, K]{
 		key:         key,
 		registryKey: registryKey,
 	}
@@ -34,7 +34,7 @@ func GetContract[K comparable, T any](key K) *Contract[K, T] {
 
 // String returns the string representation of the contract,
 // showing the key type, key value, and value type.
-func (c *Contract[K, T]) String() string {
+func (c *Contract[T, K]) String() string {
 	return c.registryKey
 }
 
@@ -42,7 +42,7 @@ func (c *Contract[K, T]) String() string {
 // The processors are wrapped to handle gob decoding transparently.
 // Processors return nil if they don't modify the value, avoiding re-encoding.
 // Processors are executed in the order they are registered.
-func (c *Contract[K, T]) Register(processors ...Processor[T]) error {
+func (c *Contract[T, K]) Register(processors ...Processor[T]) error {
 	// Create a single byte processor that handles all the type-safe processors
 	// Optimized to minimize decode operations
 	combinedProcessor := func(input []byte) ([]byte, error) {
@@ -95,7 +95,7 @@ func (c *Contract[K, T]) Register(processors ...Processor[T]) error {
 // It handles gob encoding of the input, executes the byte processor chain,
 // and decodes the result back to type T. If no processors are registered
 // for this contract, an error is returned.
-func (c *Contract[K, T]) Process(value T) (T, error) {
+func (c *Contract[T, K]) Process(value T) (T, error) {
 	// Encode input to bytes
 	input, err := Encode(value)
 	if err != nil {
@@ -121,6 +121,6 @@ func (c *Contract[K, T]) Process(value T) (T, error) {
 // composed with other contracts that process the same type T.
 // This enables building complex processing workflows by chaining
 // multiple contracts together.
-func (c *Contract[K, T]) Link() Chainable[T] {
+func (c *Contract[T, K]) Link() Chainable[T] {
 	return c
 }

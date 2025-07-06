@@ -179,15 +179,18 @@ func runVersioningDemo(cmd *cobra.Command, args []string) {
 	
 	pp.SubSection("🔧 Natural Versioning Pattern")
 	pp.Code("go", `// Version A: MVP - Ship it!
-vA := pipz.GetContract[VersionedPaymentKey, VersionedPayment](VersionedPaymentKey("A"))
+const versionA VersionedPaymentKey = "A"
+vA := pipz.GetContract[VersionedPayment](versionA)
 vA.Register(chargeCard)  // One function. That's it.
 
 // Version B: Add safety
-vB := pipz.GetContract[VersionedPaymentKey, VersionedPayment](VersionedPaymentKey("B"))
+const versionB VersionedPaymentKey = "B"
+vB := pipz.GetContract[VersionedPayment](versionB)
 vB.Register(validateAmount, chargeCard, logPayment)
 
 // Version C: Enterprise ready
-vC := pipz.GetContract[VersionedPaymentKey, VersionedPayment](VersionedPaymentKey("C"))
+const versionC VersionedPaymentKey = "C"
+vC := pipz.GetContract[VersionedPayment](versionC)
 vC.Register(
     validateAmount,
     checkVelocity,
@@ -212,18 +215,23 @@ switch getTestGroup(customerID) {
 	// Register all three versions
 	pp.SubSection("Step 1: Register All Versions")
 	
+	// Define const keys
+	const versionA VersionedPaymentKey = "A"
+	const versionB VersionedPaymentKey = "B"
+	const versionC VersionedPaymentKey = "C"
+	
 	// Version A - MVP
-	vA := pipz.GetContract[VersionedPaymentKey, VersionedPayment](VersionedPaymentKey("A"))
+	vA := pipz.GetContract[VersionedPayment](versionA)
 	vA.Register(chargeCardSimple)
 	pp.Success("✓ Version A registered (1 processor)")
 	
 	// Version B - With validation
-	vB := pipz.GetContract[VersionedPaymentKey, VersionedPayment](VersionedPaymentKey("B"))
+	vB := pipz.GetContract[VersionedPayment](versionB)
 	vB.Register(validateAmount, chargeCardWithValidation, logPayment)
 	pp.Success("✓ Version B registered (3 processors)")
 	
 	// Version C - Enterprise
-	vC := pipz.GetContract[VersionedPaymentKey, VersionedPayment](VersionedPaymentKey("C"))
+	vC := pipz.GetContract[VersionedPayment](versionC)
 	vC.Register(
 		validateAmount,
 		checkVelocity,
@@ -328,7 +336,7 @@ switch getTestGroup(customerID) {
 	// Process through all versions
 	versions := []struct {
 		name     string
-		contract *pipz.Contract[VersionedPaymentKey, VersionedPayment]
+		contract *pipz.Contract[VersionedPayment, VersionedPaymentKey]
 	}{
 		{"A (MVP)", vA},
 		{"B (Standard)", vB},
@@ -391,7 +399,8 @@ switch getTestGroup(customerID) {
 	
 	pp.SubSection("🔧 Advanced: Feature Composition")
 	pp.Code("go", `// You can even compose features from different versions!
-hybridContract := pipz.GetContract[VersionedPaymentKey, VersionedPayment](VersionedPaymentKey("hybrid"))
+const hybridKey VersionedPaymentKey = "hybrid"
+hybridContract := pipz.GetContract[VersionedPayment](hybridKey)
 hybridContract.Register(
     validateAmount,      // From version B
     fraudScore,         // From version C
@@ -399,7 +408,8 @@ hybridContract.Register(
 )
 
 // Or create specialized versions for specific scenarios
-blackFridayContract := pipz.GetContract[VersionedPaymentKey, VersionedPayment](VersionedPaymentKey("black-friday"))
+const blackFridayKey VersionedPaymentKey = "black-friday"
+blackFridayContract := pipz.GetContract[VersionedPayment](blackFridayKey)
 blackFridayContract.Register(
     skipValidation,     // Special rules for high volume
     batchProcess,       // Optimize for throughput

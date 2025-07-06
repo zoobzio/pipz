@@ -69,7 +69,7 @@ type TransformContext struct {
 }
 
 // Register transformation pipeline
-transformContract := pipz.GetContract[TransformKey, TransformContext](TransformCSVToDB)
+transformContract := pipz.GetContract[TransformContext](TransformCSVToDB)
 transformContract.Register(
     parseCSV,        // Parse CSV fields to struct
     validateEmail,   // Validate email format
@@ -78,7 +78,7 @@ transformContract.Register(
 )`)
 	
 	// Create and register the pipeline
-	transformContract := pipz.GetContract[TransformKey, TransformContext](TransformCSVToDB)
+	transformContract := pipz.GetContract[TransformContext](TransformCSVToDB)
 	err := transformContract.Register(parseCSV, validateTransformEmail, normalizePhone, enrichData)
 	if err != nil {
 		pp.Error(fmt.Sprintf("Failed to register pipeline: %v", err))

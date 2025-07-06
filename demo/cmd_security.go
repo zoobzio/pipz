@@ -64,7 +64,7 @@ const (
 )
 
 // Register audit pipeline at startup
-auditContract := pipz.GetContract[AuditKey, AuditableData](AuditContractV1)
+auditContract := pipz.GetContract[AuditableData](AuditContractV1)
 auditContract.Register(
     checkPermissions,   // Step 1: Verify access rights
     logAccess,         // Step 2: Log the access attempt
@@ -76,7 +76,7 @@ auditContract.Register(
 	const AuditContractV1 examples.SecurityKey = "v1"
 	
 	// Register the security pipeline
-	auditContract := pipz.GetContract[examples.SecurityKey, examples.AuditableData](AuditContractV1)
+	auditContract := pipz.GetContract[examples.AuditableData](AuditContractV1)
 	
 	// Use adapters to convert processors to pipz.Processor format
 	checkPermissions := pipz.Apply(examples.CheckPermissions)
@@ -100,7 +100,7 @@ auditContract.Register(
 
 func handlePatientDataRequest(userID string, patientData *User) {
     // Get the SAME pipeline using just types
-    contract := pipz.GetContract[AuditKey, AuditableData](AuditContractV1)
+    contract := pipz.GetContract[AuditableData](AuditContractV1)
     
     // Process with full audit trail
     result, err := contract.Process(AuditableData{
@@ -225,7 +225,7 @@ const AuditContractV1 AuditKey = "v1"  // Same value
 func generateInvoice(patientID string) {
     // Need to audit who's accessing billing data
     // Just use the types to find the pipeline!
-    auditPipeline := pipz.GetContract[AuditKey, AuditableData](AuditContractV1)
+    auditPipeline := pipz.GetContract[AuditableData](AuditContractV1)
     
     // This is the EXACT SAME pipeline from security module!
     result, _ := auditPipeline.Process(data)
@@ -235,7 +235,7 @@ func generateInvoice(patientID string) {
 	pp.Info("Let's prove it works...")
 	
 	// Simulate discovery from another package
-	discoveredContract := pipz.GetContract[examples.SecurityKey, examples.AuditableData](AuditContractV1)
+	discoveredContract := pipz.GetContract[examples.AuditableData](AuditContractV1)
 	
 	testData := examples.AuditableData{
 		Data: &examples.User{
@@ -274,7 +274,7 @@ func generateInvoice(patientID string) {
 	
 	pp.SubSection("pipz Solution")
 	pp.Info("✅ Just use the types:")
-	pp.Info("  contract := pipz.GetContract[AuditKey, AuditableData](AuditContractV1)")
+	pp.Info("  contract := pipz.GetContract[AuditableData](AuditContractV1)")
 	pp.Info("")
 	pp.Info("✅ Zero configuration")
 	pp.Info("✅ No mocks needed - same pipeline in tests")

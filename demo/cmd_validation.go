@@ -104,7 +104,7 @@ const (
 )
 
 // Register validation pipeline
-validationContract := pipz.GetContract[ValidatorKey, Order](ValidatorContractV1)
+validationContract := pipz.GetContract[Order](ValidatorContractV1)
 validationContract.Register(
     validateOrderID,  // Check ID format
     validateItems,    // Validate all items
@@ -112,7 +112,7 @@ validationContract.Register(
 )`)
 	
 	// Register the pipeline
-	validationContract := pipz.GetContract[ValidatorKey, Order](ValidatorContractV1)
+	validationContract := pipz.GetContract[Order](ValidatorContractV1)
 	err := validationContract.Register(validateOrderID, validateItems, validateTotal)
 	if err != nil {
 		pp.Error(fmt.Sprintf("Failed to register pipeline: %v", err))

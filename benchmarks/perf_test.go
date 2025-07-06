@@ -15,13 +15,14 @@ type PerfData struct {
 // Benchmark single processor pipeline
 func BenchmarkSingleProcessorPipeline(b *testing.B) {
 	type K string
+	const perfKey K = "perf"
 	
 	processor := func(d PerfData) ([]byte, error) {
 		d.Count++
 		return pipz.Encode(d)
 	}
 	
-	c := pipz.GetContract[K, PerfData](K("perf"))
+	c := pipz.GetContract[PerfData](perfKey)
 	c.Register(processor)
 	
 	data := PerfData{ID: 1, Name: "test", Count: 0}
@@ -35,6 +36,7 @@ func BenchmarkSingleProcessorPipeline(b *testing.B) {
 // Benchmark three processor pipeline
 func BenchmarkThreeProcessorPipeline(b *testing.B) {
 	type K string
+	const threeKey K = "three"
 	
 	proc1 := func(d PerfData) ([]byte, error) {
 		d.Count++
@@ -53,7 +55,7 @@ func BenchmarkThreeProcessorPipeline(b *testing.B) {
 		return pipz.Encode(d)
 	}
 	
-	c := pipz.GetContract[K, PerfData](K("three"))
+	c := pipz.GetContract[PerfData](threeKey)
 	c.Register(proc1, proc2, proc3)
 	
 	data := PerfData{ID: 1, Name: "test", Count: 0}
@@ -67,6 +69,7 @@ func BenchmarkThreeProcessorPipeline(b *testing.B) {
 // Benchmark read-only pipeline (validation)
 func BenchmarkReadOnlyPipeline(b *testing.B) {
 	type K string
+	const readonlyKey K = "readonly"
 	
 	validate1 := func(d PerfData) ([]byte, error) {
 		if d.ID <= 0 {
@@ -89,7 +92,7 @@ func BenchmarkReadOnlyPipeline(b *testing.B) {
 		return nil, nil
 	}
 	
-	c := pipz.GetContract[K, PerfData](K("readonly"))
+	c := pipz.GetContract[PerfData](readonlyKey)
 	c.Register(validate1, validate2, validate3)
 	
 	data := PerfData{ID: 1, Name: "test", Count: 10}

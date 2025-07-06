@@ -174,14 +174,14 @@ func ProcessSecurityRequest(req Request) (Response, error) {
 	pp.Info("")
 	pp.Info("1️⃣ Authentication Team registers their processors:")
 	pp.Code("go", `// auth_team.go
-contract := pipz.GetContract[SecurityKey, SecurityRequest](securityPipeline)
+contract := pipz.GetContract[SecurityRequest](securityPipeline)
 contract.Register(
     checkAuthentication,
     validateSession,
 )`)
 	
 	// Register auth processors
-	authContract := pipz.GetContract[SecurityKey, SecurityRequest](securityPipeline)
+	authContract := pipz.GetContract[SecurityRequest](securityPipeline)
 	authContract.Register(
 		checkAuthentication,
 		validateSession,
@@ -191,14 +191,14 @@ contract.Register(
 	pp.Info("")
 	pp.Info("2️⃣ Authorization Team adds their processors:")
 	pp.Code("go", `// authz_team.go  
-contract := pipz.GetContract[SecurityKey, SecurityRequest](securityPipeline)
+contract := pipz.GetContract[SecurityRequest](securityPipeline)
 contract.Register(
     checkAuthorization,
     enforceResourceLimits,
 )`)
 	
 	// Register authz processors
-	authzContract := pipz.GetContract[SecurityKey, SecurityRequest](securityPipeline)
+	authzContract := pipz.GetContract[SecurityRequest](securityPipeline)
 	authzContract.Register(
 		checkAuthorization,
 		enforceResourceLimits,
@@ -208,14 +208,14 @@ contract.Register(
 	pp.Info("")
 	pp.Info("3️⃣ Platform Team adds infrastructure concerns:")
 	pp.Code("go", `// platform_team.go
-contract := pipz.GetContract[SecurityKey, SecurityRequest](securityPipeline)
+contract := pipz.GetContract[SecurityRequest](securityPipeline)
 contract.Register(
     rateLimitSecurity,
     logSecurityRequest,
 )`)
 	
 	// Register platform processors
-	platformContract := pipz.GetContract[SecurityKey, SecurityRequest](securityPipeline)
+	platformContract := pipz.GetContract[SecurityRequest](securityPipeline)
 	platformContract.Register(
 		rateLimitSecurity,
 		logSecurityRequest,
@@ -225,14 +225,14 @@ contract.Register(
 	pp.Info("")
 	pp.Info("4️⃣ Compliance Team adds their processors:")
 	pp.Code("go", `// compliance_team.go
-contract := pipz.GetContract[SecurityKey, SecurityRequest](securityPipeline)
+contract := pipz.GetContract[SecurityRequest](securityPipeline)
 contract.Register(
     checkCompliance,
     redactSensitiveData,
 )`)
 	
 	// Register compliance processors
-	complianceContract := pipz.GetContract[SecurityKey, SecurityRequest](securityPipeline)
+	complianceContract := pipz.GetContract[SecurityRequest](securityPipeline)
 	complianceContract.Register(
 		checkCompliance,
 		redactSensitiveData,
@@ -293,7 +293,7 @@ contract.Register(
 	}
 	
 	// Process each scenario
-	anyContract := pipz.GetContract[SecurityKey, SecurityRequest](securityPipeline)
+	anyContract := pipz.GetContract[SecurityRequest](securityPipeline)
 	
 	for i, scenario := range scenarios {
 		pp.Info(fmt.Sprintf("\nScenario %d: %s", i+1, scenario.name))

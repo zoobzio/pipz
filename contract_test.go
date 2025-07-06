@@ -13,18 +13,28 @@ func TestContract(t *testing.T) {
 		Text  string
 	}
 	
+	const (
+		testContractKey    TestKey = "test-contract"
+		registerTestKey    TestKey = "register-test"
+		emptyTestKey       TestKey = "empty-test"
+		transformTestKey   TestKey = "transform-test"
+		nilTestKey         TestKey = "nil-test"
+		errorTestKey       TestKey = "error-test"
+		chainableTestKey   TestKey = "chainable-test"
+	)
+	
 	t.Run("GetContract", func(t *testing.T) {
-		contract := GetContract[TestKey, TestData](TestKey("test-contract"))
+		contract := GetContract[TestData](testContractKey)
 		if contract == nil {
 			t.Fatal("GetContract returned nil")
 		}
-		if contract.key != TestKey("test-contract") {
+		if contract.key != testContractKey {
 			t.Errorf("expected key 'test-contract', got %v", contract.key)
 		}
 	})
 	
 	t.Run("RegisterProcessors", func(t *testing.T) {
-		contract := GetContract[TestKey, TestData](TestKey("register-test"))
+		contract := GetContract[TestData](registerTestKey)
 		
 		// Register should succeed with valid processors
 		err := contract.Register(
@@ -58,7 +68,7 @@ func TestContract(t *testing.T) {
 	})
 	
 	t.Run("RegisterEmptyProcessors", func(t *testing.T) {
-		contract := GetContract[TestKey, TestData](TestKey("empty-test"))
+		contract := GetContract[TestData](emptyTestKey)
 		
 		// Register with no processors should succeed
 		err := contract.Register()
@@ -68,7 +78,7 @@ func TestContract(t *testing.T) {
 	})
 	
 	t.Run("ProcessWithTransformation", func(t *testing.T) {
-		contract := GetContract[TestKey, TestData](TestKey("transform-test"))
+		contract := GetContract[TestData](transformTestKey)
 		
 		contract.Register(func(data TestData) ([]byte, error) {
 			data.Value *= 2
@@ -91,7 +101,7 @@ func TestContract(t *testing.T) {
 	})
 	
 	t.Run("ProcessorReturnsNil", func(t *testing.T) {
-		contract := GetContract[TestKey, TestData](TestKey("nil-test"))
+		contract := GetContract[TestData](nilTestKey)
 		
 		// Processor that returns nil (no modification)
 		contract.Register(func(data TestData) ([]byte, error) {
@@ -116,7 +126,7 @@ func TestContract(t *testing.T) {
 	})
 	
 	t.Run("ProcessErrorHandling", func(t *testing.T) {
-		contract := GetContract[TestKey, TestData](TestKey("error-test"))
+		contract := GetContract[TestData](errorTestKey)
 		
 		expectedErr := errors.New("processing failed")
 		contract.Register(
@@ -143,7 +153,7 @@ func TestContract(t *testing.T) {
 	})
 	
 	t.Run("ContractAsChainable", func(t *testing.T) {
-		contract := GetContract[TestKey, TestData](TestKey("chainable-test"))
+		contract := GetContract[TestData](chainableTestKey)
 		contract.Register(func(data TestData) ([]byte, error) {
 			data.Value += 5
 			return Encode(data)
@@ -169,8 +179,13 @@ func TestContractGlobalRegistry(t *testing.T) {
 		ID int
 	}
 	
+	const (
+		globalTestKey GlobalKey = "global-test"
+		sharedKey     GlobalKey = "shared"
+	)
+	
 	t.Run("ProcessThroughGlobalRegistry", func(t *testing.T) {
-		contract := GetContract[GlobalKey, GlobalData](GlobalKey("global-test"))
+		contract := GetContract[GlobalData](globalTestKey)
 		contract.Register(func(data GlobalData) ([]byte, error) {
 			data.ID = 42
 			return Encode(data)
@@ -190,16 +205,15 @@ func TestContractGlobalRegistry(t *testing.T) {
 	
 	t.Run("MultipleContractsSameKey", func(t *testing.T) {
 		// Two contracts with same key should share the same pipeline
-		key := GlobalKey("shared")
 		
-		contract1 := GetContract[GlobalKey, GlobalData](key)
+		contract1 := GetContract[GlobalData](sharedKey)
 		contract1.Register(func(data GlobalData) ([]byte, error) {
 			data.ID = 100
 			return Encode(data)
 		})
 		
 		// Get the same contract again
-		contract2 := GetContract[GlobalKey, GlobalData](key)
+		contract2 := GetContract[GlobalData](sharedKey)
 		
 		// Process with second contract should use first contract's processors
 		input := GlobalData{ID: 1}

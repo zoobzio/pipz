@@ -6,7 +6,8 @@ With pipz, you create a processing pipeline once and access it from any package 
 
 ```go
 // Register a pipeline in one place...
-contract := pipz.GetContract[SecurityKey, User](SecurityKey("v1"))
+const securityKey SecurityKey = "v1"
+contract := pipz.GetContract[User](securityKey)
 contract.Register(
     pipz.Apply(validateUser),
     pipz.Apply(sanitizeInput),
@@ -14,7 +15,8 @@ contract.Register(
 )
 
 // ...retrieve and use it anywhere else
-contract := pipz.GetContract[SecurityKey, User](SecurityKey("v1"))
+const securityKey SecurityKey = "v1"
+contract := pipz.GetContract[User](securityKey)
 user, err := contract.Process(userData)
 ```
 
@@ -72,7 +74,8 @@ func isVIP(u User) bool {
 3. **Register using adapters** - Do this once at startup:
 
 ```go
-contract := pipz.GetContract[ValidationKey, User](ValidationKey("v1"))
+const validationKey ValidationKey = "v1"
+contract := pipz.GetContract[User](validationKey)
 contract.Register(
     pipz.Validate(checkEmail),               // Check without modifying
     pipz.Transform(normalizeEmail),          // Always modify
@@ -90,7 +93,8 @@ contract.Register(
 
 ```go
 // In a completely different package...
-contract := pipz.GetContract[ValidationKey, User](ValidationKey("v1"))
+const validationKey ValidationKey = "v1"
+contract := pipz.GetContract[User](validationKey)
 user, err := contract.Process(User{
     Name:  "john doe",
     Email: "JOHN@EXAMPLE.COM",
@@ -106,7 +110,8 @@ That's it! The pipeline is globally discoverable through the type system.
 ```go
 // team_a/auth.go
 type AuthKey string
-contract := pipz.GetContract[AuthKey, User](AuthKey("v1"))
+const authKey AuthKey = "v1"
+contract := pipz.GetContract[User](authKey)
 contract.Register(
     pipz.Apply(checkPassword),
     pipz.Apply(checkMFA),
@@ -115,7 +120,8 @@ contract.Register(
 
 // team_b/api.go - No import of team_a needed!
 type AuthKey string  // Same type name
-contract := pipz.GetContract[AuthKey, User](AuthKey("v1"))
+const authKey AuthKey = "v1"
+contract := pipz.GetContract[User](authKey)
 user, _ := contract.Process(loginRequest)  // Same pipeline!
 ```
 
@@ -137,8 +143,10 @@ if customer.Type == "premium" {
 }
 
 // ✅ pipz: Behavior determined by types
-premiumContract := pipz.GetContract[PremiumKey, Order](PremiumKey("v1"))
-standardContract := pipz.GetContract[StandardKey, Order](StandardKey("v1"))
+const premiumKey PremiumKey = "v1"
+const standardKey StandardKey = "v1"
+premiumContract := pipz.GetContract[Order](premiumKey)
+standardContract := pipz.GetContract[Order](standardKey)
 ```
 
 **The deeper insight**: Most if/else statements in business logic are just routing decisions. With pipz, the type system becomes your router. No more switch statements checking user roles, customer tiers, regions, or versions - just pass the right type and get the right behavior.
@@ -150,7 +158,8 @@ standardContract := pipz.GetContract[StandardKey, Order](StandardKey("v1"))
 3. **Zero Magic**: Everything is explicit. Want observability? Add it yourself:
    ```go
    func RegisterPaymentPipeline() {
-       contract := pipz.GetContract[PaymentKey, Payment](PaymentKey("v1"))
+       const paymentKey PaymentKey = "v1"
+       contract := pipz.GetContract[Payment](paymentKey)
        contract.Register(
            pipz.Apply(validate),
            pipz.Apply(charge),
@@ -206,7 +215,8 @@ type User struct {
 
 func main() {
     // Get a contract
-    contract := pipz.GetContract[UserProcessorKey, User](UserProcessorKey("v1"))
+    const userProcessorKey UserProcessorKey = "v1"
+    contract := pipz.GetContract[User](userProcessorKey)
 
     // Register processors
     contract.Register(
@@ -267,7 +277,7 @@ func formatName(u User) (User, error) {
 
 | Method                                 | Description                                     |
 | -------------------------------------- | ----------------------------------------------- |
-| `GetContract[K, T](key K)`             | Gets or creates a contract with given key       |
+| `GetContract[T](key K)`                | Gets or creates a contract with given key       |
 | `Register(processors ...Processor[T])` | Registers processors to the contract's pipeline |
 | `Process(value T) (T, error)`          | Executes the pipeline on input value            |
 | `Link() Chainable[T]`                  | Returns contract as chainable for composition   |
@@ -285,7 +295,7 @@ func formatName(u User) (User, error) {
 
 | Function                                       | Description                                   |
 | ---------------------------------------------- | --------------------------------------------- |
-| `Signature[K comparable, T any](key K) string` | Returns unique signature for contract K:key:T |
+| `Signature[T any](key K) string`               | Returns unique signature for contract K:key:T |
 
 ## Concepts
 
@@ -307,11 +317,14 @@ type AuthKey string
 type ValidationKey string
 
 // Different contracts for different purposes
-authContract := pipz.GetContract[AuthKey, User](AuthKey("v1"))
-validationContract := pipz.GetContract[ValidationKey, User](ValidationKey("v1"))
+const authKey AuthKey = "v1"
+const validationKey ValidationKey = "v1"
+authContract := pipz.GetContract[User](authKey)
+validationContract := pipz.GetContract[User](validationKey)
 
 // Anyone with AuthKey and User types can retrieve the same pipeline
-contract := pipz.GetContract[AuthKey, User](AuthKey("v1"))
+const authKey AuthKey = "v1"
+contract := pipz.GetContract[User](authKey)
 ```
 
 ### Type Universes
@@ -328,8 +341,10 @@ type PremiumKey string
 
 // Same key value "v1", same data type Transaction
 // But COMPLETELY DIFFERENT pipelines!
-standard := pipz.GetContract[StandardKey, Transaction](StandardKey("v1"))
-premium := pipz.GetContract[PremiumKey, Transaction](PremiumKey("v1"))
+const standardKey StandardKey = "v1"
+const premiumKey PremiumKey = "v1"
+standard := pipz.GetContract[Transaction](standardKey)
+premium := pipz.GetContract[Transaction](premiumKey)
 ```
 
 #### Real-World Example: Multi-Tenant Payment Processing
@@ -349,7 +364,8 @@ type Transaction struct {
 }
 
 // Standard merchants: basic fraud checks
-standardContract := pipz.GetContract[StandardMerchantKey, Transaction](StandardMerchantKey("v1"))
+const standardMerchantKey StandardMerchantKey = "v1"
+standardContract := pipz.GetContract[Transaction](standardMerchantKey)
 standardContract.Register(
     pipz.Apply(validateAmount),      // Max $10,000
     pipz.Apply(checkVelocity),      // 10 transactions/hour
@@ -357,7 +373,8 @@ standardContract.Register(
 )
 
 // Premium merchants: relaxed limits, priority processing
-premiumContract := pipz.GetContract[PremiumMerchantKey, Transaction](PremiumMerchantKey("v1"))
+const premiumMerchantKey PremiumMerchantKey = "v1"
+premiumContract := pipz.GetContract[Transaction](premiumMerchantKey)
 premiumContract.Register(
     pipz.Apply(validatePremiumAmount),  // Max $100,000
     pipz.Apply(checkPremiumVelocity),  // 100 transactions/hour
@@ -366,7 +383,8 @@ premiumContract.Register(
 )
 
 // High-risk merchants: enhanced security
-highRiskContract := pipz.GetContract[HighRiskMerchantKey, Transaction](HighRiskMerchantKey("v1"))
+const highRiskMerchantKey HighRiskMerchantKey = "v1"
+highRiskContract := pipz.GetContract[Transaction](highRiskMerchantKey)
 highRiskContract.Register(
     pipz.Apply(validate3DS),           // Require 3D Secure
     pipz.Apply(checkBlocklist),        // Enhanced fraud database
@@ -377,14 +395,17 @@ highRiskContract.Register(
 
 // Usage: Generic function - the KEY TYPE determines the pipeline!
 func processPayment[K comparable](key K, txn Transaction) (Transaction, error) {
-    contract := pipz.GetContract[K, Transaction](key)
+    contract := pipz.GetContract[Transaction](key)
     return contract.Process(txn)
 }
 
 // The caller chooses the universe by passing the right key type:
-result, err := processPayment(StandardMerchantKey("v1"), txn)  // Standard pipeline
-result, err := processPayment(PremiumMerchantKey("v1"), txn)   // Premium pipeline
-result, err := processPayment(HighRiskMerchantKey("v1"), txn)  // High-risk pipeline
+const standardKey StandardMerchantKey = "v1"
+const premiumKey PremiumMerchantKey = "v1"
+const highRiskKey HighRiskMerchantKey = "v1"
+result, err := processPayment(standardKey, txn)  // Standard pipeline
+result, err := processPayment(premiumKey, txn)   // Premium pipeline
+result, err := processPayment(highRiskKey, txn)  // High-risk pipeline
 
 // Even cleaner - let the merchant's key type drive the behavior:
 func (m Merchant) ProcessTransaction(txn Transaction) (Transaction, error) {
@@ -511,10 +532,11 @@ const (
     SecurityContractV2 = "v2"
 )
 
-contract := pipz.GetContract[SecurityKey, User](SecurityKey(SecurityContractV1))
+const securityKey SecurityKey = SecurityContractV1
+contract := pipz.GetContract[User](securityKey)
 
 // Avoid
-contract := pipz.GetContract[SecurityKey, User](SecurityKey("v1"))
+contract := pipz.GetContract[User](SecurityKey("v1"))
 ```
 
 ### Use Meaningful Key Types
@@ -623,7 +645,8 @@ Add logging to your registration functions - pipz is ephemeral by design:
 
 ```go
 func RegisterPaymentPipeline() {
-    contract := pipz.GetContract[PaymentKey, Payment](PaymentKey("v1"))
+    const paymentKey PaymentKey = "v1"
+    contract := pipz.GetContract[Payment](paymentKey)
     contract.Register(
         pipz.Apply(validate),
         pipz.Apply(charge),

@@ -201,7 +201,7 @@ const (
 )
 
 // Register middleware pipeline
-middlewareContract := pipz.GetContract[MiddlewareKey, Request](APIMiddlewareV1)
+middlewareContract := pipz.GetContract[Request](APIMiddlewareV1)
 middlewareContract.Register(
     authenticate,  // Check auth token
     rateLimit,    // Apply rate limits
@@ -210,7 +210,7 @@ middlewareContract.Register(
 )`)
 	
 	// Register the middleware pipeline
-	middlewareContract := pipz.GetContract[MiddlewareKey, Request](APIMiddlewareV1)
+	middlewareContract := pipz.GetContract[Request](APIMiddlewareV1)
 	err := middlewareContract.Register(authenticate, rateLimit, logRequest, cors)
 	if err != nil {
 		pp.Error(fmt.Sprintf("Failed to register middleware: %v", err))
@@ -339,7 +339,8 @@ middlewareContract.Register(
 	
 	pp.Info("Middleware ordering is determined by registration order:")
 	pp.Code("go", `// Security-first ordering (recommended)
-secureContract := pipz.GetContract[MiddlewareKey, Request](MiddlewareKey("secure"))
+const secureKey MiddlewareKey = "secure"
+secureContract := pipz.GetContract[Request](secureKey)
 secureContract.Register(
     authenticate,  // 1st: Auth before anything else
     rateLimit,     // 2nd: Rate limit authenticated users
@@ -348,7 +349,8 @@ secureContract.Register(
 )
 
 // Performance-first ordering (for public endpoints)
-publicContract := pipz.GetContract[MiddlewareKey, Request](MiddlewareKey("public"))
+const publicKey MiddlewareKey = "public"
+publicContract := pipz.GetContract[Request](publicKey)
 publicContract.Register(
     cors,          // 1st: Handle CORS immediately
     rateLimit,     // 2nd: Rate limit everyone
@@ -359,7 +361,8 @@ publicContract.Register(
 // Conditional middleware based on request
 if request.Path == "/health" {
     // Minimal middleware for health checks
-    healthContract := pipz.GetContract[MiddlewareKey, Request](MiddlewareKey("health"))
+    const healthKey MiddlewareKey = "health"
+    healthContract := pipz.GetContract[Request](healthKey)
     healthContract.Register(logRequest) // Only logging
 }`)
 	

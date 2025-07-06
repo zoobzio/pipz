@@ -2,6 +2,17 @@
 
 Adapters are the bridge between your business logic and pipz's byte-based pipeline system. They let you write simple functions that work with your types, while pipz handles all the serialization magic behind the scenes.
 
+## Key Types
+
+Throughout this document, we'll use these key types for pipeline identification:
+
+```go
+type UserKey string
+type OrderKey string
+```
+
+These key types help pipz identify and retrieve the correct pipeline for your data types.
+
 ## Why Adapters?
 
 Under the hood, pipz pipelines work with bytes. This design enables:
@@ -32,6 +43,8 @@ Adapters eliminate this boilerplate, letting you focus on business logic:
 
 ```go
 // With adapters - just write normal functions
+const userKey UserKey = "validation-v1"
+contract := pipz.GetContract[User](userKey)
 contract.Register(
     pipz.Validate(func(u User) error {
         if u.Age < 0 {
@@ -55,6 +68,8 @@ Always modifies data. Use this for operations that change your data every time.
 // Signature: func(T) T
 
 // Inline usage
+const userKey UserKey = "transform-v1"
+contract := pipz.GetContract[User](userKey)
 contract.Register(
     pipz.Transform(func(u User) User {
         u.UpdatedAt = time.Now()
@@ -68,6 +83,8 @@ func addTimestamp(u User) User {
     return u
 }
 
+const userKey UserKey = "timestamp-v1"
+contract := pipz.GetContract[User](userKey)
 contract.Register(pipz.Transform(addTimestamp))
 
 // Your functions don't need to know about pipz!
@@ -81,6 +98,8 @@ func NormalizeUser(u User) User {
 }
 
 // Then in your pipeline setup:
+const userKey UserKey = "normalize-v1"
+contract := pipz.GetContract[User](userKey)
 contract.Register(pipz.Transform(business.NormalizeUser))
 ```
 
@@ -91,6 +110,8 @@ For transformations that might fail. The pipeline stops if an error is returned.
 // Signature: func(T) (T, error)
 
 // Common pattern: validation with modification
+const userKey UserKey = "apply-v1"
+contract := pipz.GetContract[User](userKey)
 contract.Register(
     pipz.Apply(func(u User) (User, error) {
         if u.Email == "" {
@@ -112,6 +133,8 @@ func enrichUserFromAPI(u User) (User, error) {
     return u, nil
 }
 
+const userKey UserKey = "enrich-v1"
+contract := pipz.GetContract[User](userKey)
 contract.Register(pipz.Apply(enrichUserFromAPI))
 ```
 
@@ -122,6 +145,8 @@ Check data without modifying it. No serialization happens, making this very effi
 // Signature: func(T) error
 
 // Perfect for guard clauses
+const orderKey OrderKey = "validate-v1"
+contract := pipz.GetContract[Order](orderKey)
 contract.Register(
     pipz.Validate(func(o Order) error {
         if o.Total <= 0 {
@@ -155,6 +180,8 @@ func ValidateEmail(u User) error {
 }
 
 // Use them across different pipelines
+const userKey UserKey = "user-validation-v1"
+userContract := pipz.GetContract[User](userKey)
 userContract.Register(
     pipz.Validate(validators.ValidateAge),
     pipz.Validate(validators.ValidateEmail),
@@ -168,6 +195,8 @@ Conditionally modify data based on business rules.
 // Signature: func(T) T, func(T) bool
 
 // Apply discounts conditionally
+const orderKey OrderKey = "discount-v1"
+contract := pipz.GetContract[Order](orderKey)
 contract.Register(
     pipz.Mutate(
         func(o Order) Order {
@@ -203,6 +232,8 @@ func isHolidaySeason(o Order) bool {
     return month == time.November || month == time.December
 }
 
+const orderKey OrderKey = "pricing-v1"
+contract := pipz.GetContract[Order](orderKey)
 contract.Register(
     pipz.Mutate(applyBulkDiscount, isBulkOrder),
     pipz.Mutate(applyHolidayPricing, isHolidaySeason),
@@ -216,6 +247,8 @@ Run side effects without modifying data. Perfect for logging, metrics, and notif
 // Signature: func(T) error
 
 // Logging and metrics
+const userKey UserKey = "logging-v1"
+contract := pipz.GetContract[User](userKey)
 contract.Register(
     pipz.Effect(func(u User) error {
         log.Printf("Processing user: %s", u.ID)
@@ -240,12 +273,16 @@ func sendWelcomeEmail(u User) error {
     return nil
 }
 
+const userKey UserKey = "notifications-v1"
+contract := pipz.GetContract[User](userKey)
 contract.Register(
     pipz.Effect(notifyUserService),
     pipz.Effect(sendWelcomeEmail),
 )
 
 // Audit trails
+const orderKey OrderKey = "audit-v1"
+contract := pipz.GetContract[Order](orderKey)
 contract.Register(
     pipz.Effect(func(o Order) error {
         audit.Log(AuditEntry{
@@ -266,6 +303,8 @@ Fetch additional data with graceful degradation. If enrichment fails, processing
 // Signature: func(T) (T, error)
 
 // Optional API enrichment
+const userKey UserKey = "social-v1"
+contract := pipz.GetContract[User](userKey)
 contract.Register(
     pipz.Enrich(func(u User) (User, error) {
         // Try to get social profile
@@ -291,6 +330,8 @@ func enrichWithPurchaseHistory(u User) (User, error) {
     return u, nil
 }
 
+const userKey UserKey = "purchase-history-v1"
+contract := pipz.GetContract[User](userKey)
 contract.Register(pipz.Enrich(enrichWithPurchaseHistory))
 ```
 
@@ -342,6 +383,8 @@ func Retry[T any](fn func(T) (T, error), maxAttempts int) pipz.Processor[T] {
 }
 
 // Usage
+const userKey UserKey = "retry-v1"
+contract := pipz.GetContract[User](userKey)
 contract.Register(
     Retry(enrichFromFlakeyAPI, 3),
     Retry(saveToDatabase, 5),
@@ -377,6 +420,8 @@ func Cache[T any](fn func(T) (T, error), keyFn func(T) string, ttl time.Duration
 }
 
 // Usage
+const userKey UserKey = "cache-v1"
+contract := pipz.GetContract[User](userKey)
 contract.Register(
     Cache(
         expensiveEnrichment,
@@ -416,6 +461,8 @@ func Timeout[T any](fn func(T) (T, error), duration time.Duration) pipz.Processo
 }
 
 // Usage
+const userKey UserKey = "timeout-v1"
+contract := pipz.GetContract[User](userKey)
 contract.Register(
     Timeout(callSlowAPI, 5*time.Second),
 )

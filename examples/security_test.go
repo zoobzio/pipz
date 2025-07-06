@@ -12,7 +12,7 @@ import (
 func TestSecurityPipeline(t *testing.T) {
 	// Register the security pipeline
 	const testKey examples.SecurityKey = "test"
-	contract := pipz.GetContract[examples.SecurityKey, examples.AuditableData](testKey)
+	contract := pipz.GetContract[examples.AuditableData](testKey)
 	
 	err := contract.Register(
 		pipz.Apply(examples.CheckPermissions),
@@ -107,7 +107,7 @@ func TestSecurityPipeline(t *testing.T) {
 func TestPipelineDiscovery(t *testing.T) {
 	// Register a pipeline with one key
 	const key1 examples.SecurityKey = "discovery-test"
-	contract1 := pipz.GetContract[examples.SecurityKey, examples.AuditableData](key1)
+	contract1 := pipz.GetContract[examples.AuditableData](key1)
 	
 	err := contract1.Register(
 		pipz.Apply(examples.CheckPermissions),
@@ -117,7 +117,7 @@ func TestPipelineDiscovery(t *testing.T) {
 	}
 
 	// Discover the same pipeline with the same key
-	contract2 := pipz.GetContract[examples.SecurityKey, examples.AuditableData](key1)
+	contract2 := pipz.GetContract[examples.AuditableData](key1)
 	
 	// Process through discovered contract
 	data := examples.AuditableData{

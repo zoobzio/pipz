@@ -129,7 +129,7 @@ func TestFraudDetection(t *testing.T) {
 func TestPaymentPipeline(t *testing.T) {
 	// Create a simple payment processing pipeline
 	const testKey examples.PaymentKey = "test"
-	contract := pipz.GetContract[examples.PaymentKey, examples.Payment](testKey)
+	contract := pipz.GetContract[examples.Payment](testKey)
 	
 	err := contract.Register(
 		pipz.Apply(examples.ValidatePayment),

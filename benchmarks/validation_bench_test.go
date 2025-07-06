@@ -10,7 +10,7 @@ import (
 func BenchmarkValidationPipeline(b *testing.B) {
 	// Setup
 	const benchKey examples.ValidatorKey = "bench"
-	contract := pipz.GetContract[examples.ValidatorKey, examples.Order](benchKey)
+	contract := pipz.GetContract[examples.Order](benchKey)
 	
 	contract.Register(
 		pipz.Apply(examples.ValidateOrderID),

@@ -11,7 +11,7 @@ import (
 func TestTransformPipeline(t *testing.T) {
 	// Register transform pipeline
 	const testKey examples.TransformKey = "test"
-	contract := pipz.GetContract[examples.TransformKey, examples.TransformContext](testKey)
+	contract := pipz.GetContract[examples.TransformContext](testKey)
 	
 	err := contract.Register(
 		pipz.Apply(examples.ParseCSV),

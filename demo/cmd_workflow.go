@@ -133,15 +133,15 @@ const (
 // Create and compose the workflow
 func setupWorkflow() *pipz.Chain[WorkflowData] {
     // Stage 1: Validation
-    validationContract := pipz.GetContract[WorkflowStage, WorkflowData](ValidationStage)
+    validationContract := pipz.GetContract[WorkflowData](ValidationStage)
     validationContract.Register(validateUser)
     
     // Stage 2: Enrichment
-    enrichmentContract := pipz.GetContract[WorkflowStage, WorkflowData](EnrichmentStage)
+    enrichmentContract := pipz.GetContract[WorkflowData](EnrichmentStage)
     enrichmentContract.Register(enrichUserData)
     
     // Stage 3: Persistence
-    persistenceContract := pipz.GetContract[WorkflowStage, WorkflowData](PersistenceStage)
+    persistenceContract := pipz.GetContract[WorkflowData](PersistenceStage)
     persistenceContract.Register(persistUser)
     
     // Compose into workflow
@@ -158,17 +158,17 @@ func setupWorkflow() *pipz.Chain[WorkflowData] {
 	pp.SubSection("Step 1: Register Individual Stages")
 	
 	// Validation stage
-	validationContract := pipz.GetContract[WorkflowStage, WorkflowData](ValidationStage)
+	validationContract := pipz.GetContract[WorkflowData](ValidationStage)
 	validationContract.Register(validateUser)
 	pp.Success("✓ Validation stage registered")
 	
 	// Enrichment stage
-	enrichmentContract := pipz.GetContract[WorkflowStage, WorkflowData](EnrichmentStage)
+	enrichmentContract := pipz.GetContract[WorkflowData](EnrichmentStage)
 	enrichmentContract.Register(enrichUserData)
 	pp.Success("✓ Enrichment stage registered")
 	
 	// Persistence stage
-	persistenceContract := pipz.GetContract[WorkflowStage, WorkflowData](PersistenceStage)
+	persistenceContract := pipz.GetContract[WorkflowData](PersistenceStage)
 	persistenceContract.Register(persistUser)
 	pp.Success("✓ Persistence stage registered")
 	
@@ -269,11 +269,11 @@ func setupWorkflow() *pipz.Chain[WorkflowData] {
 	
 	pp.Info("You can also retrieve and modify stages dynamically:")
 	pp.Code("go", `// Retrieve any stage by its key
-enrichStage := pipz.GetContract[WorkflowStage, WorkflowData](EnrichmentStage)
+enrichStage := pipz.GetContract[WorkflowData](EnrichmentStage)
 
 // Add conditional stages
 if user.Country == "EU" {
-    gdprContract := pipz.GetContract[WorkflowStage, WorkflowData](GDPRStage)
+    gdprContract := pipz.GetContract[WorkflowData](GDPRStage)
     workflow.Add(gdprContract.Link())
 }`)
 	
