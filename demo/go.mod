@@ -5,9 +5,12 @@ go 1.23.1
 require (
 	github.com/spf13/cobra v1.8.0
 	pipz v0.0.0
+	pipz/examples v0.0.0
 )
 
 replace pipz => ../
+
+replace pipz/examples => ../examples
 
 require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

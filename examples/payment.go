@@ -1,4 +1,4 @@
-package processors
+package examples
 
 import (
 	"fmt"

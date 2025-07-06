@@ -1,31 +1,31 @@
-package processors_test
+package examples_test
 
 import (
 	"strings"
 	"testing"
 
 	"pipz"
-	"pipz/demo/processors"
+	"pipz/examples"
 )
 
 func TestTransformPipeline(t *testing.T) {
 	// Register transform pipeline
-	const testKey processors.TransformKey = "test"
-	contract := pipz.GetContract[processors.TransformKey, processors.TransformContext](testKey)
+	const testKey examples.TransformKey = "test"
+	contract := pipz.GetContract[examples.TransformKey, examples.TransformContext](testKey)
 	
 	err := contract.Register(
-		processors.Adapt(processors.ParseCSV),
-		processors.Adapt(processors.ValidateEmail),
-		processors.Adapt(processors.NormalizePhone),
-		processors.Adapt(processors.EnrichData),
+		pipz.Apply(examples.ParseCSV),
+		pipz.Apply(examples.ValidateEmail),
+		pipz.Apply(examples.NormalizePhone),
+		pipz.Apply(examples.EnrichData),
 	)
 	if err != nil {
 		t.Fatalf("Failed to register transform pipeline: %v", err)
 	}
 
 	t.Run("ValidTransformation", func(t *testing.T) {
-		ctx := processors.TransformContext{
-			CSV: &processors.CSVRecord{
+		ctx := examples.TransformContext{
+			CSV: &examples.CSVRecord{
 				Fields: []string{"123", "JOHN DOE", "john.doe@example.com", "(555) 123-4567"},
 			},
 		}
@@ -62,8 +62,8 @@ func TestTransformPipeline(t *testing.T) {
 	})
 
 	t.Run("InvalidEmail", func(t *testing.T) {
-		ctx := processors.TransformContext{
-			CSV: &processors.CSVRecord{
+		ctx := examples.TransformContext{
+			CSV: &examples.CSVRecord{
 				Fields: []string{"456", "Jane Smith", "invalid-email", "555-987-6543"},
 			},
 		}
@@ -102,8 +102,8 @@ func TestTransformPipeline(t *testing.T) {
 		}
 
 		for _, tc := range testCases {
-			ctx := processors.TransformContext{
-				CSV: &processors.CSVRecord{
+			ctx := examples.TransformContext{
+				CSV: &examples.CSVRecord{
 					Fields: []string{"1", "Test", "test@example.com", tc.input},
 				},
 			}
@@ -121,8 +121,8 @@ func TestTransformPipeline(t *testing.T) {
 	})
 
 	t.Run("InsufficientFields", func(t *testing.T) {
-		ctx := processors.TransformContext{
-			CSV: &processors.CSVRecord{
+		ctx := examples.TransformContext{
+			CSV: &examples.CSVRecord{
 				Fields: []string{"123", "Name"}, // Missing email and phone
 			},
 		}

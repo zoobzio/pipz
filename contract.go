@@ -44,48 +44,48 @@ func (c *Contract[K, T]) String() string {
 // Processors are executed in the order they are registered.
 func (c *Contract[K, T]) Register(processors ...Processor[T]) error {
 	// Create a single byte processor that handles all the type-safe processors
-	// This closure maintains cached state to minimize decode operations
+	// Optimized to minimize decode operations
 	combinedProcessor := func(input []byte) ([]byte, error) {
-		// State maintained across processor calls
-		var (
-			cachedValue  T
-			cachedBytes  []byte
-			valueDecoded bool
-		)
+		// Decode once at the start
+		value, err := Decode[T](input)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode input: %w", err)
+		}
 
-		// Initialize with input bytes
-		cachedBytes = input
+		// Track if any processor modified the data
+		modified := false
+		currentBytes := input
 
 		// Run all processors in sequence
 		for i, proc := range processors {
-			// Decode only when needed (lazy decoding)
-			if !valueDecoded {
-				value, err := Decode[T](cachedBytes)
-				if err != nil {
-					return nil, fmt.Errorf("processor %d: failed to decode: %w", i, err)
-				}
-				cachedValue = value
-				valueDecoded = true
-			}
-
-			// Apply the processor
-			result, err := proc(cachedValue)
+			// Apply the processor with current value
+			result, err := proc(value)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("processor %d failed: %w", i, err)
 			}
 
 			// If processor returned bytes, it modified the value
 			if result != nil {
-				// Update cached bytes
-				cachedBytes = result
-				// Mark value as needing re-decode for next processor
-				valueDecoded = false
+				modified = true
+				currentBytes = result
+
+				// Decode the new value for the next processor
+				// Skip decode for last processor since we just return bytes
+				if i < len(processors)-1 {
+					value, err = Decode[T](result)
+					if err != nil {
+						return nil, fmt.Errorf("processor %d: failed to decode result: %w", i, err)
+					}
+				}
 			}
-			// If nil, processor didn't modify - cached value remains valid
+			// If nil, processor didn't modify - 'value' stays the same
 		}
 
-		// Return the final bytes
-		return cachedBytes, nil
+		// Return appropriate bytes
+		if !modified {
+			return input, nil // Nothing changed, return original bytes
+		}
+		return currentBytes, nil
 	}
 
 	return Register(c.registryKey, combinedProcessor)

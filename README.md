@@ -7,7 +7,11 @@ With pipz, you create a processing pipeline once and access it from any package 
 ```go
 // Register a pipeline in one place...
 contract := pipz.GetContract[SecurityKey, User](SecurityKey("v1"))
-contract.Register(validateUser, sanitizeInput, auditAccess)
+contract.Register(
+    pipz.Apply(validateUser),
+    pipz.Apply(sanitizeInput),
+    pipz.Apply(auditAccess),
+)
 
 // ...retrieve and use it anywhere else
 contract := pipz.GetContract[SecurityKey, User](SecurityKey("v1"))
@@ -15,6 +19,107 @@ user, err := contract.Process(userData)
 ```
 
 No singletons to inject. No interfaces to implement. Just types.
+
+## Installation
+
+```bash
+go get github.com/zoobzio/pipz
+```
+
+## Quick Start
+
+### 5-Minute Guide to pipz
+
+1. **Define your types** - A key type for discovery and a data type to process:
+
+```go
+type ValidationKey string    // Key type identifies the pipeline
+type User struct {          // Data type to process
+    Name  string
+    Email string
+    Age   int
+}
+```
+
+2. **Write processor functions** - Simple functions that work with your types:
+
+```go
+// Validation - check without modifying
+func checkEmail(u User) error {
+    if !strings.Contains(u.Email, "@") {
+        return fmt.Errorf("invalid email: %s", u.Email)
+    }
+    return nil
+}
+
+// Transformation - always modify
+func normalizeEmail(u User) User {
+    u.Email = strings.ToLower(u.Email)
+    return u
+}
+
+// Conditional modification
+func applyDiscount(u User) User {
+    u.Discount = 0.10  // 10% off
+    return u
+}
+
+func isVIP(u User) bool {
+    return u.TotalPurchases > 1000
+}
+```
+
+3. **Register using adapters** - Do this once at startup:
+
+```go
+contract := pipz.GetContract[ValidationKey, User](ValidationKey("v1"))
+contract.Register(
+    pipz.Validate(checkEmail),               // Check without modifying
+    pipz.Transform(normalizeEmail),          // Always modify
+    pipz.Mutate(applyDiscount, isVIP),      // Conditionally modify
+    pipz.Effect(func(u User) error {         // Side effects
+        log.Printf("Processed user: %s", u.Email)
+        return nil
+    }),
+)
+```
+
+**Behind the scenes**: pipz handles all serialization. Your functions work with concrete types, not bytes!
+
+4. **Use it anywhere** - No imports needed, just the types:
+
+```go
+// In a completely different package...
+contract := pipz.GetContract[ValidationKey, User](ValidationKey("v1"))
+user, err := contract.Process(User{
+    Name:  "john doe",
+    Email: "JOHN@EXAMPLE.COM",
+    Age:   25,
+})
+// Result: {Name:"John Doe" Email:"john@example.com" Age:25}
+```
+
+That's it! The pipeline is globally discoverable through the type system.
+
+### The Magic: Type-Based Discovery
+
+```go
+// team_a/auth.go
+type AuthKey string
+contract := pipz.GetContract[AuthKey, User](AuthKey("v1"))
+contract.Register(
+    pipz.Apply(checkPassword),
+    pipz.Apply(checkMFA),
+    pipz.Apply(auditLogin),
+)
+
+// team_b/api.go - No import of team_a needed!
+type AuthKey string  // Same type name
+contract := pipz.GetContract[AuthKey, User](AuthKey("v1"))
+user, _ := contract.Process(loginRequest)  // Same pipeline!
+```
+
+If you know the types, you have the pipeline. No dependency injection, no singletons, no configuration.
 
 ## Philosophy: Types Instead of Logic
 
@@ -36,6 +141,8 @@ premiumContract := pipz.GetContract[PremiumKey, Order](PremiumKey("v1"))
 standardContract := pipz.GetContract[StandardKey, Order](StandardKey("v1"))
 ```
 
+**The deeper insight**: Most if/else statements in business logic are just routing decisions. With pipz, the type system becomes your router. No more switch statements checking user roles, customer tiers, regions, or versions - just pass the right type and get the right behavior.
+
 ### Key Principles
 
 1. **Isolation MEANS Isolation**: Different type universes cannot see or affect each other. Period.
@@ -44,19 +151,17 @@ standardContract := pipz.GetContract[StandardKey, Order](StandardKey("v1"))
    ```go
    func RegisterPaymentPipeline() {
        contract := pipz.GetContract[PaymentKey, Payment](PaymentKey("v1"))
-       contract.Register(validate, charge, notify)
-       
+       contract.Register(
+           pipz.Apply(validate),
+           pipz.Apply(charge),
+           pipz.Apply(notify),
+       )
+
        // Your app's concern, not pipz's
        logger.Info("Payment pipeline v1 registered")
    }
    ```
 4. **Ephemeral by Design**: pipz doesn't manage lifecycle. It's a pattern, not a framework.
-
-## Installation
-
-```bash
-go get github.com/zoobzio/pipz
-```
 
 ## See It In Action
 
@@ -68,7 +173,7 @@ go run ./demo security    # Security audit pipeline
 go run ./demo transform   # Data transformation
 go run ./demo universes   # Multi-tenant isolation
 go run ./demo validation  # Data validation
-go run ./demo workflow    # Multi-stage workflows  
+go run ./demo workflow    # Multi-stage workflows
 go run ./demo middleware  # Request middleware
 go run ./demo errors      # Error handling pipelines
 go run ./demo versioning  # Pipeline versioning & A/B/C testing
@@ -78,7 +183,7 @@ go run ./demo testing     # Testing without mocks
 go run ./demo all --interactive
 ```
 
-## Quick Start
+## Complete Example
 
 ```go
 package main
@@ -105,9 +210,9 @@ func main() {
 
     // Register processors
     contract.Register(
-        normalizeEmail,
-        validateAge,
-        formatName,
+        pipz.Apply(normalizeEmail),
+        pipz.Apply(validateAge),
+        pipz.Apply(formatName),
     )
 
     // Process data
@@ -211,14 +316,31 @@ contract := pipz.GetContract[AuthKey, User](AuthKey("v1"))
 
 ### Type Universes
 
-The same string value combined with different key types creates isolated processing universes. This enables powerful multi-tenant architectures where each tenant's data flows through completely separate pipelines without any cross-contamination:
+**Type Universes are the killer feature of pipz.** They let you create completely isolated processing pipelines for different contexts using the same data types.
+
+#### The Concept
+
+The KEY TYPE determines which pipeline you get. Even if two pipelines use the same key value and process the same data type, different key types create different universes:
 
 ```go
-// Multi-tenant payment processor example
+type StandardKey string
+type PremiumKey string
+
+// Same key value "v1", same data type Transaction
+// But COMPLETELY DIFFERENT pipelines!
+standard := pipz.GetContract[StandardKey, Transaction](StandardKey("v1"))
+premium := pipz.GetContract[PremiumKey, Transaction](PremiumKey("v1"))
+```
+
+#### Real-World Example: Multi-Tenant Payment Processing
+
+```go
+// Define separate key types for each merchant tier
 type StandardMerchantKey string
 type PremiumMerchantKey string
 type HighRiskMerchantKey string
 
+// All process the same Transaction type
 type Transaction struct {
     ID       string
     Amount   float64
@@ -229,40 +351,85 @@ type Transaction struct {
 // Standard merchants: basic fraud checks
 standardContract := pipz.GetContract[StandardMerchantKey, Transaction](StandardMerchantKey("v1"))
 standardContract.Register(
-    validateAmount,      // Max $10,000
-    checkVelocity,      // 10 transactions/hour
-    notifyMerchant,
+    pipz.Apply(validateAmount),      // Max $10,000
+    pipz.Apply(checkVelocity),      // 10 transactions/hour
+    pipz.Apply(notifyMerchant),
 )
 
 // Premium merchants: relaxed limits, priority processing
 premiumContract := pipz.GetContract[PremiumMerchantKey, Transaction](PremiumMerchantKey("v1"))
 premiumContract.Register(
-    validatePremiumAmount,  // Max $100,000
-    checkPremiumVelocity,  // 100 transactions/hour
-    prioritySettle,        // Same-day settlement
-    notifyPremium,         // SMS + Email alerts
+    pipz.Apply(validatePremiumAmount),  // Max $100,000
+    pipz.Apply(checkPremiumVelocity),  // 100 transactions/hour
+    pipz.Apply(prioritySettle),        // Same-day settlement
+    pipz.Apply(notifyPremium),         // SMS + Email alerts
 )
 
 // High-risk merchants: enhanced security
 highRiskContract := pipz.GetContract[HighRiskMerchantKey, Transaction](HighRiskMerchantKey("v1"))
 highRiskContract.Register(
-    validate3DS,           // Require 3D Secure
-    checkBlocklist,        // Enhanced fraud database
-    manualReview,          // Flag for human review
-    holdFunds,            // 7-day settlement hold
-    auditLog,             // Regulatory compliance
+    pipz.Apply(validate3DS),           // Require 3D Secure
+    pipz.Apply(checkBlocklist),        // Enhanced fraud database
+    pipz.Apply(manualReview),          // Flag for human review
+    pipz.Apply(holdFunds),            // 7-day settlement hold
+    pipz.Apply(auditLog),             // Regulatory compliance
 )
 
-// The key value "v1" is the same, but the pipelines are completely isolated
-// Each merchant type has its own processing rules without knowing about the others
+// Usage: Generic function - the KEY TYPE determines the pipeline!
+func processPayment[K comparable](key K, txn Transaction) (Transaction, error) {
+    contract := pipz.GetContract[K, Transaction](key)
+    return contract.Process(txn)
+}
+
+// The caller chooses the universe by passing the right key type:
+result, err := processPayment(StandardMerchantKey("v1"), txn)  // Standard pipeline
+result, err := processPayment(PremiumMerchantKey("v1"), txn)   // Premium pipeline
+result, err := processPayment(HighRiskMerchantKey("v1"), txn)  // High-risk pipeline
+
+// Even cleaner - let the merchant's key type drive the behavior:
+func (m Merchant) ProcessTransaction(txn Transaction) (Transaction, error) {
+    // Merchant has a key field that determines their universe
+    return processPayment(m.Key, txn)
+}
 ```
 
-This pattern is particularly powerful because:
+#### Why This Matters
 
-- **Complete Isolation**: Pipelines cannot accidentally access each other
-- **Type Safety**: Can't mistakenly process a high-risk transaction through standard pipeline
-- **Extensibility**: New merchant types can be added without touching existing code
-- **Discoverable**: Any code with the right key type can access the appropriate pipeline
+1. **Complete Isolation**: A bug in the high-risk pipeline CANNOT affect standard merchants
+2. **Type Safety**: You cannot accidentally process a high-risk transaction through the standard pipeline
+3. **Independent Development**: Teams can work on different pipelines without coordination
+4. **A/B Testing**: Run experiments without feature flags
+5. **Multi-tenancy**: Each customer gets their own processing universe
+
+#### Common Use Cases for Type Universes
+
+```go
+// A/B Testing
+type StrategyAKey string
+type StrategyBKey string
+
+// Multi-region processing
+type USRegionKey string
+type EURegionKey string
+type APACRegionKey string
+
+// Environment separation
+type DevKey string
+type StagingKey string
+type ProductionKey string
+
+// API versioning
+type APIv1Key string
+type APIv2Key string
+type APIv3Key string
+
+// Customer tiers
+type FreeUserKey string
+type ProUserKey string
+type EnterpriseKey string
+```
+
+Each key type creates its own universe. The same code can behave completely differently based on which universe it's in.
 
 ### Processing Model
 
@@ -372,7 +539,7 @@ Many key types is not a problem - it's the solution:
 ```go
 // Each type represents different business logic
 type FreeUserKey string
-type PremiumUserKey string  
+type PremiumUserKey string
 type EnterpriseUserKey string
 
 type USRegionKey string
@@ -443,38 +610,48 @@ return u, fmt.Errorf("invalid age")
 ## Common Questions
 
 ### "What about the global state?"
+
 Isolation MEANS isolation. `TestKey("test-1")` and `TestKey("test-2")` create completely separate universes that cannot see each other. The global registry is an implementation detail - what matters is that universes are isolated.
 
 ### "Won't I have too many key types?"
+
 That's the point! Each key type represents different business logic. Instead of runtime if/else statements, you encode behavior in types. Type proliferation is a feature, not a bug - it's compile-time business logic.
 
 ### "How do I debug which processors are registered?"
+
 Add logging to your registration functions - pipz is ephemeral by design:
+
 ```go
 func RegisterPaymentPipeline() {
     contract := pipz.GetContract[PaymentKey, Payment](PaymentKey("v1"))
-    contract.Register(validate, charge, notify)
+    contract.Register(
+        pipz.Apply(validate),
+        pipz.Apply(charge),
+        pipz.Apply(notify),
+    )
     log.Printf("Registered payment pipeline v1 with %d processors", 3)
-}
+)
 ```
 
 ### "Is this just dependency injection?"
+
 No. DI containers use reflection, configuration, and runtime resolution. pipz uses types - if you know the types, you have the pipeline. No container, no interfaces, no magic.
 
-## Use Cases
+## Documentation
 
-For detailed use cases with live demonstrations, see [USE_CASES.md](USE_CASES.md).
+- [ADAPTERS.md](ADAPTERS.md) - Complete guide to using and creating adapters
+- [USE_CASES.md](USE_CASES.md) - Detailed use cases with live demonstrations
 
 Run the interactive demos to see pipz in action:
 
 ```bash
 go run ./demo all         # Run all demos
-go run ./demo security    # Security audit pipeline  
+go run ./demo security    # Security audit pipeline
 go run ./demo transform   # Data transformation
 go run ./demo universes   # Multi-tenant isolation
 go run ./demo validation  # Data validation
 go run ./demo workflow    # Multi-stage workflows
-go run ./demo middleware  # Request middleware  
+go run ./demo middleware  # Request middleware
 go run ./demo errors      # Error handling pipelines
 go run ./demo versioning  # Pipeline versioning & A/B/C testing
 go run ./demo testing     # Testing without mocks

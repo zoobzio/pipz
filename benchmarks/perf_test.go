@@ -1,8 +1,8 @@
-package pipz_test
+package benchmarks
 
 import (
 	"testing"
-	"github.com/zoobzio/pipz"
+	"pipz"
 )
 
 // Simple test struct

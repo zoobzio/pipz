@@ -74,7 +74,11 @@ func validateTotal(o Order) (Order, error) {
 
 // Usage
 validationContract := pipz.GetContract[ValidatorKey, Order](ValidatorKey("v1"))
-validationContract.Register(validateOrderID, validateItems, validateTotal)
+validationContract.Register(
+    pipz.Apply(validateOrderID),
+    pipz.Apply(validateItems),
+    pipz.Apply(validateTotal),
+)
 ```
 
 ## Security Audit Pipeline
@@ -120,7 +124,11 @@ func redactSensitive(a AuditableData) (AuditableData, error) {
 
 // Usage
 auditContract := pipz.GetContract[AuditKey, AuditableData](AuditKey("v1"))
-auditContract.Register(checkPermissions, logAccess, redactSensitive)
+auditContract.Register(
+    pipz.Apply(checkPermissions),
+    pipz.Apply(logAccess),
+    pipz.Apply(redactSensitive),
+)
 ```
 
 ## Data Transformation Pipeline
@@ -194,7 +202,11 @@ func enrichData(ctx TransformContext) (TransformContext, error) {
 
 // Usage
 transformContract := pipz.GetContract[TransformKey, TransformContext](TransformKey("csv-to-db"))
-transformContract.Register(parseCSV, validateEmail, enrichData)
+transformContract.Register(
+    pipz.Apply(parseCSV),
+    pipz.Apply(validateEmail),
+    pipz.Apply(enrichData),
+)
 ```
 
 ## Multi-Stage Processing Workflow
@@ -221,36 +233,36 @@ func setupWorkflow() *pipz.Chain[WorkflowData] {
     // Validation stage
     validationContract := pipz.GetContract[WorkflowStage, WorkflowData](ValidationStage)
     validationContract.Register(
-        func(w WorkflowData) (WorkflowData, error) {
+        pipz.Apply(func(w WorkflowData) (WorkflowData, error) {
             if w.User.Email == "" {
                 return w, fmt.Errorf("email required")
             }
             w.Processed = append(w.Processed, "validated")
             return w, nil
-        },
+        }),
     )
 
     // Enrichment stage
     enrichmentContract := pipz.GetContract[WorkflowStage, WorkflowData](EnrichmentStage)
     enrichmentContract.Register(
-        func(w WorkflowData) (WorkflowData, error) {
+        pipz.Apply(func(w WorkflowData) (WorkflowData, error) {
             w.Metadata["enriched_at"] = time.Now()
             w.Metadata["ip_country"] = "US" // Mock enrichment
             w.Processed = append(w.Processed, "enriched")
             return w, nil
-        },
+        }),
     )
 
     // Persistence stage
     persistenceContract := pipz.GetContract[WorkflowStage, WorkflowData](PersistenceStage)
     persistenceContract.Register(
-        func(w WorkflowData) (WorkflowData, error) {
+        pipz.Apply(func(w WorkflowData) (WorkflowData, error) {
             // Simulate database save
             w.Metadata["persisted"] = true
             w.Metadata["id"] = "USR-12345"
             w.Processed = append(w.Processed, "persisted")
             return w, nil
-        },
+        }),
     )
 
     // Compose into workflow
@@ -320,7 +332,11 @@ func logRequest(r Request) (Request, error) {
 
 // Usage
 middlewareContract := pipz.GetContract[MiddlewareKey, Request](MiddlewareKey("api-v1"))
-middlewareContract.Register(authenticate, rateLimit, logRequest)
+middlewareContract.Register(
+    pipz.Apply(authenticate),
+    pipz.Apply(rateLimit),
+    pipz.Apply(logRequest),
+)
 ```
 
 ## Error Handling Pipelines
@@ -388,10 +404,19 @@ func attemptRecovery(e PaymentError) ([]byte, error) {
 
 // Register pipelines
 paymentContract := pipz.GetContract[PaymentKey, Payment](PaymentKey("v1"))
-paymentContract.Register(validatePayment, chargeCard, updateStatus)
+paymentContract.Register(
+    pipz.Apply(validatePayment),
+    pipz.Apply(chargeCard),
+    pipz.Apply(updateStatus),
+)
 
 errorContract := pipz.GetContract[PaymentErrorKey, PaymentError](PaymentErrorKey("v1"))
-errorContract.Register(categorizeError, notifyCustomer, attemptRecovery, auditLog)
+errorContract.Register(
+    pipz.Apply(categorizeError),
+    pipz.Apply(notifyCustomer),
+    pipz.Apply(attemptRecovery),
+    pipz.Apply(auditLog),
+)
 ```
 
 ### Key Insight: Type-Based Discovery
@@ -423,22 +448,26 @@ type Payment struct {
 
 // Version A: MVP - Just charge the card
 vA := pipz.GetContract[PaymentKey, Payment](PaymentKey("A"))
-vA.Register(chargeCard)
+vA.Register(pipz.Apply(chargeCard))
 
 // Version B: Add validation
 vB := pipz.GetContract[PaymentKey, Payment](PaymentKey("B"))
-vB.Register(validateAmount, chargeCard, logPayment)
+vB.Register(
+    pipz.Apply(validateAmount),
+    pipz.Apply(chargeCard),
+    pipz.Apply(logPayment),
+)
 
 // Version C: Enterprise features
 vC := pipz.GetContract[PaymentKey, Payment](PaymentKey("C"))
 vC.Register(
-    validateAmount,
-    checkVelocity,
-    fraudScore,
-    routeProvider,
-    chargeCard,
-    notify,
-    analytics,
+    pipz.Apply(validateAmount),
+    pipz.Apply(checkVelocity),
+    pipz.Apply(fraudScore),
+    pipz.Apply(routeProvider),
+    pipz.Apply(chargeCard),
+    pipz.Apply(notify),
+    pipz.Apply(analytics),
 )
 
 // A/B/C testing with zero interference
@@ -493,19 +522,19 @@ type EmailMessage struct {
 // Production pipeline
 prodContract := pipz.GetContract[EmailServiceKey, EmailMessage](EmailServiceKey("prod"))
 prodContract.Register(
-    validateEmail,
-    sanitizeContent,
-    applyTemplate,
-    sendViaProvider,  // Real email sending
+    pipz.Apply(validateEmail),
+    pipz.Apply(sanitizeContent),
+    pipz.Apply(applyTemplate),
+    pipz.Apply(sendViaProvider),  // Real email sending
 )
 
 // Test pipeline - same types, different universe!
 testContract := pipz.GetContract[EmailServiceKey, EmailMessage](EmailServiceKey("test"))
 testContract.Register(
-    validateEmail,    // Reuse real validation
-    sanitizeContent,  // Reuse real sanitization
-    testTemplate,     // Simplified for tests
-    mockSend,         // Don't actually send!
+    pipz.Apply(validateEmail),    // Reuse real validation
+    pipz.Apply(sanitizeContent),  // Reuse real sanitization
+    pipz.Apply(testTemplate),     // Simplified for tests
+    pipz.Apply(mockSend),         // Don't actually send!
 )
 
 // In tests, just use the test contract
@@ -518,10 +547,10 @@ func TestEmailValidation(t *testing.T) {
 // Advanced patterns
 hybridContract := pipz.GetContract[EmailServiceKey, EmailMessage](EmailServiceKey("hybrid"))
 hybridContract.Register(
-    validateEmail,    // Real validation
-    sanitizeContent,  // Real sanitization
-    applyTemplate,    // Real templates
-    mockSend,         // But don't send
+    pipz.Apply(validateEmail),    // Real validation
+    pipz.Apply(sanitizeContent),  // Real sanitization
+    pipz.Apply(applyTemplate),    // Real templates
+    pipz.Apply(mockSend),         // But don't send
 )
 ```
 

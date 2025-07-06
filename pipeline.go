@@ -28,12 +28,13 @@ func init() {
 
 // Register associates a chain of ByteProcessor functions with a string key.
 // The processors will be executed in the order they are provided.
-// If a key already exists, it will be overwritten with the new processor chain.
+// Multiple calls to Register with the same key will append processors to the existing chain,
+// enabling pipeline composition across different parts of an application.
 func Register(key string, processors ...ByteProcessor) error {
 	service.mu.Lock()
 	defer service.mu.Unlock()
 
-	service.chains[key] = processors
+	service.chains[key] = append(service.chains[key], processors...)
 	return nil
 }
 

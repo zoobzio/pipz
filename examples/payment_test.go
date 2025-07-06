@@ -1,23 +1,23 @@
-package processors_test
+package examples_test
 
 import (
 	"strings"
 	"testing"
 
 	"pipz"
-	"pipz/demo/processors"
+	"pipz/examples"
 )
 
 func TestPaymentValidation(t *testing.T) {
 	tests := []struct {
 		name    string
-		payment processors.Payment
+		payment examples.Payment
 		wantErr bool
 		errMsg  string
 	}{
 		{
 			name: "ValidPayment",
-			payment: processors.Payment{
+			payment: examples.Payment{
 				ID:         "PAY-001",
 				Amount:     100.00,
 				CardNumber: "****4242",
@@ -26,7 +26,7 @@ func TestPaymentValidation(t *testing.T) {
 		},
 		{
 			name: "ZeroAmount",
-			payment: processors.Payment{
+			payment: examples.Payment{
 				ID:         "PAY-002",
 				Amount:     0,
 				CardNumber: "****4242",
@@ -36,7 +36,7 @@ func TestPaymentValidation(t *testing.T) {
 		},
 		{
 			name: "NegativeAmount",
-			payment: processors.Payment{
+			payment: examples.Payment{
 				ID:         "PAY-003",
 				Amount:     -50.00,
 				CardNumber: "****4242",
@@ -46,7 +46,7 @@ func TestPaymentValidation(t *testing.T) {
 		},
 		{
 			name: "MissingCard",
-			payment: processors.Payment{
+			payment: examples.Payment{
 				ID:     "PAY-004",
 				Amount: 100.00,
 			},
@@ -57,7 +57,7 @@ func TestPaymentValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := processors.ValidatePayment(tt.payment)
+			result, err := examples.ValidatePayment(tt.payment)
 			
 			if tt.wantErr {
 				if err == nil {
@@ -80,14 +80,14 @@ func TestPaymentValidation(t *testing.T) {
 
 func TestFraudDetection(t *testing.T) {
 	t.Run("LargeFirstTransaction", func(t *testing.T) {
-		payment := processors.Payment{
+		payment := examples.Payment{
 			ID:         "PAY-FRAUD",
 			Amount:     15000.00,
 			CardNumber: "****9999",
 			Attempts:   0, // First time
 		}
 
-		_, err := processors.CheckFraud(payment)
+		_, err := examples.CheckFraud(payment)
 		if err == nil {
 			t.Fatal("Expected fraud detection for large first transaction")
 		}
@@ -98,28 +98,28 @@ func TestFraudDetection(t *testing.T) {
 	})
 
 	t.Run("LargeRepeatTransaction", func(t *testing.T) {
-		payment := processors.Payment{
+		payment := examples.Payment{
 			ID:         "PAY-OK",
 			Amount:     15000.00,
 			CardNumber: "****9999",
 			Attempts:   5, // Existing customer
 		}
 
-		_, err := processors.CheckFraud(payment)
+		_, err := examples.CheckFraud(payment)
 		if err != nil {
 			t.Fatalf("Repeat customer flagged for fraud: %v", err)
 		}
 	})
 
 	t.Run("SmallTransaction", func(t *testing.T) {
-		payment := processors.Payment{
+		payment := examples.Payment{
 			ID:         "PAY-SMALL",
 			Amount:     50.00,
 			CardNumber: "****1111",
 			Attempts:   0,
 		}
 
-		_, err := processors.CheckFraud(payment)
+		_, err := examples.CheckFraud(payment)
 		if err != nil {
 			t.Fatalf("Small transaction flagged: %v", err)
 		}
@@ -128,20 +128,20 @@ func TestFraudDetection(t *testing.T) {
 
 func TestPaymentPipeline(t *testing.T) {
 	// Create a simple payment processing pipeline
-	const testKey processors.PaymentKey = "test"
-	contract := pipz.GetContract[processors.PaymentKey, processors.Payment](testKey)
+	const testKey examples.PaymentKey = "test"
+	contract := pipz.GetContract[examples.PaymentKey, examples.Payment](testKey)
 	
 	err := contract.Register(
-		processors.Adapt(processors.ValidatePayment),
-		processors.Adapt(processors.CheckFraud),
-		processors.Adapt(processors.UpdatePaymentStatus),
+		pipz.Apply(examples.ValidatePayment),
+		pipz.Apply(examples.CheckFraud),
+		pipz.Apply(examples.UpdatePaymentStatus),
 	)
 	if err != nil {
 		t.Fatalf("Failed to register payment pipeline: %v", err)
 	}
 
 	t.Run("SuccessfulPayment", func(t *testing.T) {
-		payment := processors.Payment{
+		payment := examples.Payment{
 			ID:         "PAY-SUCCESS",
 			Amount:     250.00,
 			CardNumber: "****4242",
@@ -164,7 +164,7 @@ func TestPaymentPipeline(t *testing.T) {
 	})
 
 	t.Run("FailedValidation", func(t *testing.T) {
-		payment := processors.Payment{
+		payment := examples.Payment{
 			ID:     "PAY-FAIL",
 			Amount: -100.00, // Invalid
 		}

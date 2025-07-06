@@ -1,32 +1,32 @@
-package processors_test
+package examples_test
 
 import (
 	"strings"
 	"testing"
 
 	"pipz"
-	"pipz/demo/processors"
+	"pipz/examples"
 )
 
 func TestValidationPipeline(t *testing.T) {
 	// Register validation pipeline
-	const testKey processors.ValidatorKey = "test"
-	contract := pipz.GetContract[processors.ValidatorKey, processors.Order](testKey)
+	const testKey examples.ValidatorKey = "test"
+	contract := pipz.GetContract[examples.ValidatorKey, examples.Order](testKey)
 	
 	err := contract.Register(
-		processors.Adapt(processors.ValidateOrderID),
-		processors.Adapt(processors.ValidateItems),
-		processors.Adapt(processors.ValidateTotal),
+		pipz.Apply(examples.ValidateOrderID),
+		pipz.Apply(examples.ValidateItems),
+		pipz.Apply(examples.ValidateTotal),
 	)
 	if err != nil {
 		t.Fatalf("Failed to register validation pipeline: %v", err)
 	}
 
 	t.Run("ValidOrder", func(t *testing.T) {
-		order := processors.Order{
+		order := examples.Order{
 			ID:         "ORD-12345",
 			CustomerID: "CUST-001",
-			Items: []processors.OrderItem{
+			Items: []examples.OrderItem{
 				{ProductID: "PROD-A", Quantity: 2, Price: 29.99},
 				{ProductID: "PROD-B", Quantity: 1, Price: 49.99},
 			},
@@ -44,9 +44,9 @@ func TestValidationPipeline(t *testing.T) {
 	})
 
 	t.Run("InvalidOrderID", func(t *testing.T) {
-		order := processors.Order{
+		order := examples.Order{
 			ID: "12345", // Missing ORD- prefix
-			Items: []processors.OrderItem{
+			Items: []examples.OrderItem{
 				{ProductID: "P1", Quantity: 1, Price: 10.00},
 			},
 			Total: 10.00,
@@ -63,9 +63,9 @@ func TestValidationPipeline(t *testing.T) {
 	})
 
 	t.Run("EmptyOrder", func(t *testing.T) {
-		order := processors.Order{
+		order := examples.Order{
 			ID:    "ORD-999",
-			Items: []processors.OrderItem{}, // No items
+			Items: []examples.OrderItem{}, // No items
 			Total: 0,
 		}
 
@@ -80,9 +80,9 @@ func TestValidationPipeline(t *testing.T) {
 	})
 
 	t.Run("InvalidQuantity", func(t *testing.T) {
-		order := processors.Order{
+		order := examples.Order{
 			ID: "ORD-123",
-			Items: []processors.OrderItem{
+			Items: []examples.OrderItem{
 				{ProductID: "P1", Quantity: 0, Price: 10.00}, // Zero quantity
 			},
 			Total: 0,
@@ -99,9 +99,9 @@ func TestValidationPipeline(t *testing.T) {
 	})
 
 	t.Run("TotalMismatch", func(t *testing.T) {
-		order := processors.Order{
+		order := examples.Order{
 			ID: "ORD-456",
-			Items: []processors.OrderItem{
+			Items: []examples.OrderItem{
 				{ProductID: "P1", Quantity: 2, Price: 25.00},
 			},
 			Total: 100.00, // Should be 50.00
@@ -116,37 +116,4 @@ func TestValidationPipeline(t *testing.T) {
 			t.Errorf("Wrong error message: %v", err)
 		}
 	})
-}
-
-func BenchmarkValidationPipeline(b *testing.B) {
-	// Setup
-	const benchKey processors.ValidatorKey = "bench"
-	contract := pipz.GetContract[processors.ValidatorKey, processors.Order](benchKey)
-	
-	contract.Register(
-		processors.Adapt(processors.ValidateOrderID),
-		processors.Adapt(processors.ValidateItems),
-		processors.Adapt(processors.ValidateTotal),
-	)
-
-	order := processors.Order{
-		ID:         "ORD-BENCH",
-		CustomerID: "BENCH",
-		Items: []processors.OrderItem{
-			{ProductID: "P1", Quantity: 5, Price: 19.99},
-			{ProductID: "P2", Quantity: 3, Price: 29.99},
-			{ProductID: "P3", Quantity: 1, Price: 99.99},
-		},
-		Total: 289.91,
-	}
-
-	b.ResetTimer()
-	
-	// Benchmark
-	for i := 0; i < b.N; i++ {
-		_, err := contract.Process(order)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
 }

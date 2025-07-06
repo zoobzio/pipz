@@ -1,7 +1,7 @@
 // Package processors contains the business logic implementations used in pipz demos.
 // These processors demonstrate real-world use cases and best practices for building
 // pipelines with pipz.
-package processors
+package examples
 
 import (
 	"fmt"

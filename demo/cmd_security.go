@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"pipz"
-	"pipz/demo/processors"
+	"pipz/examples"
 	"pipz/demo/testutil"
 )
 
@@ -73,16 +73,16 @@ auditContract.Register(
 )`)
 	
 	// Constants for demo
-	const AuditContractV1 processors.SecurityKey = "v1"
+	const AuditContractV1 examples.SecurityKey = "v1"
 	
 	// Register the security pipeline
-	auditContract := pipz.GetContract[processors.SecurityKey, processors.AuditableData](AuditContractV1)
+	auditContract := pipz.GetContract[examples.SecurityKey, examples.AuditableData](AuditContractV1)
 	
 	// Use adapters to convert processors to pipz.Processor format
-	checkPermissions := processors.Adapt(processors.CheckPermissions)
-	logAccess := processors.Adapt(processors.LogAccess)
-	redactSensitive := processors.Adapt(processors.RedactSensitive)
-	trackCompliance := processors.Adapt(processors.TrackCompliance)
+	checkPermissions := pipz.Apply(examples.CheckPermissions)
+	logAccess := pipz.Apply(examples.LogAccess)
+	redactSensitive := pipz.Apply(examples.RedactSensitive)
+	trackCompliance := pipz.Apply(examples.TrackCompliance)
 	
 	// Register with proper error handling
 	if err := auditContract.Register(checkPermissions, logAccess, redactSensitive, trackCompliance); err != nil {
@@ -117,7 +117,7 @@ func handlePatientDataRequest(userID string, patientData *User) {
 	pp.Info("Let's trace through the pipeline step by step...")
 	pp.Info("")
 	
-	patientData := &processors.User{
+	patientData := &examples.User{
 		Name:    "John Doe",
 		Email:   "john.doe@hospital.com",
 		SSN:     "123-45-6789",
@@ -133,7 +133,7 @@ func handlePatientDataRequest(userID string, patientData *User) {
 	pp.Info("⚙️  PIPELINE EXECUTION:")
 	pp.Info("Watch how data flows through each processor...")
 	
-	auditData := processors.AuditableData{
+	auditData := examples.AuditableData{
 		Data:      patientData,
 		UserID:    "doctor-789",
 		Timestamp: time.Now(),
@@ -183,7 +183,7 @@ func handlePatientDataRequest(userID string, patientData *User) {
 	pp.Info("What happens when someone tries to access without authentication?")
 	pp.Info("")
 	
-	unauthorizedData := processors.AuditableData{
+	unauthorizedData := examples.AuditableData{
 		Data:      patientData,
 		UserID:    "", // No user ID!
 		Timestamp: time.Now(),
@@ -235,10 +235,10 @@ func generateInvoice(patientID string) {
 	pp.Info("Let's prove it works...")
 	
 	// Simulate discovery from another package
-	discoveredContract := pipz.GetContract[processors.SecurityKey, processors.AuditableData](AuditContractV1)
+	discoveredContract := pipz.GetContract[examples.SecurityKey, examples.AuditableData](AuditContractV1)
 	
-	testData := processors.AuditableData{
-		Data: &processors.User{
+	testData := examples.AuditableData{
+		Data: &examples.User{
 			Name:  "Test Patient",
 			SSN:   "999-88-7777",
 			Email: "test@example.com",

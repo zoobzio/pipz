@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"pipz"
-	"pipz/demo/processors"
+	"pipz/examples"
 )
 
 // TestTypeUniverseIsolation verifies that different key types create isolated pipelines
@@ -16,33 +16,33 @@ func TestTypeUniverseIsolation(t *testing.T) {
 	type TestKey string
 
 	// Create three different pipelines with the same key value
-	standardContract := pipz.GetContract[StandardKey, processors.Payment](StandardKey("v1"))
-	premiumContract := pipz.GetContract[PremiumKey, processors.Payment](PremiumKey("v1"))
-	testContract := pipz.GetContract[TestKey, processors.Payment](TestKey("v1"))
+	standardContract := pipz.GetContract[StandardKey, examples.Payment](StandardKey("v1"))
+	premiumContract := pipz.GetContract[PremiumKey, examples.Payment](PremiumKey("v1"))
+	testContract := pipz.GetContract[TestKey, examples.Payment](TestKey("v1"))
 
 	// Register different processors for each
 	var standardProcessed, premiumProcessed, testProcessed bool
 
-	standardContract.Register(func(p processors.Payment) ([]byte, error) {
+	standardContract.Register(func(p examples.Payment) ([]byte, error) {
 		standardProcessed = true
 		p.Provider = "standard"
 		return pipz.Encode(p)
 	})
 
-	premiumContract.Register(func(p processors.Payment) ([]byte, error) {
+	premiumContract.Register(func(p examples.Payment) ([]byte, error) {
 		premiumProcessed = true
 		p.Provider = "premium"
 		return pipz.Encode(p)
 	})
 
-	testContract.Register(func(p processors.Payment) ([]byte, error) {
+	testContract.Register(func(p examples.Payment) ([]byte, error) {
 		testProcessed = true
 		p.Provider = "test"
 		return pipz.Encode(p)
 	})
 
 	// Process the same payment through each pipeline
-	payment := processors.Payment{
+	payment := examples.Payment{
 		ID:     "PAY-001",
 		Amount: 100.00,
 	}
@@ -95,20 +95,20 @@ func TestPipelineVersioning(t *testing.T) {
 	type PaymentKey string
 
 	// Register v1 pipeline - simple validation
-	v1 := pipz.GetContract[PaymentKey, processors.Payment](PaymentKey("v1"))
+	v1 := pipz.GetContract[PaymentKey, examples.Payment](PaymentKey("v1"))
 	v1.Register(
-		processors.Adapt(processors.ValidatePayment),
+		pipz.Apply(examples.ValidatePayment),
 	)
 
 	// Register v2 pipeline - validation + fraud check
-	v2 := pipz.GetContract[PaymentKey, processors.Payment](PaymentKey("v2"))
+	v2 := pipz.GetContract[PaymentKey, examples.Payment](PaymentKey("v2"))
 	v2.Register(
-		processors.Adapt(processors.ValidatePayment),
-		processors.Adapt(processors.CheckFraud),
+		pipz.Apply(examples.ValidatePayment),
+		pipz.Apply(examples.CheckFraud),
 	)
 
 	// Test payment that passes v1 but fails v2
-	payment := processors.Payment{
+	payment := examples.Payment{
 		ID:         "PAY-TEST",
 		Amount:     15000.00, // Large amount
 		CardNumber: "****4242",
@@ -131,16 +131,16 @@ func TestPipelineVersioning(t *testing.T) {
 // TestChainComposition tests combining multiple contracts
 func TestChainComposition(t *testing.T) {
 	// Create individual contracts
-	validationContract := pipz.GetContract[processors.ValidatorKey, processors.Order](processors.ValidatorKey("test"))
+	validationContract := pipz.GetContract[examples.ValidatorKey, examples.Order](examples.ValidatorKey("test"))
 	validationContract.Register(
-		processors.Adapt(processors.ValidateOrderID),
-		processors.Adapt(processors.ValidateItems),
+		pipz.Apply(examples.ValidateOrderID),
+		pipz.Apply(examples.ValidateItems),
 	)
 
 	// Create a second contract for enrichment
 	type EnrichmentKey string
-	enrichmentContract := pipz.GetContract[EnrichmentKey, processors.Order](EnrichmentKey("test"))
-	enrichmentContract.Register(func(o processors.Order) ([]byte, error) {
+	enrichmentContract := pipz.GetContract[EnrichmentKey, examples.Order](EnrichmentKey("test"))
+	enrichmentContract.Register(func(o examples.Order) ([]byte, error) {
 		// Add some metadata
 		if o.CustomerID == "" {
 			o.CustomerID = "GUEST"
@@ -149,16 +149,16 @@ func TestChainComposition(t *testing.T) {
 	})
 
 	// Create a chain
-	chain := pipz.NewChain[processors.Order]()
+	chain := pipz.NewChain[examples.Order]()
 	chain.Add(
 		validationContract.Link(),
 		enrichmentContract.Link(),
 	)
 
 	// Test the chain
-	order := processors.Order{
+	order := examples.Order{
 		ID: "ORD-123",
-		Items: []processors.OrderItem{
+		Items: []examples.OrderItem{
 			{ProductID: "P1", Quantity: 1, Price: 10.00},
 		},
 		Total: 10.00,
@@ -177,11 +177,11 @@ func TestChainComposition(t *testing.T) {
 
 // TestConcurrentPipelines verifies thread safety
 func TestConcurrentPipelines(t *testing.T) {
-	const key processors.PaymentKey = "concurrent"
-	contract := pipz.GetContract[processors.PaymentKey, processors.Payment](key)
+	const key examples.PaymentKey = "concurrent"
+	contract := pipz.GetContract[examples.PaymentKey, examples.Payment](key)
 
 	var counter int
-	contract.Register(func(p processors.Payment) ([]byte, error) {
+	contract.Register(func(p examples.Payment) ([]byte, error) {
 		counter++
 		return pipz.Encode(p)
 	})
@@ -190,7 +190,7 @@ func TestConcurrentPipelines(t *testing.T) {
 	done := make(chan bool, 10)
 	for i := 0; i < 10; i++ {
 		go func(id int) {
-			payment := processors.Payment{
+			payment := examples.Payment{
 				ID:     fmt.Sprintf("PAY-%d", id),
 				Amount: float64(id * 100),
 			}

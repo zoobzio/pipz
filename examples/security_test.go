@@ -1,4 +1,4 @@
-package processors_test
+package examples_test
 
 import (
 	"strings"
@@ -6,27 +6,27 @@ import (
 	"time"
 
 	"pipz"
-	"pipz/demo/processors"
+	"pipz/examples"
 )
 
 func TestSecurityPipeline(t *testing.T) {
 	// Register the security pipeline
-	const testKey processors.SecurityKey = "test"
-	contract := pipz.GetContract[processors.SecurityKey, processors.AuditableData](testKey)
+	const testKey examples.SecurityKey = "test"
+	contract := pipz.GetContract[examples.SecurityKey, examples.AuditableData](testKey)
 	
 	err := contract.Register(
-		processors.Adapt(processors.CheckPermissions),
-		processors.Adapt(processors.LogAccess),
-		processors.Adapt(processors.RedactSensitive),
-		processors.Adapt(processors.TrackCompliance),
+		pipz.Apply(examples.CheckPermissions),
+		pipz.Apply(examples.LogAccess),
+		pipz.Apply(examples.RedactSensitive),
+		pipz.Apply(examples.TrackCompliance),
 	)
 	if err != nil {
 		t.Fatalf("Failed to register pipeline: %v", err)
 	}
 
 	t.Run("ValidAccess", func(t *testing.T) {
-		data := processors.AuditableData{
-			Data: &processors.User{
+		data := examples.AuditableData{
+			Data: &examples.User{
 				Name:  "John Doe",
 				Email: "john@example.com",
 				SSN:   "123-45-6789",
@@ -57,8 +57,8 @@ func TestSecurityPipeline(t *testing.T) {
 	})
 
 	t.Run("UnauthorizedAccess", func(t *testing.T) {
-		data := processors.AuditableData{
-			Data: &processors.User{
+		data := examples.AuditableData{
+			Data: &examples.User{
 				Name: "Jane Doe",
 				SSN:  "987-65-4321",
 			},
@@ -77,8 +77,8 @@ func TestSecurityPipeline(t *testing.T) {
 	})
 
 	t.Run("AdminAccess", func(t *testing.T) {
-		data := processors.AuditableData{
-			Data: &processors.User{
+		data := examples.AuditableData{
+			Data: &examples.User{
 				Name:  "Admin User",
 				Email: "admin@example.com",
 				SSN:   "555-55-5555",
@@ -106,24 +106,24 @@ func TestSecurityPipeline(t *testing.T) {
 
 func TestPipelineDiscovery(t *testing.T) {
 	// Register a pipeline with one key
-	const key1 processors.SecurityKey = "discovery-test"
-	contract1 := pipz.GetContract[processors.SecurityKey, processors.AuditableData](key1)
+	const key1 examples.SecurityKey = "discovery-test"
+	contract1 := pipz.GetContract[examples.SecurityKey, examples.AuditableData](key1)
 	
 	err := contract1.Register(
-		processors.Adapt(processors.CheckPermissions),
+		pipz.Apply(examples.CheckPermissions),
 	)
 	if err != nil {
 		t.Fatalf("Failed to register first contract: %v", err)
 	}
 
 	// Discover the same pipeline with the same key
-	contract2 := pipz.GetContract[processors.SecurityKey, processors.AuditableData](key1)
+	contract2 := pipz.GetContract[examples.SecurityKey, examples.AuditableData](key1)
 	
 	// Process through discovered contract
-	data := processors.AuditableData{
+	data := examples.AuditableData{
 		UserID:    "test-user",
 		Timestamp: time.Now(),
-		Data:      &processors.User{Name: "Test"},
+		Data:      &examples.User{Name: "Test"},
 	}
 
 	result, err := contract2.Process(data)
