@@ -75,12 +75,12 @@ func handleAPIRequest(w http.ResponseWriter, r *http.Request) {
 
 **Result**: No more scattered conditionals. No more copy-paste middleware. Just clean, reusable, type-safe pipelines.
 
-### Error Handling as a Pipeline
+### The Problem: Error Handling Hell
 
-Traditional error handling scatters logic everywhere:
+Error handling logic gets duplicated everywhere:
 
 ```go
-// Error handling hell - repeated everywhere
+// Same error handling copied in every function 😫
 func chargeCard(p Payment) (Payment, error) {
     err := processCharge(p)
     if err != nil {
@@ -101,10 +101,10 @@ func chargeCard(p Payment) (Payment, error) {
 }
 ```
 
-**With pipz**: Error handling becomes just another pipeline!
+### The Solution: Error Handling as a Pipeline
 
 ```go
-// Create an error handling pipeline
+// Create a reusable error handling pipeline
 errorPipeline := pipz.NewContract[PaymentError]()
 errorPipeline.Register(
     pipz.Apply(categorizeError),     // Determine error type
@@ -114,7 +114,7 @@ errorPipeline.Register(
     pipz.Effect(auditLog),           // Compliance logging
 )
 
-// Use it in your payment processor
+// Use it everywhere - no more duplication!
 func chargeCard(p Payment) (Payment, error) {
     err := processCharge(p)
     if err != nil {
@@ -127,6 +127,80 @@ func chargeCard(p Payment) (Payment, error) {
     return p, nil
 }
 ```
+
+**Result**: Error handling logic is centralized, testable, and reusable. No more copy-paste error handling!
+
+### The Problem: Untestable Code
+
+Business logic gets tangled with external dependencies:
+
+```go
+// Impossible to test without external services 😫
+func processOrder(orderID string) error {
+    // Database call mixed with business logic
+    order, err := db.GetOrder(orderID)
+    if err != nil {
+        return err
+    }
+    
+    // Validation mixed with external calls
+    if order.Total < 0 {
+        return errors.New("invalid total")
+    }
+    
+    // Payment processing mixed with notifications
+    if err := stripe.ChargeCard(order.CardToken, order.Total); err != nil {
+        return err
+    }
+    
+    // Email service mixed with business rules
+    if err := sendGrid.SendConfirmation(order.Email, order.ID); err != nil {
+        return err
+    }
+    
+    return db.MarkOrderComplete(orderID)
+}
+```
+
+### The Solution: Testable Pipeline Components
+
+```go
+// Pure business logic - easy to test!
+orderPipeline := pipz.NewContract[Order]()
+orderPipeline.Register(
+    pipz.Validate(validateOrder),     // Pure validation
+    pipz.Apply(calculateTax),         // Pure calculation
+    pipz.Apply(applyDiscounts),       // Pure business rules
+)
+
+// Test with mock external services
+func TestOrderProcessing(t *testing.T) {
+    // Test pure business logic without external dependencies
+    order := Order{ID: "123", Total: 100.00}
+    
+    result, err := orderPipeline.Process(order)
+    
+    // Fast, reliable tests
+    assert.NoError(t, err)
+    assert.Equal(t, 108.00, result.Total) // With tax
+}
+
+// Production: compose with external services
+func processOrder(orderID string) error {
+    order := fetchFromDB(orderID)
+    
+    // Business logic pipeline (tested)
+    processedOrder, err := orderPipeline.Process(order)
+    if err != nil {
+        return err
+    }
+    
+    // External services (mocked in tests)
+    return saveAndNotify(processedOrder)
+}
+```
+
+**Result**: Business logic is isolated and easily testable. External dependencies are cleanly separated!
 
 ## Installation
 
