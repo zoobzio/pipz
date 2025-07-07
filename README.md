@@ -1,26 +1,22 @@
 # pipz
 
-Build type-safe processing pipelines in Go that you can retrieve from anywhere in your codebase using just the types.
+Build fast, type-safe processing pipelines in Go with zero dependencies.
 
-With pipz, you create a processing pipeline once and access it from any package without passing references around. Your pipelines are discoverable through Go's type system - if you know the types, you can find the pipeline.
+pipz provides a simple way to build composable data pipelines that transform, validate, and process your data through a series of operations. No global state, no magic, just clean functional composition.
 
 ```go
-// Register a pipeline in one place...
-const securityKey SecurityKey = "v1"
-contract := pipz.GetContract[User](securityKey)
-contract.Register(
-    pipz.Apply(validateUser),
-    pipz.Apply(sanitizeInput),
-    pipz.Apply(auditAccess),
+// Create a pipeline
+userPipeline := pipz.NewContract[User]()
+userPipeline.Register(
+    pipz.Validate(checkEmail),        // Validation
+    pipz.Transform(normalizeData),    // Transformation  
+    pipz.Mutate(applyDiscount, isVIP), // Conditional logic
+    pipz.Effect(logAccess),           // Side effects
 )
 
-// ...retrieve and use it anywhere else
-const securityKey SecurityKey = "v1"
-contract := pipz.GetContract[User](securityKey)
-user, err := contract.Process(userData)
+// Process data through the pipeline
+user, err := userPipeline.Process(userData)
 ```
-
-No singletons to inject. No interfaces to implement. Just types.
 
 ## Why pipz?
 
@@ -57,18 +53,17 @@ func handleAPIRequest(w http.ResponseWriter, r *http.Request) {
 ### The Solution: Pipeline-Driven Architecture
 
 ```go
-// Register once at startup
-const apiMiddleware MiddlewareKey = "api-v1"
-contract := pipz.GetContract[Request](apiMiddleware)
-contract.Register(
+// Create a reusable pipeline
+apiPipeline := pipz.NewContract[Request]()
+apiPipeline.Register(
     pipz.Apply(authenticate),  // Check auth token
     pipz.Apply(rateLimit),     // Apply rate limits
     pipz.Effect(logRequest),   // Log the request
 )
 
-// Use everywhere - one clean line
+// Use it cleanly in your handlers
 func handleAPIRequest(w http.ResponseWriter, r *http.Request) {
-    request, err := contract.Process(buildRequest(r))
+    request, err := apiPipeline.Process(buildRequest(r))
     if err != nil {
         http.Error(w, err.Error(), getStatusCode(err))
         return
@@ -80,9 +75,9 @@ func handleAPIRequest(w http.ResponseWriter, r *http.Request) {
 
 **Result**: No more scattered conditionals. No more copy-paste middleware. Just clean, reusable, type-safe pipelines.
 
-### But Wait, There's More: Error Handling
+### Error Handling as a Pipeline
 
-What happens when your clean middleware fails? Traditional code scatters error handling logic everywhere too:
+Traditional error handling scatters logic everywhere:
 
 ```go
 // Error handling hell - repeated everywhere
@@ -109,10 +104,9 @@ func chargeCard(p Payment) (Payment, error) {
 **With pipz**: Error handling becomes just another pipeline!
 
 ```go
-// Error handling pipeline - completely separate from payment logic
-const errorKey PaymentErrorKey = "v1"
-errorContract := pipz.GetContract[PaymentError](errorKey)
-errorContract.Register(
+// Create an error handling pipeline
+errorPipeline := pipz.NewContract[PaymentError]()
+errorPipeline.Register(
     pipz.Apply(categorizeError),     // Determine error type
     pipz.Apply(notifyCustomer),      // Send appropriate notifications  
     pipz.Apply(attemptRecovery),     // Try backup strategies
@@ -120,13 +114,11 @@ errorContract.Register(
     pipz.Effect(auditLog),           // Compliance logging
 )
 
-// Inside your payment processor - NO IMPORTS of error handling needed!
+// Use it in your payment processor
 func chargeCard(p Payment) (Payment, error) {
     err := processCharge(p)
     if err != nil {
-        // Discover error pipeline using just types
-        errorContract := pipz.GetContract[PaymentError](errorKey)
-        result, _ := errorContract.Process(PaymentError{
+        result, _ := errorPipeline.Process(PaymentError{
             Payment: p,
             OriginalError: err,
         })
@@ -136,38 +128,6 @@ func chargeCard(p Payment) (Payment, error) {
 }
 ```
 
-**The breakthrough**: Your payment processor has **zero imports** of error handling code. Different teams can own different pipelines. Error handling logic is completely separated from business logic.
-
-### This Pattern Scales to Everything
-
-Once you see it, you can't unsee it. **Every scattered conditional in your codebase is a pipeline waiting to happen:**
-
-```go
-// A/B testing? Pipeline.
-const testKey ExperimentKey = "checkout-flow-v2"
-experiment := pipz.GetContract[User](testKey)
-
-// Data validation? Pipeline.  
-const validationKey ValidationKey = "user-onboarding"
-validator := pipz.GetContract[SignupForm](validationKey)
-
-// Multi-tenant logic? Different pipelines per tenant.
-const tenantKey TenantKey = "enterprise-customer-123"
-processor := pipz.GetContract[Order](tenantKey)
-
-// Testing? Just another universe.
-const testKey PaymentKey = "test"
-testContract := pipz.GetContract[Payment](testKey)
-testContract.Register(
-    pipz.Apply(validatePayment),    // Real validation
-    pipz.Apply(checkFraud),         // Real business logic
-    pipz.Apply(mockChargeCard),     // Mock external API
-)
-// No mocking frameworks needed!
-```
-
-> 💡 **See [USE_CASES.md](USE_CASES.md) for complete examples including multi-tenant systems, A/B testing, data validation pipelines, testing patterns, and more.**
-
 ## Installation
 
 ```bash
@@ -176,23 +136,22 @@ go get github.com/zoobzio/pipz
 
 ## Quick Start
 
-### 5-Minute Guide to pipz
-
-1. **Define your types** - A key type for discovery and a data type to process:
+### 1. Define Your Data Types
 
 ```go
-type ValidationKey string    // Key type identifies the pipeline
-type User struct {          // Data type to process
+type User struct {
     Name  string
     Email string
     Age   int
 }
 ```
 
-2. **Write processor functions** - Just normal Go functions! No special interfaces or pipz imports needed:
+### 2. Write Processing Functions
+
+Write normal Go functions - no special interfaces needed:
 
 ```go
-// Validation functions: check data, return error if invalid
+// Validation function
 func checkEmail(u User) error {
     if !strings.Contains(u.Email, "@") {
         return fmt.Errorf("invalid email: %s", u.Email)
@@ -200,13 +159,13 @@ func checkEmail(u User) error {
     return nil
 }
 
-// Transform functions: always modify and return new data
+// Transform function
 func normalizeEmail(u User) User {
     u.Email = strings.ToLower(u.Email)
     return u
 }
 
-// Business logic functions: pure logic, no pipz knowledge
+// Conditional logic
 func applyDiscount(u User) User {
     u.Discount = 0.10  // 10% off
     return u
@@ -217,656 +176,208 @@ func isVIP(u User) bool {
 }
 ```
 
-**Key insight**: These are just regular Go functions that work with your domain types. They don't import pipz, don't know about pipelines, and can be unit tested independently!
-
-3. **Wrap with adapters and register** - Adapters tell pipz how to use your functions:
+### 3. Create and Use a Pipeline
 
 ```go
-const validationKey ValidationKey = "v1"
-contract := pipz.GetContract[User](validationKey)
-contract.Register(
-    pipz.Validate(checkEmail),               // Check without modifying
-    pipz.Transform(normalizeEmail),          // Always modify
-    pipz.Mutate(applyDiscount, isVIP),      // Conditionally modify
-    pipz.Effect(func(u User) error {         // Side effects
+// Create a pipeline
+userPipeline := pipz.NewContract[User]()
+userPipeline.Register(
+    pipz.Validate(checkEmail),           // Check without modifying
+    pipz.Transform(normalizeEmail),      // Always modify
+    pipz.Mutate(applyDiscount, isVIP),  // Conditionally modify
+    pipz.Effect(func(u User) error {     // Side effects
         log.Printf("Processed user: %s", u.Email)
         return nil
     }),
 )
-```
 
-**What just happened?**
-- `pipz.Validate(checkEmail)` wraps your `func(User) error` 
-- `pipz.Transform(normalizeEmail)` wraps your `func(User) User`
-- `pipz.Mutate(applyDiscount, isVIP)` wraps your transform + condition functions
-- `pipz.Effect(...)` wraps functions that do side effects
-
-**Behind the scenes**: pipz handles all serialization. Your functions work with concrete types, not bytes!
-
-4. **Use it anywhere** - No imports needed, just the types:
-
-```go
-// In a completely different package...
-const validationKey ValidationKey = "v1"
-contract := pipz.GetContract[User](validationKey)
-user, err := contract.Process(User{
+// Process data
+user, err := userPipeline.Process(User{
     Name:  "john doe",
     Email: "JOHN@EXAMPLE.COM",
     Age:   25,
 })
-// Result: {Name:"John Doe" Email:"john@example.com" Age:25}
+// Result: {Name:"john doe" Email:"john@example.com" Age:25}
 ```
 
-That's it! The pipeline is globally discoverable through the type system.
+## Adapters
 
-### The Magic: Type-Based Discovery
+pipz provides adapters to wrap your functions based on their behavior:
 
+### Transform
+Always modifies the data:
 ```go
-// team_a/auth.go
-type AuthKey string
-const authKey AuthKey = "v1"
-contract := pipz.GetContract[User](authKey)
-contract.Register(
-    pipz.Apply(checkPassword),
-    pipz.Apply(checkMFA),
-    pipz.Apply(auditLogin),
+pipz.Transform(func(u User) User {
+    u.Name = strings.Title(u.Name)
+    return u
+})
+```
+
+### Apply
+Can fail with an error:
+```go
+pipz.Apply(func(u User) (User, error) {
+    if u.Age < 0 {
+        return u, errors.New("invalid age")
+    }
+    u.Verified = true
+    return u, nil
+})
+```
+
+### Validate
+Checks without modifying:
+```go
+pipz.Validate(func(u User) error {
+    if u.Email == "" {
+        return errors.New("email required")
+    }
+    return nil
+})
+```
+
+### Mutate
+Conditionally modifies:
+```go
+pipz.Mutate(
+    func(u User) User { u.Score *= 2; return u },  // transformer
+    func(u User) bool { return u.IsVIP },          // condition
 )
-
-// team_b/api.go - No import of team_a needed!
-type AuthKey string  // Same type name
-const authKey AuthKey = "v1"
-contract := pipz.GetContract[User](authKey)
-user, _ := contract.Process(loginRequest)  // Same pipeline!
 ```
 
-If you know the types, you have the pipeline. No dependency injection, no singletons, no configuration.
-
-## Philosophy: Types Instead of Logic
-
-pipz represents a fundamental shift in how we organize code:
-
-- **Traditional**: Business logic scattered in if/else statements
-- **pipz**: Business logic encoded in the type system
-
+### Effect
+Side effects without modification:
 ```go
-// ❌ Traditional: Runtime conditionals everywhere
-if customer.Type == "premium" {
-    processPremiumOrder(order)
-} else if customer.Type == "standard" {
-    processStandardOrder(order)
-}
-
-// ✅ pipz: Behavior determined by types
-const premiumKey PremiumKey = "v1"
-const standardKey StandardKey = "v1"
-premiumContract := pipz.GetContract[Order](premiumKey)
-standardContract := pipz.GetContract[Order](standardKey)
+pipz.Effect(func(u User) error {
+    metrics.RecordUser(u)
+    return nil
+})
 ```
 
-**The deeper insight**: Most if/else statements in business logic are just routing decisions. With pipz, the type system becomes your router. No more switch statements checking user roles, customer tiers, regions, or versions - just pass the right type and get the right behavior.
-
-### Key Principles
-
-1. **Isolation MEANS Isolation**: Different type universes cannot see or affect each other. Period.
-2. **Types Are Configuration**: No YAML, no JSON, no environment variables. Just Go types.
-3. **Zero Magic**: Everything is explicit. Want observability? Add it yourself:
-   ```go
-   func RegisterPaymentPipeline() {
-       const paymentKey PaymentKey = "v1"
-       contract := pipz.GetContract[Payment](paymentKey)
-       contract.Register(
-           pipz.Apply(validate),
-           pipz.Apply(charge),
-           pipz.Apply(notify),
-       )
-
-       // Your app's concern, not pipz's
-       logger.Info("Payment pipeline v1 registered")
-   }
-   ```
-4. **Ephemeral by Design**: pipz doesn't manage lifecycle. It's a pattern, not a framework.
-
-## See It In Action
-
-Want to see pipz in action before diving into code? Run the interactive demos:
-
-```bash
-go run ./demo all         # Run all demos
-go run ./demo security    # Security audit pipeline
-go run ./demo transform   # Data transformation
-go run ./demo universes   # Multi-tenant isolation
-go run ./demo validation  # Data validation
-go run ./demo workflow    # Multi-stage workflows
-go run ./demo middleware  # Request middleware
-go run ./demo errors      # Error handling pipelines
-go run ./demo versioning  # Pipeline versioning & A/B/C testing
-go run ./demo testing     # Testing without mocks
-
-# For a more engaging experience with typewriter effects:
-go run ./demo all --interactive
-```
-
-## Complete Example
-
+### Enrich
+Best-effort data enhancement:
 ```go
-package main
-
-import (
-    "fmt"
-    "strings"
-    "github.com/zoobzio/pipz"
-)
-
-// Define a contract key type
-type UserProcessorKey string
-
-// Define your data type
-type User struct {
-    Name  string
-    Email string
-    Age   int
-}
-
-func main() {
-    // Get a contract
-    const userProcessorKey UserProcessorKey = "v1"
-    contract := pipz.GetContract[User](userProcessorKey)
-
-    // Register processors
-    contract.Register(
-        pipz.Apply(normalizeEmail),
-        pipz.Apply(validateAge),
-        pipz.Apply(formatName),
-    )
-
-    // Process data
-    user := User{Name: "john doe", Email: "JOHN@EXAMPLE.COM", Age: 25}
-    result, err := contract.Process(user)
+pipz.Enrich(func(u User) (User, error) {
+    profile, err := fetchProfile(u.ID)
     if err != nil {
-        panic(err)
+        return u, err  // Original data continues
     }
-
-    fmt.Printf("%+v\n", result)
-    // Output: {Name:John Doe Email:john@example.com Age:25}
-}
-
-func normalizeEmail(u User) (User, error) {
-    u.Email = strings.ToLower(u.Email)
+    u.Profile = profile
     return u, nil
-}
-
-func validateAge(u User) (User, error) {
-    if u.Age < 0 || u.Age > 150 {
-        return u, fmt.Errorf("invalid age: %d", u.Age)
-    }
-    return u, nil
-}
-
-func formatName(u User) (User, error) {
-    // Title case each word in the name
-    words := strings.Fields(strings.ToLower(u.Name))
-    for i, word := range words {
-        if len(word) > 0 {
-            words[i] = strings.ToUpper(word[:1]) + word[1:]
-        }
-    }
-    u.Name = strings.Join(words, " ")
-    return u, nil
-}
+})
 ```
 
-## API Reference
+## Composing Pipelines
 
-### Core Types
-
-| Type                            | Description                                                  |
-| ------------------------------- | ------------------------------------------------------------ |
-| `Processor[T any]`              | Function type that transforms `T` to `T` with possible error |
-| `Contract[K comparable, T any]` | Type-safe pipeline bound to key type `K` and data type `T`   |
-| `Chainable[T any]`              | Interface for components that can process type `T`           |
-| `Chain[T any]`                  | Sequential executor for multiple `Chainable[T]` components   |
-| `ByteProcessor`                 | Low-level function type for byte transformations             |
-
-### Contract Methods
-
-| Method                                 | Description                                     |
-| -------------------------------------- | ----------------------------------------------- |
-| `GetContract[T](key K)`                | Gets or creates a contract with given key       |
-| `Register(processors ...Processor[T])` | Registers processors to the contract's pipeline |
-| `Process(value T) (T, error)`          | Executes the pipeline on input value            |
-| `Link() Chainable[T]`                  | Returns contract as chainable for composition   |
-| `String() string`                      | Returns string representation of contract       |
-
-### Chain Methods
-
-| Method                            | Description                                   |
-| --------------------------------- | --------------------------------------------- |
-| `NewChain[T]()`                   | Creates a new empty chain                     |
-| `Add(processors ...Chainable[T])` | Adds chainable processors to the chain        |
-| `Process(value T) (T, error)`     | Executes all processors sequentially in order |
-
-### Utility Functions
-
-| Function                                       | Description                                   |
-| ---------------------------------------------- | --------------------------------------------- |
-| `Signature[T any](key K) string`               | Returns unique signature for contract K:key:T |
-
-## Concepts
-
-### Contracts
-
-Contracts provide type-safe access to processing pipelines. They are identified by two generic parameters:
-
-- `K`: A comparable type serving as the contract's domain identifier
-- `T`: The data type being processed
-
-The combination of `K`, its value, and `T` creates a globally unique pipeline identifier.
-
-### Type-Based Discovery
-
-By using concrete types as keys, contracts become discoverable through type information alone:
+Use chains to combine multiple pipelines:
 
 ```go
-type AuthKey string
-type ValidationKey string
+// Create separate pipelines
+validationPipeline := pipz.NewContract[Order]()
+validationPipeline.Register(/* validators */)
 
-// Different contracts for different purposes
-const authKey AuthKey = "v1"
-const validationKey ValidationKey = "v1"
-authContract := pipz.GetContract[User](authKey)
-validationContract := pipz.GetContract[User](validationKey)
+enrichmentPipeline := pipz.NewContract[Order]()
+enrichmentPipeline.Register(/* enrichers */)
 
-// Anyone with AuthKey and User types can retrieve the same pipeline
-const authKey AuthKey = "v1"
-contract := pipz.GetContract[User](authKey)
-```
+auditPipeline := pipz.NewContract[Order]()
+auditPipeline.Register(/* auditors */)
 
-### Type Universes
-
-**Type Universes are the killer feature of pipz.** They let you create completely isolated processing pipelines for different contexts using the same data types.
-
-#### The Concept
-
-The KEY TYPE determines which pipeline you get. Even if two pipelines use the same key value and process the same data type, different key types create different universes:
-
-```go
-type StandardKey string
-type PremiumKey string
-
-// Same key value "v1", same data type Transaction
-// But COMPLETELY DIFFERENT pipelines!
-const standardKey StandardKey = "v1"
-const premiumKey PremiumKey = "v1"
-standard := pipz.GetContract[Transaction](standardKey)
-premium := pipz.GetContract[Transaction](premiumKey)
-```
-
-#### Real-World Example: Multi-Tenant Payment Processing
-
-```go
-// Define separate key types for each merchant tier
-type StandardMerchantKey string
-type PremiumMerchantKey string
-type HighRiskMerchantKey string
-
-// All process the same Transaction type
-type Transaction struct {
-    ID       string
-    Amount   float64
-    Currency string
-    CardLast4 string
-}
-
-// Standard merchants: basic fraud checks
-const standardMerchantKey StandardMerchantKey = "v1"
-standardContract := pipz.GetContract[Transaction](standardMerchantKey)
-standardContract.Register(
-    pipz.Apply(validateAmount),      // Max $10,000
-    pipz.Apply(checkVelocity),      // 10 transactions/hour
-    pipz.Apply(notifyMerchant),
+// Compose them
+orderChain := pipz.NewChain[Order]()
+orderChain.Add(
+    validationPipeline.Link(),
+    enrichmentPipeline.Link(),
+    auditPipeline.Link(),
 )
 
-// Premium merchants: relaxed limits, priority processing
-const premiumMerchantKey PremiumMerchantKey = "v1"
-premiumContract := pipz.GetContract[Transaction](premiumMerchantKey)
-premiumContract.Register(
-    pipz.Apply(validatePremiumAmount),  // Max $100,000
-    pipz.Apply(checkPremiumVelocity),  // 100 transactions/hour
-    pipz.Apply(prioritySettle),        // Same-day settlement
-    pipz.Apply(notifyPremium),         // SMS + Email alerts
-)
-
-// High-risk merchants: enhanced security
-const highRiskMerchantKey HighRiskMerchantKey = "v1"
-highRiskContract := pipz.GetContract[Transaction](highRiskMerchantKey)
-highRiskContract.Register(
-    pipz.Apply(validate3DS),           // Require 3D Secure
-    pipz.Apply(checkBlocklist),        // Enhanced fraud database
-    pipz.Apply(manualReview),          // Flag for human review
-    pipz.Apply(holdFunds),            // 7-day settlement hold
-    pipz.Apply(auditLog),             // Regulatory compliance
-)
-
-// Usage: Generic function - the KEY TYPE determines the pipeline!
-func processPayment[K comparable](key K, txn Transaction) (Transaction, error) {
-    contract := pipz.GetContract[Transaction](key)
-    return contract.Process(txn)
-}
-
-// The caller chooses the universe by passing the right key type:
-const standardKey StandardMerchantKey = "v1"
-const premiumKey PremiumMerchantKey = "v1"
-const highRiskKey HighRiskMerchantKey = "v1"
-result, err := processPayment(standardKey, txn)  // Standard pipeline
-result, err := processPayment(premiumKey, txn)   // Premium pipeline
-result, err := processPayment(highRiskKey, txn)  // High-risk pipeline
-
-// Even cleaner - let the merchant's key type drive the behavior:
-func (m Merchant) ProcessTransaction(txn Transaction) (Transaction, error) {
-    // Merchant has a key field that determines their universe
-    return processPayment(m.Key, txn)
-}
+// Process through the complete chain
+order, err := orderChain.Process(orderData)
 ```
 
-#### Why This Matters
+## Error Handling
 
-1. **Complete Isolation**: A bug in the high-risk pipeline CANNOT affect standard merchants
-2. **Type Safety**: You cannot accidentally process a high-risk transaction through the standard pipeline
-3. **Independent Development**: Teams can work on different pipelines without coordination
-4. **A/B Testing**: Run experiments without feature flags
-5. **Multi-tenancy**: Each customer gets their own processing universe
-
-#### Common Use Cases for Type Universes
+When a processor returns an error:
+- Pipeline execution stops immediately
+- The zero value of the type is returned
+- The error is propagated to the caller
 
 ```go
-// A/B Testing
-type StrategyAKey string
-type StrategyBKey string
-
-// Multi-region processing
-type USRegionKey string
-type EURegionKey string
-type APACRegionKey string
-
-// Environment separation
-type DevKey string
-type StagingKey string
-type ProductionKey string
-
-// API versioning
-type APIv1Key string
-type APIv2Key string
-type APIv3Key string
-
-// Customer tiers
-type FreeUserKey string
-type ProUserKey string
-type EnterpriseKey string
-```
-
-Each key type creates its own universe. The same code can behave completely differently based on which universe it's in.
-
-### Processing Model
-
-1. Processors are pure functions that transform data
-2. Each processor receives the output of the previous processor
-3. Processing stops on first error
-4. Original data is preserved if an error occurs
-
-### Composition
-
-Contracts can be composed into larger workflows using chains:
-
-```go
-chain := pipz.NewChain[User]()
-chain.Add(
-    validationContract.Link(),
-    enrichmentContract.Link(),
-    auditContract.Link(),
+pipeline := pipz.NewContract[User]()
+pipeline.Register(
+    pipz.Validate(checkAge),      // Returns error if age < 0
+    pipz.Transform(normalizeData), // Won't execute if validation fails
 )
 
-result, err := chain.Process(user)
+user, err := pipeline.Process(invalidUser)
+if err != nil {
+    // Handle error - user will be zero value
+}
 ```
-
-## How It Works
-
-### The Architecture
-
-pipz uses several techniques to provide its type-safe, discoverable pipeline system:
-
-#### 1. Global Registry Pattern
-
-A singleton service initialized at package import manages all pipelines:
-
-- Pipelines are stored as chains of `ByteProcessor` functions
-- Thread-safe with read/write mutex protection
-- Allows pipeline discovery from anywhere in your codebase
-
-#### 2. Smart Serialization
-
-Contracts intelligently handle data serialization:
-
-- Serialization only happens when absolutely necessary
-- Direct memory passing when possible
-- Automatic optimization for common patterns
-- Zero overhead for most use cases
-
-#### 3. Smart Type Caching
-
-Type reflection happens only once per type:
-
-- First use: `reflect.TypeOf()` captures type information
-- Subsequent uses: Returns cached string instantly
-- Thread-safe double-checked locking for performance
-
-### Thread Safety
-
-All operations are thread-safe:
-
-- Multiple goroutines can register pipelines concurrently
-- Multiple goroutines can process data through pipelines concurrently
-- Type cache is protected with read/write mutexes
-
-### Important Behaviors
-
-- **Contract Registration**: Registering processors to an existing contract **appends** to the existing pipeline
-- **Error Handling**: If any processor fails, the chain stops and returns the original input value with the error
-- **Isolation**: Each contract's processors are completely isolated via gob copying
 
 ## Performance
 
-pipz is designed for real-world performance. Here are the key characteristics:
+pipz is designed for speed:
 
-### Quick Performance Summary
+- **Zero serialization overhead** - Direct function calls
+- **No reflection** at runtime
+- **No global locks** or state
+- **Minimal allocations**
 
-| Scenario | Throughput | Use Case |
-|----------|------------|----------|
-| Read-only validation | ~244k ops/sec | Input validation, auth checks |
-| Single transformation | ~138k ops/sec | Data normalization, enrichment |
-| Multi-step pipeline | ~73k ops/sec | Business rule chains |
-| Complex validation | ~15k ops/sec | Order processing, form validation |
-
-### Performance Features
-
-✅ **Minimal overhead**: ~200-500ns per operation  
-✅ **Smart caching**: Pipeline lookup is near-zero cost after first access  
-✅ **Read-only optimization**: Validation processors avoid serialization overhead  
-✅ **Predictable scaling**: Performance scales linearly with pipeline complexity  
-
-### When pipz is Fast
-
-- **Validation pipelines**: Read-only processors are highly optimized
-- **Small to medium data**: Serialization overhead is minimal
-- **Cached contracts**: Reusing contract references eliminates lookup costs
-
-### Real-World Impact
-
-**Web APIs**: 50-200μs additional latency per request (negligible)  
-**Batch processing**: 10k-100k records/sec depending on complexity  
-**Memory usage**: 2-5KB additional per operation
-
-> 📊 **See [benchmarks/README.md](benchmarks/README.md) for detailed performance analysis, optimization tips, and profiling guides.**
+Benchmarks show pipz adds only ~20-30ns overhead per processor compared to direct function calls. See [benchmarks/](benchmarks/) for detailed performance analysis.
 
 ## Best Practices
 
-### Use Constants for Contract Keys
-
-Instead of using string literals throughout your code, define constants:
-
-```go
-// Good
-const (
-    SecurityContractV1 = "v1"
-    SecurityContractV2 = "v2"
-)
-
-const securityKey SecurityKey = SecurityContractV1
-contract := pipz.GetContract[User](securityKey)
-
-// Avoid
-contract := pipz.GetContract[User](SecurityKey("v1"))
-```
-
-### Use Meaningful Key Types
-
-Your key types should describe the domain they represent:
-
-```go
-// Good - clearly indicates purpose
-type AuthenticationKey string
-type ValidationKey string
-type PersistenceKey string
-
-// Avoid - too generic
-type Key string
-type ProcessorKey string
-```
-
-### Embrace Type Proliferation
-
-Many key types is not a problem - it's the solution:
-
-```go
-// Each type represents different business logic
-type FreeUserKey string
-type PremiumUserKey string
-type EnterpriseUserKey string
-
-type USRegionKey string
-type EURegionKey string
-type APACRegionKey string
-
-type TestPaymentKey string
-type LivePaymentKey string
-```
-
-These types replace runtime conditionals with compile-time guarantees. You're moving business logic from if/else statements into the type system where it belongs.
-
-### Compose with Chains
-
-When combining multiple contracts, use a single `Add` call:
-
-```go
-// Good
-chain := pipz.NewChain[User]()
-chain.Add(
-    authContract.Link(),
-    validationContract.Link(),
-    auditContract.Link(),
-)
-
-// Avoid
-chain := pipz.NewChain[User]()
-chain.Add(authContract.Link())
-chain.Add(validationContract.Link())
-chain.Add(auditContract.Link())
-```
-
-### Keep Processors Pure
-
-Processors should be pure functions without side effects:
-
+### 1. Keep Processors Pure
 ```go
 // Good - pure function
-func validateAge(u User) (User, error) {
-    if u.Age < 0 || u.Age > 150 {
-        return u, fmt.Errorf("invalid age: %d", u.Age)
-    }
-    return u, nil
+func normalizeEmail(u User) User {
+    u.Email = strings.ToLower(u.Email)
+    return u
 }
 
 // Avoid - has side effects
-func validateAge(u User) (User, error) {
-    log.Printf("Validating user %s", u.Name) // Side effect!
-    if u.Age < 0 || u.Age > 150 {
-        return u, fmt.Errorf("invalid age: %d", u.Age)
-    }
-    return u, nil
+func normalizeEmail(u User) User {
+    log.Printf("Normalizing %s", u.Email) // Side effect!
+    u.Email = strings.ToLower(u.Email)
+    return u
 }
 ```
 
-### Error Messages Should Be Descriptive
+### 2. Use the Right Adapter
+- `Validate` for checks that don't modify data
+- `Transform` when you always modify
+- `Apply` when the operation might fail
+- `Effect` for logging, metrics, etc.
 
-Include context in your error messages:
-
-```go
-// Good
-return u, fmt.Errorf("age validation failed: %d is outside valid range (0-150)", u.Age)
-
-// Avoid
-return u, fmt.Errorf("invalid age")
-```
-
-## Common Questions
-
-### "What about the global state?"
-
-Isolation MEANS isolation. `TestKey("test-1")` and `TestKey("test-2")` create completely separate universes that cannot see each other. The global registry is an implementation detail - what matters is that universes are isolated.
-
-### "Won't I have too many key types?"
-
-That's the point! Each key type represents different business logic. Instead of runtime if/else statements, you encode behavior in types. Type proliferation is a feature, not a bug - it's compile-time business logic.
-
-### "How do I debug which processors are registered?"
-
-Add logging to your registration functions - pipz is ephemeral by design:
+### 3. Compose Small Pipelines
+Instead of one large pipeline, create focused pipelines and compose them:
 
 ```go
-func RegisterPaymentPipeline() {
-    const paymentKey PaymentKey = "v1"
-    contract := pipz.GetContract[Payment](paymentKey)
-    contract.Register(
-        pipz.Apply(validate),
-        pipz.Apply(charge),
-        pipz.Apply(notify),
-    )
-    log.Printf("Registered payment pipeline v1 with %d processors", 3)
-)
+// Good - focused, reusable pipelines
+validationPipeline := createValidationPipeline()
+transformPipeline := createTransformPipeline()
+auditPipeline := createAuditPipeline()
+
+// Bad - everything in one pipeline
+megaPipeline := pipz.NewContract[Data]()
+megaPipeline.Register(validate1, validate2, transform1, transform2, audit1, audit2)
 ```
 
-### "Is this just dependency injection?"
+## Examples
 
-No. DI containers use reflection, configuration, and runtime resolution. pipz uses types - if you know the types, you have the pipeline. No container, no interfaces, no magic.
+See the [examples](examples/) directory for complete examples:
+- **validation** - Order validation pipeline
+- **security** - Security audit and data redaction
+- **transform** - CSV to database transformation
+- **payment** - Payment processing with error handling
 
-## Documentation
+## When to Use pipz
 
-- [ADAPTERS.md](ADAPTERS.md) - Complete guide to using and creating adapters
-- [USE_CASES.md](USE_CASES.md) - Detailed use cases with live demonstrations
-
-Run the interactive demos to see pipz in action:
-
-```bash
-go run ./demo all         # Run all demos
-go run ./demo security    # Security audit pipeline
-go run ./demo transform   # Data transformation
-go run ./demo universes   # Multi-tenant isolation
-go run ./demo validation  # Data validation
-go run ./demo workflow    # Multi-stage workflows
-go run ./demo middleware  # Request middleware
-go run ./demo errors      # Error handling pipelines
-go run ./demo versioning  # Pipeline versioning & A/B/C testing
-go run ./demo testing     # Testing without mocks
-```
+pipz is perfect when you have:
+- ✅ Multi-step validation or transformation
+- ✅ Reusable middleware patterns
+- ✅ Complex error handling flows
+- ✅ ETL or data processing pipelines
 
 ## License
 

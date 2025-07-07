@@ -1,4 +1,4 @@
-module github.com/zoobzio/pipz/benchmarks
+module github.com/zoobzio/pipz/demos
 
 go 1.23
 

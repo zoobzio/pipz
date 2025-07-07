@@ -2,228 +2,141 @@ package pipz
 
 import (
 	"errors"
-	"fmt"
 	"testing"
 )
 
 func TestContract(t *testing.T) {
-	type TestKey string
 	type TestData struct {
 		Value int
 		Text  string
 	}
-	
-	const (
-		testContractKey    TestKey = "test-contract"
-		registerTestKey    TestKey = "register-test"
-		emptyTestKey       TestKey = "empty-test"
-		transformTestKey   TestKey = "transform-test"
-		nilTestKey         TestKey = "nil-test"
-		errorTestKey       TestKey = "error-test"
-		chainableTestKey   TestKey = "chainable-test"
-	)
-	
-	t.Run("GetContract", func(t *testing.T) {
-		contract := GetContract[TestData](testContractKey)
+
+	t.Run("NewContract", func(t *testing.T) {
+		contract := NewContract[TestData]()
 		if contract == nil {
-			t.Fatal("GetContract returned nil")
+			t.Fatal("NewContract returned nil")
 		}
-		if contract.key != testContractKey {
-			t.Errorf("expected key 'test-contract', got %v", contract.key)
+		if contract.processors == nil {
+			t.Fatal("processors slice not initialized")
 		}
-	})
-	
-	t.Run("RegisterProcessors", func(t *testing.T) {
-		contract := GetContract[TestData](registerTestKey)
-		
-		// Register should succeed with valid processors
-		err := contract.Register(
-			func(data TestData) ([]byte, error) {
-				data.Value++
-				return Encode(data)
-			},
-			func(data TestData) ([]byte, error) {
-				data.Text += "-processed"
-				return Encode(data)
-			},
-		)
-		
-		if err != nil {
-			t.Fatalf("Register failed: %v", err)
-		}
-		
-		// Test processing works after registration
-		input := TestData{Value: 10, Text: "test"}
-		output, err := contract.Process(input)
-		if err != nil {
-			t.Fatal(err)
-		}
-		
-		if output.Value != 11 {
-			t.Errorf("expected value 11, got %d", output.Value)
-		}
-		if output.Text != "test-processed" {
-			t.Errorf("expected text 'test-processed', got %s", output.Text)
+		if len(contract.processors) != 0 {
+			t.Errorf("expected empty processors, got %d", len(contract.processors))
 		}
 	})
-	
-	t.Run("RegisterEmptyProcessors", func(t *testing.T) {
-		contract := GetContract[TestData](emptyTestKey)
+
+	t.Run("Register", func(t *testing.T) {
+		contract := NewContract[TestData]()
 		
-		// Register with no processors should succeed
-		err := contract.Register()
-		if err != nil {
-			t.Fatal("Register with no processors should succeed")
+		processor1 := func(d TestData) (TestData, error) {
+			d.Value++
+			return d, nil
+		}
+		processor2 := func(d TestData) (TestData, error) {
+			d.Text += "!"
+			return d, nil
+		}
+		
+		contract.Register(processor1, processor2)
+		
+		if len(contract.processors) != 2 {
+			t.Errorf("expected 2 processors, got %d", len(contract.processors))
 		}
 	})
-	
-	t.Run("ProcessWithTransformation", func(t *testing.T) {
-		contract := GetContract[TestData](transformTestKey)
-		
-		contract.Register(func(data TestData) ([]byte, error) {
-			data.Value *= 2
-			data.Text = fmt.Sprintf("%s-%d", data.Text, data.Value)
-			return Encode(data)
-		})
-		
-		input := TestData{Value: 5, Text: "num"}
-		output, err := contract.Process(input)
-		if err != nil {
-			t.Fatal(err)
-		}
-		
-		if output.Value != 10 {
-			t.Errorf("expected value 10, got %d", output.Value)
-		}
-		if output.Text != "num-10" {
-			t.Errorf("expected text 'num-10', got %s", output.Text)
-		}
-	})
-	
-	t.Run("ProcessorReturnsNil", func(t *testing.T) {
-		contract := GetContract[TestData](nilTestKey)
-		
-		// Processor that returns nil (no modification)
-		contract.Register(func(data TestData) ([]byte, error) {
-			// Read-only processor - returns nil to indicate no change
-			if data.Value > 0 {
-				return nil, nil
-			}
-			data.Value = 100
-			return Encode(data)
-		})
-		
-		input := TestData{Value: 10, Text: "test"}
-		output, err := contract.Process(input)
-		if err != nil {
-			t.Fatal(err)
-		}
-		
-		// Should be unchanged since processor returned nil
-		if output.Value != 10 {
-			t.Errorf("expected value 10 (unchanged), got %d", output.Value)
-		}
-	})
-	
-	t.Run("ProcessErrorHandling", func(t *testing.T) {
-		contract := GetContract[TestData](errorTestKey)
-		
-		expectedErr := errors.New("processing failed")
+
+	t.Run("Process_Success", func(t *testing.T) {
+		contract := NewContract[TestData]()
 		contract.Register(
-			func(data TestData) ([]byte, error) {
-				data.Value++
-				return Encode(data)
+			func(d TestData) (TestData, error) {
+				d.Value *= 2
+				return d, nil
 			},
-			func(data TestData) ([]byte, error) {
-				return nil, expectedErr
+			func(d TestData) (TestData, error) {
+				d.Text = d.Text + "!"
+				return d, nil
+			},
+		)
+		
+		input := TestData{Value: 5, Text: "hello"}
+		result, err := contract.Process(input)
+		
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Value != 10 {
+			t.Errorf("expected Value 10, got %d", result.Value)
+		}
+		if result.Text != "hello!" {
+			t.Errorf("expected Text 'hello!', got '%s'", result.Text)
+		}
+	})
+
+	t.Run("Process_Error", func(t *testing.T) {
+		contract := NewContract[TestData]()
+		contract.Register(
+			func(d TestData) (TestData, error) {
+				d.Value++
+				return d, nil
+			},
+			func(d TestData) (TestData, error) {
+				return d, errors.New("processing failed")
+			},
+			func(d TestData) (TestData, error) {
+				// This should not be executed
+				d.Value = 999
+				return d, nil
 			},
 		)
 		
 		input := TestData{Value: 10, Text: "test"}
-		_, err := contract.Process(input)
+		result, err := contract.Process(input)
 		
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
-		
-		// The error should be wrapped in processing context
-		if !errors.Is(err, expectedErr) {
-			t.Errorf("expected error to wrap %v, got %v", expectedErr, err)
+		if err.Error() != "processing failed" {
+			t.Errorf("unexpected error: %v", err)
+		}
+		// Result should be zero value on error
+		if result.Value != 0 || result.Text != "" {
+			t.Error("expected zero value on error")
 		}
 	})
-	
-	t.Run("ContractAsChainable", func(t *testing.T) {
-		contract := GetContract[TestData](chainableTestKey)
-		contract.Register(func(data TestData) ([]byte, error) {
-			data.Value += 5
-			return Encode(data)
-		})
-		
-		// Use contract as a Chainable
-		chainable := contract.Link()
-		input := TestData{Value: 10, Text: "test"}
-		output, err := chainable.Process(input)
-		if err != nil {
-			t.Fatal(err)
-		}
-		
-		if output.Value != 15 {
-			t.Errorf("expected value 15, got %d", output.Value)
-		}
-	})
-}
 
-func TestContractGlobalRegistry(t *testing.T) {
-	type GlobalKey string
-	type GlobalData struct {
-		ID int
-	}
-	
-	const (
-		globalTestKey GlobalKey = "global-test"
-		sharedKey     GlobalKey = "shared"
-	)
-	
-	t.Run("ProcessThroughGlobalRegistry", func(t *testing.T) {
-		contract := GetContract[GlobalData](globalTestKey)
-		contract.Register(func(data GlobalData) ([]byte, error) {
-			data.ID = 42
-			return Encode(data)
-		})
+	t.Run("Process_EmptyPipeline", func(t *testing.T) {
+		contract := NewContract[TestData]()
 		
-		// Process through the contract (which uses global registry internally)
-		input := GlobalData{ID: 1}
-		output, err := contract.Process(input)
+		input := TestData{Value: 42, Text: "unchanged"}
+		result, err := contract.Process(input)
+		
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("unexpected error: %v", err)
 		}
-		
-		if output.ID != 42 {
-			t.Errorf("expected ID 42, got %d", output.ID)
+		if result != input {
+			t.Error("empty pipeline should return input unchanged")
 		}
 	})
-	
-	t.Run("MultipleContractsSameKey", func(t *testing.T) {
-		// Two contracts with same key should share the same pipeline
-		
-		contract1 := GetContract[GlobalData](sharedKey)
-		contract1.Register(func(data GlobalData) ([]byte, error) {
-			data.ID = 100
-			return Encode(data)
+
+	t.Run("Link", func(t *testing.T) {
+		contract := NewContract[TestData]()
+		contract.Register(func(d TestData) (TestData, error) {
+			d.Value = 100
+			return d, nil
 		})
 		
-		// Get the same contract again
-		contract2 := GetContract[GlobalData](sharedKey)
-		
-		// Process with second contract should use first contract's processors
-		input := GlobalData{ID: 1}
-		output, err := contract2.Process(input)
-		if err != nil {
-			t.Fatal(err)
+		chainable := contract.Link()
+		if chainable == nil {
+			t.Fatal("Link returned nil")
 		}
 		
-		if output.ID != 100 {
-			t.Errorf("expected ID 100, got %d", output.ID)
+		// Verify it works as Chainable
+		input := TestData{Value: 1, Text: "test"}
+		result, err := chainable.Process(input)
+		
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Value != 100 {
+			t.Errorf("expected Value 100, got %d", result.Value)
 		}
 	})
 }

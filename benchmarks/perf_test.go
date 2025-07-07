@@ -2,103 +2,249 @@ package benchmarks
 
 import (
 	"testing"
+	
 	"pipz"
 )
 
-// Simple test struct
+// Simple data structure for performance testing
 type PerfData struct {
 	ID    int
-	Name  string
-	Count int
+	Value string
+	Score float64
 }
 
-// Benchmark single processor pipeline
-func BenchmarkSingleProcessorPipeline(b *testing.B) {
-	type K string
-	const perfKey K = "perf"
-	
-	processor := func(d PerfData) ([]byte, error) {
-		d.Count++
-		return pipz.Encode(d)
+// Simple processors
+func doubleScore(d PerfData) PerfData {
+	d.Score *= 2
+	return d
+}
+
+func addPrefix(d PerfData) PerfData {
+	d.Value = "PREFIX_" + d.Value
+	return d
+}
+
+func incrementID(d PerfData) PerfData {
+	d.ID++
+	return d
+}
+
+// Benchmark pipz pipeline
+func BenchmarkPipzPipeline(b *testing.B) {
+	pipeline := pipz.NewContract[PerfData]()
+	pipeline.Register(
+		pipz.Transform(doubleScore),
+		pipz.Transform(addPrefix),
+		pipz.Transform(incrementID),
+	)
+
+	data := PerfData{
+		ID:    100,
+		Value: "test",
+		Score: 42.5,
 	}
-	
-	c := pipz.GetContract[PerfData](perfKey)
-	c.Register(processor)
-	
-	data := PerfData{ID: 1, Name: "test", Count: 0}
-	
+
 	b.ResetTimer()
+	
 	for i := 0; i < b.N; i++ {
-		c.Process(data)
-	}
-}
-
-// Benchmark three processor pipeline
-func BenchmarkThreeProcessorPipeline(b *testing.B) {
-	type K string
-	const threeKey K = "three"
-	
-	proc1 := func(d PerfData) ([]byte, error) {
-		d.Count++
-		return pipz.Encode(d)
-	}
-	
-	proc2 := func(d PerfData) ([]byte, error) {
-		if d.Count > 100 {
-			d.Name = "high"
+		_, err := pipeline.Process(data)
+		if err != nil {
+			b.Fatal(err)
 		}
-		return nil, nil // No change
-	}
-	
-	proc3 := func(d PerfData) ([]byte, error) {
-		d.ID = d.ID * 2
-		return pipz.Encode(d)
-	}
-	
-	c := pipz.GetContract[PerfData](threeKey)
-	c.Register(proc1, proc2, proc3)
-	
-	data := PerfData{ID: 1, Name: "test", Count: 0}
-	
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		c.Process(data)
 	}
 }
 
-// Benchmark read-only pipeline (validation)
-func BenchmarkReadOnlyPipeline(b *testing.B) {
-	type K string
-	const readonlyKey K = "readonly"
-	
-	validate1 := func(d PerfData) ([]byte, error) {
-		if d.ID <= 0 {
-			return nil, nil
-		}
-		return nil, nil
+// Benchmark direct function calls (baseline)
+func BenchmarkDirectCalls(b *testing.B) {
+	data := PerfData{
+		ID:    100,
+		Value: "test",
+		Score: 42.5,
 	}
-	
-	validate2 := func(d PerfData) ([]byte, error) {
-		if len(d.Name) == 0 {
-			return nil, nil
-		}
-		return nil, nil
-	}
-	
-	validate3 := func(d PerfData) ([]byte, error) {
-		if d.Count < 0 {
-			return nil, nil
-		}
-		return nil, nil
-	}
-	
-	c := pipz.GetContract[PerfData](readonlyKey)
-	c.Register(validate1, validate2, validate3)
-	
-	data := PerfData{ID: 1, Name: "test", Count: 10}
-	
+
 	b.ResetTimer()
+	
 	for i := 0; i < b.N; i++ {
-		c.Process(data)
+		result := doubleScore(data)
+		result = addPrefix(result)
+		result = incrementID(result)
+		_ = result
 	}
+}
+
+// Benchmark function slice approach
+func BenchmarkFunctionSlice(b *testing.B) {
+	processors := []func(PerfData) PerfData{
+		doubleScore,
+		addPrefix,
+		incrementID,
+	}
+
+	data := PerfData{
+		ID:    100,
+		Value: "test",
+		Score: 42.5,
+	}
+
+	b.ResetTimer()
+	
+	for i := 0; i < b.N; i++ {
+		result := data
+		for _, proc := range processors {
+			result = proc(result)
+		}
+		_ = result
+	}
+}
+
+// Benchmark interface approach
+type Processor interface {
+	Process(PerfData) PerfData
+}
+
+type scoreDoubler struct{}
+func (s scoreDoubler) Process(d PerfData) PerfData { return doubleScore(d) }
+
+type prefixAdder struct{}
+func (p prefixAdder) Process(d PerfData) PerfData { return addPrefix(d) }
+
+type idIncrementer struct{}
+func (i idIncrementer) Process(d PerfData) PerfData { return incrementID(d) }
+
+func BenchmarkInterfaceApproach(b *testing.B) {
+	processors := []Processor{
+		scoreDoubler{},
+		prefixAdder{},
+		idIncrementer{},
+	}
+
+	data := PerfData{
+		ID:    100,
+		Value: "test",
+		Score: 42.5,
+	}
+
+	b.ResetTimer()
+	
+	for i := 0; i < b.N; i++ {
+		result := data
+		for _, proc := range processors {
+			result = proc.Process(result)
+		}
+		_ = result
+	}
+}
+
+// Benchmark pipz with many processors
+func BenchmarkPipzManyProcessors(b *testing.B) {
+	pipeline := pipz.NewContract[PerfData]()
+	
+	// Register 10 processors
+	for i := 0; i < 10; i++ {
+		pipeline.Register(
+			pipz.Transform(doubleScore),
+			pipz.Transform(addPrefix),
+			pipz.Transform(incrementID),
+		)
+	}
+
+	data := PerfData{
+		ID:    100,
+		Value: "test",
+		Score: 42.5,
+	}
+
+	b.ResetTimer()
+	
+	for i := 0; i < b.N; i++ {
+		_, err := pipeline.Process(data)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// Benchmark chain performance
+func BenchmarkPipzChain(b *testing.B) {
+	// Create 3 separate pipelines
+	pipeline1 := pipz.NewContract[PerfData]()
+	pipeline1.Register(pipz.Transform(doubleScore))
+
+	pipeline2 := pipz.NewContract[PerfData]()
+	pipeline2.Register(pipz.Transform(addPrefix))
+
+	pipeline3 := pipz.NewContract[PerfData]()
+	pipeline3.Register(pipz.Transform(incrementID))
+
+	// Chain them
+	chain := pipz.NewChain[PerfData]()
+	chain.Add(pipeline1, pipeline2, pipeline3)
+
+	data := PerfData{
+		ID:    100,
+		Value: "test",
+		Score: 42.5,
+	}
+
+	b.ResetTimer()
+	
+	for i := 0; i < b.N; i++ {
+		_, err := chain.Process(data)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// Benchmark memory allocations
+func BenchmarkPipzAllocations(b *testing.B) {
+	pipeline := pipz.NewContract[PerfData]()
+	pipeline.Register(
+		pipz.Transform(doubleScore),
+		pipz.Transform(addPrefix),
+		pipz.Transform(incrementID),
+	)
+
+	data := PerfData{
+		ID:    100,
+		Value: "test",
+		Score: 42.5,
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	
+	for i := 0; i < b.N; i++ {
+		_, err := pipeline.Process(data)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// Benchmark parallel execution
+func BenchmarkPipzParallel(b *testing.B) {
+	pipeline := pipz.NewContract[PerfData]()
+	pipeline.Register(
+		pipz.Transform(doubleScore),
+		pipz.Transform(addPrefix),
+		pipz.Transform(incrementID),
+	)
+
+	data := PerfData{
+		ID:    100,
+		Value: "test",
+		Score: 42.5,
+	}
+
+	b.ResetTimer()
+	
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, err := pipeline.Process(data)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }

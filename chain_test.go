@@ -5,157 +5,174 @@ import (
 	"testing"
 )
 
-type TestData struct {
-	Value int
-	Name  string
+// mockChainable is a test implementation of Chainable
+type mockChainable[T any] struct {
+	processFunc func(T) (T, error)
 }
 
-// TestProcessor implements Chainable[TestData] for testing
-type TestProcessor struct {
-	processFunc func(TestData) (TestData, error)
-}
-
-func (p *TestProcessor) Process(data TestData) (TestData, error) {
-	return p.processFunc(data)
+func (m *mockChainable[T]) Process(value T) (T, error) {
+	return m.processFunc(value)
 }
 
 func TestChain(t *testing.T) {
-	
-	t.Run("EmptyChain", func(t *testing.T) {
+	type TestData struct {
+		Value int
+		Name  string
+	}
+
+	t.Run("NewChain", func(t *testing.T) {
 		chain := NewChain[TestData]()
-		
-		input := TestData{Value: 10, Name: "test"}
-		output, err := chain.Process(input)
-		if err != nil {
-			t.Fatal(err)
+		if chain == nil {
+			t.Fatal("NewChain returned nil")
 		}
-		
-		if output != input {
-			t.Error("empty chain should return input unchanged")
+		if chain.processors == nil {
+			t.Fatal("processors slice not initialized")
+		}
+		if len(chain.processors) != 0 {
+			t.Errorf("expected empty processors, got %d", len(chain.processors))
 		}
 	})
-	
-	t.Run("SingleProcessor", func(t *testing.T) {
+
+	t.Run("Add", func(t *testing.T) {
 		chain := NewChain[TestData]()
-		chain.Add(&TestProcessor{
-			processFunc: func(data TestData) (TestData, error) {
-				data.Value *= 2
-				return data, nil
+		
+		proc1 := &mockChainable[TestData]{
+			processFunc: func(d TestData) (TestData, error) {
+				d.Value++
+				return d, nil
 			},
-		})
-		
-		input := TestData{Value: 10, Name: "test"}
-		output, err := chain.Process(input)
-		if err != nil {
-			t.Fatal(err)
+		}
+		proc2 := &mockChainable[TestData]{
+			processFunc: func(d TestData) (TestData, error) {
+				d.Name += "!"
+				return d, nil
+			},
 		}
 		
-		if output.Value != 20 {
-			t.Errorf("expected value 20, got %d", output.Value)
+		result := chain.Add(proc1, proc2)
+		
+		// Verify fluent interface
+		if result != chain {
+			t.Error("Add should return the chain for fluent interface")
+		}
+		
+		if len(chain.processors) != 2 {
+			t.Errorf("expected 2 processors, got %d", len(chain.processors))
 		}
 	})
-	
-	t.Run("MultipleProcessors", func(t *testing.T) {
+
+	t.Run("Process_Success", func(t *testing.T) {
 		chain := NewChain[TestData]()
+		
 		chain.Add(
-			&TestProcessor{
-				processFunc: func(data TestData) (TestData, error) {
-					data.Value += 5
-					return data, nil
+			&mockChainable[TestData]{
+				processFunc: func(d TestData) (TestData, error) {
+					d.Value *= 2
+					return d, nil
 				},
 			},
-			&TestProcessor{
-				processFunc: func(data TestData) (TestData, error) {
-					data.Value *= 2
-					return data, nil
+			&mockChainable[TestData]{
+				processFunc: func(d TestData) (TestData, error) {
+					d.Name = d.Name + " processed"
+					return d, nil
 				},
 			},
-			&TestProcessor{
-				processFunc: func(data TestData) (TestData, error) {
-					data.Name = data.Name + "-processed"
-					return data, nil
+		)
+		
+		input := TestData{Value: 5, Name: "test"}
+		result, err := chain.Process(input)
+		
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Value != 10 {
+			t.Errorf("expected Value 10, got %d", result.Value)
+		}
+		if result.Name != "test processed" {
+			t.Errorf("expected Name 'test processed', got '%s'", result.Name)
+		}
+	})
+
+	t.Run("Process_Error", func(t *testing.T) {
+		chain := NewChain[TestData]()
+		
+		chain.Add(
+			&mockChainable[TestData]{
+				processFunc: func(d TestData) (TestData, error) {
+					d.Value++
+					return d, nil
+				},
+			},
+			&mockChainable[TestData]{
+				processFunc: func(d TestData) (TestData, error) {
+					return d, errors.New("chain failed")
+				},
+			},
+			&mockChainable[TestData]{
+				processFunc: func(d TestData) (TestData, error) {
+					// This should not execute
+					d.Value = 999
+					return d, nil
 				},
 			},
 		)
 		
 		input := TestData{Value: 10, Name: "test"}
-		output, err := chain.Process(input)
-		if err != nil {
-			t.Fatal(err)
-		}
-		
-		if output.Value != 30 { // (10 + 5) * 2
-			t.Errorf("expected value 30, got %d", output.Value)
-		}
-		if output.Name != "test-processed" {
-			t.Errorf("expected name 'test-processed', got %s", output.Name)
-		}
-	})
-	
-	t.Run("ProcessorError", func(t *testing.T) {
-		expectedErr := errors.New("processor failed")
-		chain := NewChain[TestData]()
-		chain.Add(
-			&TestProcessor{
-				processFunc: func(data TestData) (TestData, error) {
-					data.Value += 1
-					return data, nil
-				},
-			},
-			&TestProcessor{
-				processFunc: func(data TestData) (TestData, error) {
-					return data, expectedErr
-				},
-			},
-			&TestProcessor{
-				processFunc: func(data TestData) (TestData, error) {
-					// This should not be called
-					data.Value += 100
-					return data, nil
-				},
-			},
-		)
-		
-		input := TestData{Value: 10, Name: "test"}
-		output, err := chain.Process(input)
+		result, err := chain.Process(input)
 		
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
-		
-		if !errors.Is(err, expectedErr) {
-			t.Errorf("expected specific error, got %v", err)
+		if err.Error() != "chain failed" {
+			t.Errorf("unexpected error: %v", err)
 		}
-		
-		// On error, should return the original input
-		if output.Value != 10 {
-			t.Errorf("expected value 10 (original input), got %d", output.Value)
+		// Result should be zero value on error
+		if result.Value != 0 || result.Name != "" {
+			t.Error("expected zero value on error")
 		}
 	})
-	
-	t.Run("MethodChaining", func(t *testing.T) {
-		chain := NewChain[TestData]().
-			Add(&TestProcessor{
-				processFunc: func(data TestData) (TestData, error) {
-					data.Value++
-					return data, nil
-				},
-			}).
-			Add(&TestProcessor{
-				processFunc: func(data TestData) (TestData, error) {
-					data.Value *= 3
-					return data, nil
-				},
-			})
+
+	t.Run("Process_EmptyChain", func(t *testing.T) {
+		chain := NewChain[TestData]()
+		
+		input := TestData{Value: 42, Name: "unchanged"}
+		result, err := chain.Process(input)
+		
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result != input {
+			t.Error("empty chain should return input unchanged")
+		}
+	})
+
+	t.Run("Chain_With_Contracts", func(t *testing.T) {
+		// Create two contracts
+		contract1 := NewContract[TestData]()
+		contract1.Register(func(d TestData) (TestData, error) {
+			d.Value += 10
+			return d, nil
+		})
+		
+		contract2 := NewContract[TestData]()
+		contract2.Register(func(d TestData) (TestData, error) {
+			d.Value *= 2
+			return d, nil
+		})
+		
+		// Chain them together
+		chain := NewChain[TestData]()
+		chain.Add(contract1.Link(), contract2.Link())
 		
 		input := TestData{Value: 5, Name: "test"}
-		output, err := chain.Process(input)
-		if err != nil {
-			t.Fatal(err)
-		}
+		result, err := chain.Process(input)
 		
-		if output.Value != 18 { // (5 + 1) * 3
-			t.Errorf("expected value 18, got %d", output.Value)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// (5 + 10) * 2 = 30
+		if result.Value != 30 {
+			t.Errorf("expected Value 30, got %d", result.Value)
 		}
 	})
 }

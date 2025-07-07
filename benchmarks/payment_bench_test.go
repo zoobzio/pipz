@@ -6,115 +6,190 @@ import (
 	"time"
 	
 	"pipz"
-	"pipz/examples"
 )
 
-// BenchmarkPaymentPipeline tests the performance of a payment processing pipeline
-func BenchmarkPaymentPipeline(b *testing.B) {
-	// Setup
-	const paymentKey examples.PaymentKey = "bench-payment"
-	contract := pipz.GetContract[examples.Payment](paymentKey)
-	contract.Register(
-		pipz.Apply(examples.ValidatePayment),
-		pipz.Apply(examples.CheckFraud),
-		pipz.Apply(examples.UpdatePaymentStatus),
-	)
-	
-	// Test data - typical payment
-	payment := examples.Payment{
-		ID:            "PAY-123456",
-		Amount:        99.99,
-		Currency:      "USD",
-		CardNumber:    "1111",
-		CardLimit:     5000.00,
-		CustomerEmail: "customer@example.com",
-		CustomerPhone: "555-0123",
-		Status:        "initiated",
-		Attempts:      0,
+// Payment types
+type Payment struct {
+	ID            string
+	Amount        float64
+	Currency      string
+	CardNumber    string
+	Provider      string
+	Status        string
+	ProcessedAt   time.Time
+	RetryCount    int
+}
+
+// Payment processors
+func validatePayment(p Payment) (Payment, error) {
+	if p.Amount <= 0 {
+		return Payment{}, fmt.Errorf("invalid amount: %.2f", p.Amount)
+	}
+	if p.Currency == "" {
+		return Payment{}, fmt.Errorf("currency required")
+	}
+	if p.CardNumber == "" {
+		return Payment{}, fmt.Errorf("card information required")
+	}
+	return p, nil
+}
+
+func checkPaymentFraud(p Payment) (Payment, error) {
+	if p.Amount > 10000 {
+		return Payment{}, fmt.Errorf("amount exceeds fraud threshold")
+	}
+	return p, nil
+}
+
+func processPrimary(p Payment) (Payment, error) {
+	if p.Amount > 5000 {
+		return Payment{}, fmt.Errorf("primary provider: amount too large")
 	}
 	
+	p.Provider = "primary"
+	p.Status = "completed"
+	p.ProcessedAt = time.Now()
+	return p, nil
+}
+
+func processBackup(p Payment) (Payment, error) {
+	if p.Amount > 15000 {
+		return Payment{}, fmt.Errorf("backup provider: amount exceeds limit")
+	}
+	
+	p.Provider = "backup"
+	p.Status = "completed"
+	p.ProcessedAt = time.Now()
+	return p, nil
+}
+
+func BenchmarkPaymentPipeline(b *testing.B) {
+	// Setup pipeline
+	pipeline := pipz.NewContract[Payment]()
+	pipeline.Register(
+		pipz.Apply(validatePayment),
+		pipz.Apply(checkPaymentFraud),
+		pipz.Apply(processPrimary),
+	)
+
+	payment := Payment{
+		ID:         "PAY-BENCH",
+		Amount:     100.00,
+		Currency:   "USD",
+		CardNumber: "1234",
+	}
+
 	b.ResetTimer()
 	
-	// Benchmark
 	for i := 0; i < b.N; i++ {
-		_, err := contract.Process(payment)
+		_, err := pipeline.Process(payment)
 		if err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-// BenchmarkPaymentPipelineWithFraud tests performance with fraud detection triggered
-func BenchmarkPaymentPipelineWithFraud(b *testing.B) {
-	// Setup
-	const paymentKey examples.PaymentKey = "bench-payment-fraud"
-	contract := pipz.GetContract[examples.Payment](paymentKey)
-	contract.Register(
-		pipz.Apply(examples.ValidatePayment),
-		pipz.Apply(examples.CheckFraud),
-		pipz.Apply(examples.UpdatePaymentStatus),
+func BenchmarkPaymentWithFallback(b *testing.B) {
+	// Primary pipeline
+	primary := pipz.NewContract[Payment]()
+	primary.Register(
+		pipz.Apply(validatePayment),
+		pipz.Apply(checkPaymentFraud),
+		pipz.Apply(processPrimary),
 	)
 	
-	// Test data - high amount that triggers fraud check
-	payment := examples.Payment{
-		ID:            "PAY-999999",
-		Amount:        15000.00, // Triggers fraud detection
-		Currency:      "USD",
-		CardNumber:    "1111",
-		CardLimit:     20000.00,
-		CustomerEmail: "newcustomer@example.com",
-		CustomerPhone: "555-9999",
-		Status:        "initiated",
-		Attempts:      0, // First transaction triggers fraud check
+	// Backup pipeline
+	backup := pipz.NewContract[Payment]()
+	backup.Register(
+		pipz.Transform(func(p Payment) Payment {
+			p.RetryCount++
+			return p
+		}),
+		pipz.Apply(processBackup),
+	)
+
+	// Payment that fails primary
+	payment := Payment{
+		ID:         "PAY-BENCH",
+		Amount:     7500.00,
+		Currency:   "USD",
+		CardNumber: "5678",
 	}
-	
+
 	b.ResetTimer()
 	
-	// Benchmark
 	for i := 0; i < b.N; i++ {
-		_, err := contract.Process(payment)
+		_, err := primary.Process(payment)
 		if err != nil {
-			// Fraud detection returns error - this is expected
-			continue
+			// Fallback to backup
+			_, err = backup.Process(payment)
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
 	}
 }
 
-// BenchmarkPaymentErrorPipeline tests the error handling pipeline performance
-func BenchmarkPaymentErrorPipeline(b *testing.B) {
-	// Setup
-	const errorKey examples.PaymentErrorKey = "bench-error"
-	contract := pipz.GetContract[examples.PaymentError](errorKey)
-	contract.Register(
-		pipz.Apply(func(pe examples.PaymentError) (examples.PaymentError, error) {
-			// Categorize error
-			pe.ErrorType = "payment_failed"
-			pe.ErrorCode = "PF001"
-			return pe, nil
-		}),
-		pipz.Apply(func(pe examples.PaymentError) (examples.PaymentError, error) {
-			// Determine recovery
-			pe.RecoveryAttempted = true
-			pe.AlertLevel = "ops"
-			return pe, nil
-		}),
-	)
-	
-	// Test data
-	paymentError := examples.PaymentError{
-		Payment: examples.Payment{
-			ID:     "PAY-ERROR-001",
-			Amount: 50.00,
-		},
-		OriginalError: fmt.Errorf("insufficient funds"),
-		Timestamp:     time.Now(),
+func BenchmarkPaymentValidation(b *testing.B) {
+	payment := Payment{
+		ID:         "PAY-BENCH",
+		Amount:     100.00,
+		Currency:   "USD",
+		CardNumber: "1234",
 	}
 	
 	b.ResetTimer()
-	
-	// Benchmark
 	for i := 0; i < b.N; i++ {
-		_, err := contract.Process(paymentError)
+		_, err := validatePayment(payment)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkFraudCheck(b *testing.B) {
+	payment := Payment{
+		Amount: 5000.00,
+	}
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := checkPaymentFraud(payment)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkPaymentChain(b *testing.B) {
+	// Create validation pipeline
+	validator := pipz.NewContract[Payment]()
+	validator.Register(
+		pipz.Apply(validatePayment),
+		pipz.Apply(checkPaymentFraud),
+	)
+
+	// Create processing pipeline
+	processor := pipz.NewContract[Payment]()
+	processor.Register(
+		pipz.Apply(processPrimary),
+	)
+
+	// Chain them
+	chain := pipz.NewChain[Payment]()
+	chain.Add(validator, processor)
+
+	payment := Payment{
+		ID:         "PAY-BENCH",
+		Amount:     1000.00,
+		Currency:   "USD",
+		CardNumber: "9999",
+	}
+
+	b.ResetTimer()
+	
+	for i := 0; i < b.N; i++ {
+		_, err := chain.Process(payment)
 		if err != nil {
 			b.Fatal(err)
 		}

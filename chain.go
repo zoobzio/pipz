@@ -32,14 +32,15 @@ func (c *Chain[T]) Add(processors ...Chainable[T]) *Chain[T] {
 // Process executes all processors in the chain sequentially.
 // Each processor receives the output of the previous processor as input.
 // If any processor returns an error, execution stops immediately
-// and the original input value is returned along with the error.
+// and the zero value of T is returned along with the error.
 func (c *Chain[T]) Process(value T) (T, error) {
 	result := value
 	for _, processor := range c.processors {
 		var err error
 		result, err = processor.Process(result)
 		if err != nil {
-			return value, err
+			var zero T
+			return zero, err
 		}
 	}
 	return result, nil
