@@ -200,6 +200,29 @@ user, err := userPipeline.Process(User{
 // Result: {Name:"john doe" Email:"john@example.com" Age:25}
 ```
 
+## Core Concept: Processors
+
+pipz expects all processors to have the same signature:
+```go
+func(T) (T, error)
+```
+
+This uniform signature enables type-safe composition, but your functions might have different signatures. That's where adapters come in:
+
+```go
+// Your function signatures might vary:
+func normalize(u User) User { }           // No error return
+func validate(u User) error { }           // No data return
+func enrich(u User) (User, error) { }    // Already matches!
+
+// Adapters make them compatible:
+pipeline.Register(
+    pipz.Transform(normalize),  // Wraps to add error return
+    pipz.Validate(validate),    // Wraps to add data passthrough
+    pipz.Apply(enrich),        // Already matches, but makes intent clear
+)
+```
+
 ## Adapters
 
 pipz provides adapters to wrap your functions based on their behavior:
