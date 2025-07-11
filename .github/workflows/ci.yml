@@ -55,8 +55,7 @@ jobs:
         version: v1.61.0  # Pin version for consistency
         args: --config=.golangci.yml --timeout=5m
         skip-cache: false
-        skip-build-cache: false
-        skip-pkg-cache: false
+        skip-save-cache: false
     
     - name: Security Report
       if: always()
