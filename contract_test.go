@@ -26,7 +26,7 @@ func TestContract(t *testing.T) {
 
 	t.Run("Register", func(t *testing.T) {
 		contract := NewContract[TestData]()
-		
+
 		processor1 := func(d TestData) (TestData, error) {
 			d.Value++
 			return d, nil
@@ -35,9 +35,9 @@ func TestContract(t *testing.T) {
 			d.Text += "!"
 			return d, nil
 		}
-		
+
 		contract.Register(processor1, processor2)
-		
+
 		if len(contract.processors) != 2 {
 			t.Errorf("expected 2 processors, got %d", len(contract.processors))
 		}
@@ -51,14 +51,14 @@ func TestContract(t *testing.T) {
 				return d, nil
 			},
 			func(d TestData) (TestData, error) {
-				d.Text = d.Text + "!"
+				d.Text += "!"
 				return d, nil
 			},
 		)
-		
+
 		input := TestData{Value: 5, Text: "hello"}
 		result, err := contract.Process(input)
-		
+
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -86,10 +86,10 @@ func TestContract(t *testing.T) {
 				return d, nil
 			},
 		)
-		
+
 		input := TestData{Value: 10, Text: "test"}
 		result, err := contract.Process(input)
-		
+
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -104,10 +104,10 @@ func TestContract(t *testing.T) {
 
 	t.Run("Process_EmptyPipeline", func(t *testing.T) {
 		contract := NewContract[TestData]()
-		
+
 		input := TestData{Value: 42, Text: "unchanged"}
 		result, err := contract.Process(input)
-		
+
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -122,16 +122,16 @@ func TestContract(t *testing.T) {
 			d.Value = 100
 			return d, nil
 		})
-		
+
 		chainable := contract.Link()
 		if chainable == nil {
 			t.Fatal("Link returned nil")
 		}
-		
+
 		// Verify it works as Chainable
 		input := TestData{Value: 1, Text: "test"}
 		result, err := chainable.Process(input)
-		
+
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

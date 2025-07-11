@@ -20,7 +20,15 @@ demo:
 
 lint:
 	@echo "Running linters..."
-	@golangci-lint run
+	@golangci-lint run --config=.golangci.yml
+
+lint-security:
+	@echo "Running security-focused linters..."
+	@golangci-lint run --config=.golangci.yml --enable=gosec,errorlint,noctx,bodyclose,sqlclosecheck
+
+lint-fix:
+	@echo "Running linters with auto-fix..."
+	@golangci-lint run --config=.golangci.yml --fix
 
 coverage:
 	@echo "Generating coverage report..."

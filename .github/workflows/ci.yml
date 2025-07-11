@@ -52,8 +52,19 @@ jobs:
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v6
       with:
-        version: latest
-        args: --timeout=5m
+        version: v1.61.0  # Pin version for consistency
+        args: --config=.golangci.yml --timeout=5m
+        skip-cache: false
+        skip-build-cache: false
+        skip-pkg-cache: false
+    
+    - name: Security Report
+      if: always()
+      run: |
+        golangci-lint run --config=.golangci.yml --out-format=json > lint-report.json || true
+        echo "### Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+        echo "Linters with findings:" >> $GITHUB_STEP_SUMMARY
+        jq -r '.Issues[] | .FromLinter' lint-report.json 2>/dev/null | sort | uniq -c | sort -nr >> $GITHUB_STEP_SUMMARY || echo "No issues found ✅" >> $GITHUB_STEP_SUMMARY
 
   benchmark:
     name: Benchmark

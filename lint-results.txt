@@ -1,0 +1,68 @@
+level=warning msg="[config_reader] The configuration option `run.skip-dirs-use-default` is deprecated, please use `issues.exclude-dirs-use-default`."
+level=warning msg="[config_reader] The configuration option `linters.govet.check-shadowing` is deprecated. Please enable `shadow` instead, if you are not using `enable-all`."
+level=warning msg="The linter 'exportloopref' is deprecated (since v1.60.2) due to: Since Go1.22 (loopvar) this linter is no longer relevant. Replaced by copyloopvar."
+level=error msg="[linters_context] exportloopref: This linter is fully inactivated: it will not produce any reports."
+level=warning msg="[linters_context] gocritic: no need to enable check \"appendAssign\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"argOrder\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"assignOp\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"badCall\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"badCond\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"caseOrder\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"deprecatedComment\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"dupArg\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"dupBranchBody\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"dupCase\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"dupSubExpr\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"elseif\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"exitAfterDefer\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"ifElseChain\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"mapKey\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"newDeref\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"offBy1\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"regexpMust\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"singleCaseSwitch\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"sloppyLen\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"sloppyTypeAssert\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"switchTrue\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"typeSwitchVar\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"underef\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"unlambda\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"unslice\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"valSwap\": it's already enabled"
+level=warning msg="[linters_context] gocritic: no need to enable check \"wrapperFunc\": it's already enabled"
+chain_test.go:76:6: assignOp: replace `d.Name = d.Name + " processed"` with `d.Name += " processed"` (gocritic)
+					d.Name = d.Name + " processed"
+					^
+chain_test.go:173:3: commentedOutCode: may want to remove commented-out code (gocritic)
+		// (5 + 10) * 2 = 30
+		^
+contract_test.go:54:5: assignOp: replace `d.Text = d.Text + "!"` with `d.Text += "!"` (gocritic)
+				d.Text = d.Text + "!"
+				^
+chain_test.go:8:1: Comment should end in a period (godot)
+// mockChainable is a test implementation of Chainable
+^
+adapt.go:63:1: File is not properly formatted (gofmt)
+}
+^
+chain.go:47:1: File is not properly formatted (gofmt)
+}
+^
+contract.go:47:1: File is not properly formatted (gofmt)
+}
+^
+adapt_test.go:24:1: File is not properly formatted (gofmt)
+		
+^
+chain_test.go:38:1: File is not properly formatted (gofmt)
+		
+^
+contract_test.go:29:1: File is not properly formatted (gofmt)
+		
+^
+chain_test.go:18:16: fieldalignment: struct with 16 pointer bytes could be 8 (govet)
+	type TestData struct {
+	              ^
+contract_test.go:9:16: fieldalignment: struct with 16 pointer bytes could be 8 (govet)
+	type TestData struct {
+	              ^

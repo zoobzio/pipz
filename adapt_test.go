@@ -21,10 +21,10 @@ func TestAdapters(t *testing.T) {
 			u.Email = strings.ToLower(u.Email)
 			return u
 		})
-		
+
 		input := TestUser{Name: "john doe", Email: "JOHN@EXAMPLE.COM"}
 		result, err := processor(input)
-		
+
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -44,10 +44,10 @@ func TestAdapters(t *testing.T) {
 			u.Score = float64(u.Age) * 1.5
 			return u, nil
 		})
-		
+
 		input := TestUser{Age: 20}
 		result, err := processor(input)
-		
+
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -64,10 +64,10 @@ func TestAdapters(t *testing.T) {
 			u.Score = float64(u.Age) * 1.5
 			return u, nil
 		})
-		
+
 		input := TestUser{Age: -5}
 		_, err := processor(input)
-		
+
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -86,10 +86,10 @@ func TestAdapters(t *testing.T) {
 			}
 			return nil
 		})
-		
+
 		input := TestUser{Email: "test@example.com"}
 		result, err := processor(input)
-		
+
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -106,10 +106,10 @@ func TestAdapters(t *testing.T) {
 			}
 			return nil
 		})
-		
+
 		input := TestUser{Name: "test"}
 		result, err := processor(input)
-		
+
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -132,10 +132,10 @@ func TestAdapters(t *testing.T) {
 				return u.Name == "VIP"
 			},
 		)
-		
+
 		input := TestUser{Name: "VIP", Score: 100}
 		result, err := processor(input)
-		
+
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -154,10 +154,10 @@ func TestAdapters(t *testing.T) {
 				return u.Name == "VIP"
 			},
 		)
-		
+
 		input := TestUser{Name: "regular", Score: 100}
 		result, err := processor(input)
-		
+
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -177,10 +177,10 @@ func TestAdapters(t *testing.T) {
 			// Simulate logging
 			return nil
 		})
-		
+
 		input := TestUser{ID: "123", Name: "test"}
 		result, err := processor(input)
-		
+
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -200,10 +200,10 @@ func TestAdapters(t *testing.T) {
 			}
 			return nil
 		})
-		
+
 		input := TestUser{Name: "test"}
 		result, err := processor(input)
-		
+
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -223,10 +223,10 @@ func TestAdapters(t *testing.T) {
 			u.Score = 100.0
 			return u, nil
 		})
-		
+
 		input := TestUser{ID: "123", Name: "john"}
 		result, err := processor(input)
-		
+
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -242,10 +242,10 @@ func TestAdapters(t *testing.T) {
 		processor := Enrich(func(u TestUser) (TestUser, error) {
 			return u, errors.New("enrichment service unavailable")
 		})
-		
+
 		input := TestUser{ID: "123", Name: "john", Score: 50}
 		result, err := processor(input)
-		
+
 		if err != nil {
 			t.Fatal("Enrich should not fail the pipeline")
 		}
