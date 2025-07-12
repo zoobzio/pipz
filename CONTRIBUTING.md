@@ -31,11 +31,61 @@ make coverage
 - Keep the API simple and focused
 - Maintain 100% test coverage
 
+## Commit Convention
+
+This project uses [Conventional Commits](https://www.conventionalcommits.org/) for automatic semantic versioning.
+
+### Commit Message Format
+
+```
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+```
+
+### Types
+
+- **feat**: A new feature (triggers MINOR version bump)
+- **fix**: A bug fix (triggers PATCH version bump)
+- **docs**: Documentation only changes
+- **style**: Changes that don't affect code meaning (formatting, etc.)
+- **refactor**: Code changes that neither fix bugs nor add features
+- **perf**: Performance improvements
+- **test**: Adding or updating tests
+- **chore**: Changes to build process or auxiliary tools
+
+### Breaking Changes
+
+Add `BREAKING CHANGE:` in the commit footer or `!` after the type/scope to trigger a MAJOR version bump:
+
+```
+feat!: remove deprecated API endpoints
+
+BREAKING CHANGE: The /v1/users endpoint has been removed
+```
+
+### Examples
+
+```bash
+# Patch release (0.0.1 -> 0.0.2)
+git commit -m "fix: correct validation logic in pipeline processor"
+
+# Minor release (0.0.2 -> 0.1.0)
+git commit -m "feat: add support for parallel execution"
+
+# Major release (0.1.0 -> 1.0.0)
+git commit -m "feat!: redesign configuration format
+
+BREAKING CHANGE: Config files now use YAML instead of JSON"
+```
+
 ## Submitting Changes
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
+3. Commit your changes using conventional commits
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 

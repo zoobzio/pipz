@@ -2,8 +2,9 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -14,25 +15,58 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch all history for svu
     
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
         go-version: '1.23'
     
+    - name: Install svu
+      run: go install github.com/caarlos0/svu@latest
+    
     - name: Run tests
       run: go test -v ./...
     
+    - name: Calculate next version
+      id: version
+      run: |
+        NEXT_VERSION=$(svu next)
+        echo "next_version=$NEXT_VERSION" >> $GITHUB_OUTPUT
+        echo "Next version will be: $NEXT_VERSION"
+    
+    - name: Check if tag exists
+      id: check_tag
+      run: |
+        if git rev-parse "${{ steps.version.outputs.next_version }}" >/dev/null 2>&1; then
+          echo "exists=true" >> $GITHUB_OUTPUT
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Create tag
+      if: steps.check_tag.outputs.exists == 'false'
+      run: |
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+        git tag -a "${{ steps.version.outputs.next_version }}" -m "Release ${{ steps.version.outputs.next_version }}"
+        git push origin "${{ steps.version.outputs.next_version }}"
+    
+    - name: Generate changelog
+      id: changelog
+      run: |
+        echo "## What's Changed" > changelog.md
+        git log --pretty=format:"* %s (%h)" $(git describe --tags --abbrev=0 2>/dev/null || echo "")..HEAD >> changelog.md
+    
     - name: Create Release
+      if: steps.check_tag.outputs.exists == 'false'
       uses: actions/create-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ github.ref }}
-        release_name: Release ${{ github.ref }}
+        tag_name: ${{ steps.version.outputs.next_version }}
+        release_name: Release ${{ steps.version.outputs.next_version }}
         draft: false
         prerelease: false
-        body: |
-          ## Changes in this Release
-          
-          See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ github.ref }}/CHANGELOG.md) for details.
+        body_path: changelog.md
