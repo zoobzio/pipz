@@ -1,0 +1,123 @@
+name: Update Changelog
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-changelog:
+    name: Update CHANGELOG.md
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch all history for changelog generation
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.23'
+    
+    - name: Install svu
+      run: go install github.com/caarlos0/svu@latest
+    
+    - name: Get current version
+      id: current_version
+      run: |
+        CURRENT_VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+        echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+        echo "Current version: $CURRENT_VERSION"
+    
+    - name: Calculate next version
+      id: next_version
+      run: |
+        NEXT_VERSION=$(svu next)
+        echo "next_version=$NEXT_VERSION" >> $GITHUB_OUTPUT
+        echo "Next version will be: $NEXT_VERSION"
+    
+    - name: Generate changelog entry
+      id: changelog
+      run: |
+        # Create temporary file for new changelog entry
+        echo "## [${{ steps.next_version.outputs.next_version }}] - $(date +%Y-%m-%d)" > new_entry.md
+        echo "" >> new_entry.md
+        
+        # Group commits by type
+        echo "### Added" >> new_entry.md
+        git log --pretty=format:"- %s" ${{ steps.current_version.outputs.current_version }}..HEAD | grep -E "^- (feat|add):" | sed 's/^- feat: /- /' | sed 's/^- add: /- /' >> new_entry.md || true
+        
+        echo "" >> new_entry.md
+        echo "### Changed" >> new_entry.md
+        git log --pretty=format:"- %s" ${{ steps.current_version.outputs.current_version }}..HEAD | grep -E "^- (change|update|refactor):" | sed 's/^- change: /- /' | sed 's/^- update: /- /' | sed 's/^- refactor: /- /' >> new_entry.md || true
+        
+        echo "" >> new_entry.md
+        echo "### Fixed" >> new_entry.md
+        git log --pretty=format:"- %s" ${{ steps.current_version.outputs.current_version }}..HEAD | grep -E "^- (fix|bugfix):" | sed 's/^- fix: /- /' | sed 's/^- bugfix: /- /' >> new_entry.md || true
+        
+        echo "" >> new_entry.md
+        echo "### Security" >> new_entry.md
+        git log --pretty=format:"- %s" ${{ steps.current_version.outputs.current_version }}..HEAD | grep -E "^- (security|sec):" | sed 's/^- security: /- /' | sed 's/^- sec: /- /' >> new_entry.md || true
+        
+        echo "" >> new_entry.md
+        
+        # Clean up empty sections
+        sed -i '/^### Added$/,/^### /{/^### Added$/d; /^### /!d;}' new_entry.md
+        sed -i '/^### Changed$/,/^### /{/^### Changed$/d; /^### /!d;}' new_entry.md
+        sed -i '/^### Fixed$/,/^### /{/^### Fixed$/d; /^### /!d;}' new_entry.md
+        sed -i '/^### Security$/,/^$/{/^### Security$/d; /^$/!d;}' new_entry.md
+        
+        # Remove multiple empty lines
+        sed -i '/^$/N;/^\n$/d' new_entry.md
+    
+    - name: Update CHANGELOG.md
+      run: |
+        # Read the current changelog
+        if [ -f CHANGELOG.md ]; then
+          # Find the line number where [Unreleased] section ends
+          LINE_NUM=$(grep -n "^## \[" CHANGELOG.md | grep -v "Unreleased" | head -1 | cut -d: -f1)
+          
+          if [ -z "$LINE_NUM" ]; then
+            # No previous releases, append at the end
+            cat CHANGELOG.md > temp_changelog.md
+            echo "" >> temp_changelog.md
+            cat new_entry.md >> temp_changelog.md
+          else
+            # Insert new entry before the first release
+            head -n $((LINE_NUM-1)) CHANGELOG.md > temp_changelog.md
+            echo "" >> temp_changelog.md
+            cat new_entry.md >> temp_changelog.md
+            echo "" >> temp_changelog.md
+            tail -n +$LINE_NUM CHANGELOG.md >> temp_changelog.md
+          fi
+          
+          mv temp_changelog.md CHANGELOG.md
+        fi
+    
+    - name: Check if changes were made
+      id: check_changes
+      run: |
+        if git diff --quiet; then
+          echo "changed=false" >> $GITHUB_OUTPUT
+        else
+          echo "changed=true" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Create Pull Request
+      if: steps.check_changes.outputs.changed == 'true'
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: "chore: update CHANGELOG.md for ${{ steps.next_version.outputs.next_version }}"
+        title: "Update CHANGELOG.md for ${{ steps.next_version.outputs.next_version }}"
+        body: |
+          Automated changelog update for version ${{ steps.next_version.outputs.next_version }}
+          
+          This PR updates CHANGELOG.md with commits since ${{ steps.current_version.outputs.current_version }}
+        branch: update-changelog-${{ steps.next_version.outputs.next_version }}
+        delete-branch: true
