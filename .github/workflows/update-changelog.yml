@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'CHANGELOG.md'
+      - '.github/workflows/release.yml'
 
 permissions:
   contents: write
@@ -41,59 +44,68 @@ jobs:
         echo "next_version=$NEXT_VERSION" >> $GITHUB_OUTPUT
         echo "Next version will be: $NEXT_VERSION"
     
-    - name: Generate changelog entry
-      id: changelog
+    - name: Update Unreleased section
       run: |
-        # Create temporary file for new changelog entry
-        echo "## [${{ steps.next_version.outputs.next_version }}] - $(date +%Y-%m-%d)" > new_entry.md
-        echo "" >> new_entry.md
+        # Get commits since last tag
+        LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        
+        # Create temporary file for new entries
+        echo "" > new_entries.md
         
         # Group commits by type
-        echo "### Added" >> new_entry.md
-        git log --pretty=format:"- %s" ${{ steps.current_version.outputs.current_version }}..HEAD | grep -E "^- (feat|add):" | sed 's/^- feat: /- /' | sed 's/^- add: /- /' >> new_entry.md || true
+        echo "### Added" >> new_entries.md
+        git log --pretty=format:"- %s" ${LAST_TAG:+$LAST_TAG..}HEAD | grep -E "^(feat|add):" | sed 's/^feat: /- /' | sed 's/^add: /- /' >> new_entries.md || true
         
-        echo "" >> new_entry.md
-        echo "### Changed" >> new_entry.md
-        git log --pretty=format:"- %s" ${{ steps.current_version.outputs.current_version }}..HEAD | grep -E "^- (change|update|refactor):" | sed 's/^- change: /- /' | sed 's/^- update: /- /' | sed 's/^- refactor: /- /' >> new_entry.md || true
+        echo "" >> new_entries.md
+        echo "### Changed" >> new_entries.md
+        git log --pretty=format:"- %s" ${LAST_TAG:+$LAST_TAG..}HEAD | grep -E "^(change|update|refactor):" | sed 's/^change: /- /' | sed 's/^update: /- /' | sed 's/^refactor: /- /' >> new_entries.md || true
         
-        echo "" >> new_entry.md
-        echo "### Fixed" >> new_entry.md
-        git log --pretty=format:"- %s" ${{ steps.current_version.outputs.current_version }}..HEAD | grep -E "^- (fix|bugfix):" | sed 's/^- fix: /- /' | sed 's/^- bugfix: /- /' >> new_entry.md || true
+        echo "" >> new_entries.md
+        echo "### Fixed" >> new_entries.md
+        git log --pretty=format:"- %s" ${LAST_TAG:+$LAST_TAG..}HEAD | grep -E "^(fix|bugfix):" | sed 's/^fix: /- /' | sed 's/^bugfix: /- /' >> new_entries.md || true
         
-        echo "" >> new_entry.md
-        echo "### Security" >> new_entry.md
-        git log --pretty=format:"- %s" ${{ steps.current_version.outputs.current_version }}..HEAD | grep -E "^- (security|sec):" | sed 's/^- security: /- /' | sed 's/^- sec: /- /' >> new_entry.md || true
+        echo "" >> new_entries.md
+        echo "### Security" >> new_entries.md
+        git log --pretty=format:"- %s" ${LAST_TAG:+$LAST_TAG..}HEAD | grep -E "^(security|sec):" | sed 's/^security: /- /' | sed 's/^sec: /- /' >> new_entries.md || true
         
-        echo "" >> new_entry.md
+        echo "" >> new_entries.md
         
         # Clean up empty sections
-        sed -i '/^### Added$/,/^### /{/^### Added$/d; /^### /!d;}' new_entry.md
-        sed -i '/^### Changed$/,/^### /{/^### Changed$/d; /^### /!d;}' new_entry.md
-        sed -i '/^### Fixed$/,/^### /{/^### Fixed$/d; /^### /!d;}' new_entry.md
-        sed -i '/^### Security$/,/^$/{/^### Security$/d; /^$/!d;}' new_entry.md
+        sed -i '/^### Added$/,/^### /{/^### Added$/d; /^### /!d;}' new_entries.md
+        sed -i '/^### Changed$/,/^### /{/^### Changed$/d; /^### /!d;}' new_entries.md
+        sed -i '/^### Fixed$/,/^### /{/^### Fixed$/d; /^### /!d;}' new_entries.md
+        sed -i '/^### Security$/,/^$/{/^### Security$/d; /^$/!d;}' new_entries.md
         
         # Remove multiple empty lines
-        sed -i '/^$/N;/^\n$/d' new_entry.md
+        sed -i '/^$/N;/^\n$/d' new_entries.md
     
     - name: Update CHANGELOG.md
       run: |
-        # Read the current changelog
-        if [ -f CHANGELOG.md ]; then
-          # Find the line number where [Unreleased] section ends
-          LINE_NUM=$(grep -n "^## \[" CHANGELOG.md | grep -v "Unreleased" | head -1 | cut -d: -f1)
+        # Find where the Unreleased section content starts
+        UNRELEASED_LINE=$(grep -n "^## \[Unreleased\]" CHANGELOG.md | cut -d: -f1)
+        
+        if [ -n "$UNRELEASED_LINE" ]; then
+          # Find the next section (next version or end of file)
+          NEXT_SECTION_LINE=$(tail -n +$((UNRELEASED_LINE + 1)) CHANGELOG.md | grep -n "^## \[" | head -1 | cut -d: -f1)
           
-          if [ -z "$LINE_NUM" ]; then
-            # No previous releases, append at the end
-            cat CHANGELOG.md > temp_changelog.md
+          if [ -n "$NEXT_SECTION_LINE" ]; then
+            # Calculate actual line number
+            NEXT_SECTION_LINE=$((UNRELEASED_LINE + NEXT_SECTION_LINE))
+            
+            # Extract everything before Unreleased content
+            head -n $((UNRELEASED_LINE)) CHANGELOG.md > temp_changelog.md
             echo "" >> temp_changelog.md
-            cat new_entry.md >> temp_changelog.md
+            
+            # Add new entries
+            cat new_entries.md >> temp_changelog.md
+            
+            # Add everything after the Unreleased section
+            tail -n +$((NEXT_SECTION_LINE)) CHANGELOG.md >> temp_changelog.md
           else
-            # Insert new entry before the first release
-            head -n $((LINE_NUM-1)) CHANGELOG.md > temp_changelog.md
+            # No other versions, just append
+            head -n $((UNRELEASED_LINE)) CHANGELOG.md > temp_changelog.md
             echo "" >> temp_changelog.md
-            cat new_entry.md >> temp_changelog.md
-            echo "" >> temp_changelog.md
-            tail -n +$LINE_NUM CHANGELOG.md >> temp_changelog.md
+            cat new_entries.md >> temp_changelog.md
           fi
           
           mv temp_changelog.md CHANGELOG.md
@@ -114,5 +126,5 @@ jobs:
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
         git add CHANGELOG.md
-        git commit -m "chore: update CHANGELOG.md for ${{ steps.next_version.outputs.next_version }}"
+        git commit -m "chore: update CHANGELOG.md [skip ci]"
         git push
