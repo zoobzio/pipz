@@ -1,13 +1,13 @@
 // Package pipz provides a lightweight, type-safe library for building composable data processing pipelines in Go.
 //
-// Overview
+// # Overview
 //
 // pipz enables developers to create clean, testable, and maintainable data processing workflows
 // by composing small, focused functions into larger pipelines. It addresses common challenges
 // in Go applications such as scattered business logic, repetitive error handling, and
 // difficult-to-test code that mixes pure logic with external dependencies.
 //
-// Core Concepts
+// # Core Concepts
 //
 // The library is built around three main types:
 //
@@ -19,7 +19,7 @@
 // type safety through Go generics. Execution follows a fail-fast pattern where processing
 // stops at the first error.
 //
-// Adapter Functions
+// # Adapter Functions
 //
 // pipz provides several adapter functions to wrap common patterns:
 //
@@ -30,7 +30,7 @@
 //   - Effect: Side effects like logging or metrics
 //   - Enrich: Best-effort data enhancement
 //
-// Usage Example
+// # Usage Example
 //
 // Here's a simple example of building a user registration pipeline:
 //
@@ -67,7 +67,7 @@
 //	user := User{Email: "user@example.com", Password: "secret"}
 //	result, err := pipeline.Process(user)
 //
-// Benefits
+// # Benefits
 //
 // Using pipz provides several advantages:
 //
@@ -77,7 +77,7 @@
 //   - Type Safety: Compile-time type checking prevents runtime errors
 //   - Performance: Minimal overhead with zero allocations in hot paths
 //
-// Pipeline Patterns
+// # Pipeline Patterns
 //
 // pipz supports several common patterns:
 //
@@ -87,7 +87,7 @@
 //   - Parallel Composition: Build and compose independent pipelines
 //   - Side Effect Management: Use Effect for logging, metrics, or external calls
 //
-// Performance
+// # Performance
 //
 // The library is designed for minimal overhead:
 //
@@ -96,18 +96,18 @@
 //   - No reflection, locks, or global state
 //   - Predictable performance characteristics
 //
-// Best Practices
+// # Best Practices
 //
 // When using pipz:
 //
-//   1. Keep processors small and focused on a single responsibility
-//   2. Use the appropriate adapter for your use case
-//   3. Compose pipelines from reusable processors
-//   4. Test processors independently before composing
-//   5. Handle errors at the pipeline level, not within processors
-//   6. Use Effect for side effects to maintain processor purity
+//  1. Keep processors small and focused on a single responsibility
+//  2. Use the appropriate adapter for your use case
+//  3. Compose pipelines from reusable processors
+//  4. Test processors independently before composing
+//  5. Handle errors at the pipeline level, not within processors
+//  6. Use Effect for side effects to maintain processor purity
 //
-// Integration
+// # Integration
 //
 // pipz integrates well with existing Go code:
 //
