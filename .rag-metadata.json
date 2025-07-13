@@ -1,0 +1,208 @@
+{
+  "project": {
+    "name": "pipz",
+    "type": "library",
+    "language": "go",
+    "version": "0.2.1",
+    "description": "A lightweight, type-safe library for building composable data processing pipelines in Go",
+    "keywords": [
+      "pipeline",
+      "functional",
+      "composition",
+      "data-processing",
+      "middleware",
+      "go",
+      "golang",
+      "type-safe",
+      "error-handling",
+      "validation",
+      "transformation",
+      "etl",
+      "data-pipeline",
+      "functional-programming",
+      "chainable",
+      "composable"
+    ],
+    "use_cases": [
+      "data validation",
+      "data transformation",
+      "error handling",
+      "middleware composition",
+      "etl pipelines",
+      "request processing",
+      "business logic organization",
+      "functional composition"
+    ]
+  },
+  "architecture": {
+    "pattern": "functional pipeline",
+    "core_concepts": [
+      {
+        "name": "Processor",
+        "type": "function type",
+        "purpose": "Basic unit of computation that transforms data",
+        "signature": "func(T) (T, error)"
+      },
+      {
+        "name": "Contract",
+        "type": "struct",
+        "purpose": "Wraps a single processor for composition",
+        "methods": ["Process", "Then", "Link"]
+      },
+      {
+        "name": "Chain",
+        "type": "struct",
+        "purpose": "Sequences multiple processors for execution",
+        "methods": ["Process", "Then", "Link"]
+      },
+      {
+        "name": "Chainable",
+        "type": "interface",
+        "purpose": "Common interface for composable elements",
+        "methods": ["Process", "Then"]
+      }
+    ],
+    "adapter_functions": [
+      {
+        "name": "Transform",
+        "purpose": "Pure data transformations",
+        "error_handling": "never fails",
+        "use_case": "data formatting, calculations"
+      },
+      {
+        "name": "Validate",
+        "purpose": "Data validation without modification",
+        "error_handling": "fails on validation error",
+        "use_case": "input validation, business rules"
+      },
+      {
+        "name": "Apply",
+        "purpose": "Operations that might fail",
+        "error_handling": "propagates errors",
+        "use_case": "external calls, parsing"
+      },
+      {
+        "name": "Mutate",
+        "purpose": "Conditional transformations",
+        "error_handling": "never fails",
+        "use_case": "feature flags, conditional logic"
+      },
+      {
+        "name": "Effect",
+        "purpose": "Side effects without data modification",
+        "error_handling": "never fails",
+        "use_case": "logging, metrics, notifications"
+      },
+      {
+        "name": "Enrich",
+        "purpose": "Best-effort data enhancement",
+        "error_handling": "silently ignores errors",
+        "use_case": "optional enrichment, fallback data"
+      }
+    ]
+  },
+  "code_organization": {
+    "main_files": [
+      {
+        "file": "contract.go",
+        "purpose": "Defines Contract type and methods",
+        "exports": ["Contract", "NewContract"]
+      },
+      {
+        "file": "chain.go",
+        "purpose": "Defines Chain type and methods",
+        "exports": ["Chain", "NewChain", "Chainable"]
+      },
+      {
+        "file": "adapt.go",
+        "purpose": "Adapter functions for common patterns",
+        "exports": ["Transform", "Validate", "Apply", "Mutate", "Effect", "Enrich"]
+      },
+      {
+        "file": "types.go",
+        "purpose": "Core type definitions",
+        "exports": ["Processor"]
+      }
+    ],
+    "example_directories": [
+      {
+        "path": "examples/validation",
+        "description": "Order validation pipeline example"
+      },
+      {
+        "path": "examples/payment",
+        "description": "Payment processing pipeline example"
+      },
+      {
+        "path": "examples/security",
+        "description": "Security audit pipeline example"
+      },
+      {
+        "path": "examples/transform",
+        "description": "Data transformation pipeline example"
+      }
+    ],
+    "documentation_files": [
+      {
+        "file": "README.md",
+        "purpose": "Main project documentation",
+        "sections": ["installation", "quick-start", "concepts", "examples"]
+      },
+      {
+        "file": "USE_CASES.md",
+        "purpose": "Real-world use cases and patterns",
+        "sections": ["validation", "transformation", "integration", "testing"]
+      },
+      {
+        "file": "API_REFERENCE.md",
+        "purpose": "Complete API documentation",
+        "sections": ["types", "functions", "methods", "examples"]
+      },
+      {
+        "file": "CONCEPTS.md",
+        "purpose": "Architecture and design explanations",
+        "sections": ["pipeline-pattern", "error-handling", "composition", "performance"]
+      },
+      {
+        "file": "PATTERNS.md",
+        "purpose": "Common patterns and recipes",
+        "sections": ["validation", "transformation", "error-handling", "testing"]
+      }
+    ]
+  },
+  "search_hints": {
+    "common_queries": {
+      "how to validate data": ["Validate function", "validation examples", "PATTERNS.md#validation-patterns"],
+      "how to transform data": ["Transform function", "transformation examples", "PATTERNS.md#transformation-patterns"],
+      "how to handle errors": ["error handling philosophy", "CONCEPTS.md#error-handling-philosophy"],
+      "how to compose pipelines": ["Then method", "Chain type", "composition examples"],
+      "how to test pipelines": ["testing patterns", "PATTERNS.md#testing-patterns"],
+      "performance characteristics": ["benchmarks", "CONCEPTS.md#memory-and-performance"]
+    },
+    "related_concepts": {
+      "middleware": ["pipeline pattern", "composition", "Chain type"],
+      "functional programming": ["Transform", "immutability", "composition"],
+      "error handling": ["fail-fast", "Apply function", "error propagation"],
+      "data validation": ["Validate function", "validation patterns"],
+      "etl": ["pipeline pattern", "Transform", "data processing"]
+    }
+  },
+  "api_summary": {
+    "constructors": [
+      "NewContract(processor Processor[T]) *Contract[T]",
+      "NewChain(chainables ...Chainable[T]) *Chain[T]"
+    ],
+    "adapters": [
+      "Transform[T any](fn func(T) T) *Contract[T]",
+      "Validate[T any](fn func(T) error) *Contract[T]",
+      "Apply[T any](fn func(T) (T, error)) *Contract[T]",
+      "Mutate[T any](condition func(T) bool, mutation func(T) T) *Contract[T]",
+      "Effect[T any](fn func(T)) *Contract[T]",
+      "Enrich[T any](fn func(T) (T, error)) *Contract[T]"
+    ],
+    "methods": {
+      "Contract": ["Process(T) (T, error)", "Then(Chainable[T]) *Chain[T]"],
+      "Chain": ["Process(T) (T, error)", "Then(Chainable[T]) *Chain[T]"]
+    }
+  }
+}
