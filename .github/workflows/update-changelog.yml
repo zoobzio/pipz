@@ -108,16 +108,11 @@ jobs:
           echo "changed=true" >> $GITHUB_OUTPUT
         fi
     
-    - name: Create Pull Request
+    - name: Commit changes
       if: steps.check_changes.outputs.changed == 'true'
-      uses: peter-evans/create-pull-request@v5
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        commit-message: "chore: update CHANGELOG.md for ${{ steps.next_version.outputs.next_version }}"
-        title: "Update CHANGELOG.md for ${{ steps.next_version.outputs.next_version }}"
-        body: |
-          Automated changelog update for version ${{ steps.next_version.outputs.next_version }}
-          
-          This PR updates CHANGELOG.md with commits since ${{ steps.current_version.outputs.current_version }}
-        branch: update-changelog-${{ steps.next_version.outputs.next_version }}
-        delete-branch: true
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git add CHANGELOG.md
+        git commit -m "chore: update CHANGELOG.md for ${{ steps.next_version.outputs.next_version }}"
+        git push
