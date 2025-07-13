@@ -54,13 +54,41 @@ jobs:
         git push origin "${{ steps.version.outputs.next_version }}"
     
     - name: Update CHANGELOG.md
+      if: steps.check_tag.outputs.exists == 'false'
       run: |
-        # Replace [Unreleased] with the new version
-        sed -i "s/## \[Unreleased\]/## [${{ steps.version.outputs.next_version }}] - $(date +%Y-%m-%d)/" CHANGELOG.md
+        # Get the last tag
+        LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
         
-        # Add new [Unreleased] section at the top
-        sed -i '/^# Changelog/a\
-\n## [Unreleased]\n' CHANGELOG.md
+        # Collect commits since last tag and format them
+        echo "## [${{ steps.version.outputs.next_version }}] - $(date +%Y-%m-%d)" > new_release.md
+        echo "" >> new_release.md
+        
+        # Group commits by type
+        FEAT_COMMITS=$(git log --pretty=format:"%s" ${LAST_TAG:+$LAST_TAG..}HEAD | grep -E "^(feat|add):" | sed 's/^feat: /- /' | sed 's/^add: /- /' || true)
+        FIX_COMMITS=$(git log --pretty=format:"%s" ${LAST_TAG:+$LAST_TAG..}HEAD | grep -E "^(fix|bugfix):" | sed 's/^fix: /- /' | sed 's/^bugfix: /- /' || true)
+        CHANGE_COMMITS=$(git log --pretty=format:"%s" ${LAST_TAG:+$LAST_TAG..}HEAD | grep -E "^(change|update|refactor):" | sed 's/^change: /- /' | sed 's/^update: /- /' | sed 's/^refactor: /- /' || true)
+        
+        if [ ! -z "$FEAT_COMMITS" ]; then
+          echo "### Added" >> new_release.md
+          echo "$FEAT_COMMITS" >> new_release.md
+          echo "" >> new_release.md
+        fi
+        
+        if [ ! -z "$CHANGE_COMMITS" ]; then
+          echo "### Changed" >> new_release.md
+          echo "$CHANGE_COMMITS" >> new_release.md
+          echo "" >> new_release.md
+        fi
+        
+        if [ ! -z "$FIX_COMMITS" ]; then
+          echo "### Fixed" >> new_release.md
+          echo "$FIX_COMMITS" >> new_release.md
+          echo "" >> new_release.md
+        fi
+        
+        # Update CHANGELOG - insert new release after [Unreleased]
+        awk '/^## \[Unreleased\]/{print; print ""; system("cat new_release.md"); next} 1' CHANGELOG.md > temp_changelog.md
+        mv temp_changelog.md CHANGELOG.md
         
         # Commit the updated changelog
         git config user.name "GitHub Actions"
