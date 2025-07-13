@@ -53,11 +53,27 @@ jobs:
         git tag -a "${{ steps.version.outputs.next_version }}" -m "Release ${{ steps.version.outputs.next_version }}"
         git push origin "${{ steps.version.outputs.next_version }}"
     
-    - name: Generate changelog
-      id: changelog
+    - name: Update CHANGELOG.md
       run: |
-        echo "## What's Changed" > changelog.md
-        git log --pretty=format:"* %s (%h)" $(git describe --tags --abbrev=0 2>/dev/null || echo "")..HEAD >> changelog.md
+        # Replace [Unreleased] with the new version
+        sed -i "s/## \[Unreleased\]/## [${{ steps.version.outputs.next_version }}] - $(date +%Y-%m-%d)/" CHANGELOG.md
+        
+        # Add new [Unreleased] section at the top
+        sed -i '/^# Changelog/a\
+\n## [Unreleased]\n' CHANGELOG.md
+        
+        # Commit the updated changelog
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+        git add CHANGELOG.md
+        git commit -m "chore: release ${{ steps.version.outputs.next_version }}" || echo "No changes to commit"
+        git push origin main
+    
+    - name: Extract release notes
+      id: release_notes
+      run: |
+        # Extract the release notes for this version
+        awk '/^## \[${{ steps.version.outputs.next_version }}\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md > release_notes.md
     
     - name: Create Release
       if: steps.check_tag.outputs.exists == 'false'
@@ -69,4 +85,4 @@ jobs:
         release_name: Release ${{ steps.version.outputs.next_version }}
         draft: false
         prerelease: false
-        body_path: changelog.md
+        body_path: release_notes.md
