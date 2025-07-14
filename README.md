@@ -1,8 +1,8 @@
 # pipz
 
-Build fast, type-safe processing pipelines in Go with zero dependencies.
+Build fast, type-safe processing pipelines in Go with zero dependencies and dynamic runtime modification.
 
-pipz provides a simple way to build composable data pipelines that transform, validate, and process your data through a series of operations. No global state, no magic, just clean functional composition.
+pipz provides a simple way to build composable data pipelines that transform, validate, and process your data through a series of operations. Pipelines can be modified at runtime for conditional processing, A/B testing, and performance optimization. No global state, no magic, just clean functional composition with dynamic adaptability.
 
 ```go
 // Create a pipeline
@@ -16,6 +16,11 @@ userPipeline.Register(
 
 // Process data through the pipeline
 user, err := userPipeline.Process(userData)
+
+// Dynamic modification - add fraud detection for high-value users
+if user.AccountValue > 10000 {
+    userPipeline.PushHead(pipz.Apply(fraudCheck))
+}
 ```
 
 ## Why pipz?
@@ -364,6 +369,123 @@ pipz.Enrich(func(u User) (User, error) {
 })
 ```
 
+## Dynamic Pipeline Modification
+
+pipz supports runtime pipeline modification for adaptive processing:
+
+### Queue/Stack Operations
+
+```go
+contract := pipz.NewContract[Transaction]()
+
+// Queue workflow (FIFO)
+contract.PushTail(validate, normalize)    // Add to back
+contract.PushHead(priorityCheck)          // Add to front
+processor, _ := contract.PopHead()        // Remove from front
+
+// Stack workflow (LIFO) 
+contract.PushTail(undoValidation)         // Add to back
+processor, _ := contract.PopTail()        // Remove from back (undo)
+```
+
+### Conditional Processing
+
+```go
+contract := pipz.NewContract[Payment]()
+contract.PushTail(basicValidation, processPayment)
+
+// Add fraud detection for high-value transactions
+if payment.Amount > 1000 {
+    contract.PushHead(fraudDetection)
+}
+
+// Remove expensive checks during high load
+if serverLoad > 80 {
+    contract.RemoveAt(0) // Remove fraud detection
+}
+```
+
+### A/B Testing
+
+```go
+contract := pipz.NewContract[User]()
+contract.PushTail(authenticate, authorize)
+
+// Dynamically switch algorithms
+if user.ID%2 == 0 {
+    contract.ReplaceAt(1, newAuthAlgorithm)
+} else {
+    contract.ReplaceAt(1, legacyAuthAlgorithm)
+}
+```
+
+### Pipeline Reordering
+
+```go
+contract := pipz.NewContract[Order]()
+contract.PushTail(validate, enrich, audit)
+
+// Optimize for performance - move audit to end
+contract.MoveToTail(2)
+
+// Reverse entire pipeline for testing
+contract.Reverse()
+
+// Swap processors
+contract.Swap(0, 1)
+```
+
+### Runtime Optimization
+
+```go
+contract := pipz.NewContract[Request]()
+contract.PushTail(expensiveValidation, process)
+
+// Switch to lightweight validation under load
+if cpuUsage > 75 {
+    contract.ReplaceAt(0, lightValidation)
+}
+
+// Remove optional processors when overloaded
+if queueDepth > 1000 {
+    contract.Clear()
+    contract.PushTail(essentialProcessor)
+}
+```
+
+### Thread-Safe Modifications
+
+All modification operations are thread-safe and can be performed concurrently with pipeline processing:
+
+```go
+contract := pipz.NewContract[Data]()
+
+// Goroutine 1: Processing data
+go func() {
+    for data := range dataChannel {
+        result, _ := contract.Process(data)
+        // Process result...
+    }
+}()
+
+// Goroutine 2: Dynamic optimization
+go func() {
+    for {
+        if shouldOptimize() {
+            contract.ReplaceAt(1, optimizedProcessor)
+        }
+        time.Sleep(time.Minute)
+    }
+}()
+```
+
+### Available Operations
+
+- **Queue/Stack**: `PushHead()`, `PushTail()`, `PopHead()`, `PopTail()`
+- **Precise**: `InsertAt()`, `RemoveAt()`, `ReplaceAt()`
+- **Movement**: `MoveToHead()`, `MoveToTail()`, `MoveTo()`, `Swap()`, `Reverse()`
+- **Utility**: `Len()`, `IsEmpty()`, `Clear()`
+
 ## Composing Pipelines
 
 Use chains to combine multiple pipelines:
@@ -468,6 +590,13 @@ See the [examples](examples/) directory for complete examples:
 - **transform** - CSV to database transformation
 - **payment** - Payment processing with error handling
 
+Run interactive demos:
+```bash
+cd demos
+go run . dynamic    # Dynamic pipeline modification
+go run . all        # All capability demonstrations
+```
+
 ## When to Use pipz
 
 pipz is perfect when you have:
@@ -475,6 +604,10 @@ pipz is perfect when you have:
 - ✅ Reusable middleware patterns
 - ✅ Complex error handling flows
 - ✅ ETL or data processing pipelines
+- ✅ Conditional processing logic
+- ✅ A/B testing requirements
+- ✅ Performance optimization needs
+- ✅ Queue/stack processing patterns
 
 ## License
 

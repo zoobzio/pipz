@@ -48,6 +48,11 @@ func init() {
 			Run:         runErrorDemo,
 		},
 		{
+			Name:        "dynamic",
+			Description: "Dynamic pipeline modification and runtime optimization",
+			Run:         runDynamicPipelineDemo,
+		},
+		{
 			Name:        "all",
 			Description: "Run all demonstrations",
 			Run:         runAllDemos,
