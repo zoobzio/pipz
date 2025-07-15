@@ -52,7 +52,7 @@ jobs:
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v6
       with:
-        version: v1.61.0  # Pin version for consistency
+        version: v1.64.8  # Updated to support Go 1.24
         args: --config=.golangci.yml --timeout=5m
         skip-cache: false
         skip-save-cache: false
