@@ -1,112 +1,137 @@
 # Contributing to pipz
 
-Thank you for your interest in contributing to pipz! We welcome contributions that maintain the project's focus on simplicity and performance.
+Thank you for your interest in contributing to pipz! This guide will help you get started.
 
-## Development Setup
+## Code of Conduct
 
-1. Clone the repository
-2. Install Go 1.23 or later
-3. Install development tools:
-   ```bash
-   make install-tools
-   ```
+By participating in this project, you agree to maintain a respectful and inclusive environment for all contributors.
 
-## Running Tests
-
-```bash
-# Run all tests
-make test
-
-# Run benchmarks
-make bench
-
-# Generate coverage report
-make coverage
-```
-
-## Code Style
-
-- Follow standard Go conventions
-- Run `make lint` before submitting
-- Keep the API simple and focused
-- Maintain 100% test coverage
-
-## Commit Convention
-
-This project uses [Conventional Commits](https://www.conventionalcommits.org/) for automatic semantic versioning.
-
-### Commit Message Format
-
-```
-<type>(<scope>): <subject>
-
-<body>
-
-<footer>
-```
-
-### Types
-
-- **feat**: A new feature (triggers MINOR version bump)
-- **fix**: A bug fix (triggers PATCH version bump)
-- **docs**: Documentation only changes
-- **style**: Changes that don't affect code meaning (formatting, etc.)
-- **refactor**: Code changes that neither fix bugs nor add features
-- **perf**: Performance improvements
-- **test**: Adding or updating tests
-- **chore**: Changes to build process or auxiliary tools
-
-### Breaking Changes
-
-Add `BREAKING CHANGE:` in the commit footer or `!` after the type/scope to trigger a MAJOR version bump:
-
-```
-feat!: remove deprecated API endpoints
-
-BREAKING CHANGE: The /v1/users endpoint has been removed
-```
-
-### Examples
-
-```bash
-# Patch release (0.0.1 -> 0.0.2)
-git commit -m "fix: correct validation logic in pipeline processor"
-
-# Minor release (0.0.2 -> 0.1.0)
-git commit -m "feat: add support for parallel execution"
-
-# Major release (0.1.0 -> 1.0.0)
-git commit -m "feat!: redesign configuration format
-
-BREAKING CHANGE: Config files now use YAML instead of JSON"
-```
-
-## Submitting Changes
+## Getting Started
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes using conventional commits
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+2. Clone your fork: `git clone https://github.com/yourusername/pipz.git`
+3. Create a feature branch: `git checkout -b feature/your-feature-name`
+4. Make your changes
+5. Run tests: `go test ./...`
+6. Commit your changes with a descriptive message
+7. Push to your fork: `git push origin feature/your-feature-name`
+8. Create a Pull Request
 
-## Pull Request Guidelines
+## Development Guidelines
 
-- Update tests for any new functionality
-- Update documentation as needed
-- Add examples if introducing new patterns
-- Ensure all CI checks pass
-- Keep commits focused and atomic
+### Code Style
 
-## Philosophy
+- Follow standard Go conventions
+- Run `go fmt` before committing
+- Add comments for exported functions and types
+- Keep functions small and focused
 
-When contributing, please keep these principles in mind:
+### Testing
 
-- **Simplicity**: pipz should remain easy to understand
-- **Performance**: Zero-allocation operations where possible
-- **Type Safety**: Leverage Go's type system
-- **No Magic**: Explicit is better than implicit
-- **Composability**: Small pieces that work together
+- Write tests for new functionality
+- Ensure all tests pass: `go test ./...`
+- Include benchmarks for performance-critical code
+- Aim for good test coverage
+
+### Documentation
+
+- Update documentation for API changes
+- Add examples for new features
+- Keep doc comments clear and concise
+
+## Types of Contributions
+
+### Bug Reports
+
+- Use GitHub Issues
+- Include minimal reproduction code
+- Describe expected vs actual behavior
+- Include Go version and OS
+
+### Feature Requests
+
+- Open an issue for discussion first
+- Explain the use case
+- Consider backwards compatibility
+
+### Code Contributions
+
+#### Adding Processors
+
+New processor adapters should:
+- Follow the existing pattern (Apply, Validate, Effect)
+- Include comprehensive tests
+- Add documentation with examples
+
+#### Adding Connectors
+
+New connectors should:
+- Implement the `Chainable[T]` interface
+- Handle context cancellation properly
+- Include tests for error cases
+- Document behavior clearly
+
+#### Examples
+
+New examples should:
+- Solve a real-world problem
+- Include tests and benchmarks
+- Have a descriptive README
+- Follow the existing structure
+
+## Pull Request Process
+
+1. **Keep PRs focused** - One feature/fix per PR
+2. **Write descriptive commit messages**
+3. **Update tests and documentation**
+4. **Ensure CI passes**
+5. **Respond to review feedback**
+
+## Testing
+
+Run the full test suite:
+```bash
+go test ./...
+```
+
+Run with race detection:
+```bash
+go test -race ./...
+```
+
+Run benchmarks:
+```bash
+go test -bench=. ./...
+```
+
+## Project Structure
+
+```
+pipz/
+├── *.go              # Core library files
+├── *_test.go         # Tests
+├── *_bench_test.go   # Benchmarks
+├── examples/         # Example implementations
+│   └── */           # Individual examples
+├── docs/            # Documentation
+└── cmd/             # Command-line tools
+```
+
+## Commit Messages
+
+Follow conventional commits:
+- `feat:` New feature
+- `fix:` Bug fix
+- `docs:` Documentation changes
+- `test:` Test additions/changes
+- `refactor:` Code refactoring
+- `perf:` Performance improvements
+- `chore:` Maintenance tasks
 
 ## Questions?
 
-Feel free to open an issue for any questions or discussions!
+- Open an issue for questions
+- Check existing issues first
+- Be patient and respectful
+
+Thank you for contributing to pipz!

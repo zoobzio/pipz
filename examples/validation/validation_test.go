@@ -1,122 +1,136 @@
-package main
+package validation
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
-	"pipz"
+	"github.com/zoobzio/pipz"
 )
 
 func TestValidateOrderID(t *testing.T) {
+	ctx := context.Background()
+
 	tests := []struct {
 		name    string
 		order   Order
-		wantErr bool
+		wantErr string
 	}{
 		{
-			name: "valid order ID",
-			order: Order{
-				ID: "ORD-12345",
-			},
-			wantErr: false,
+			name:    "valid order ID",
+			order:   Order{ID: "ORD-12345"},
+			wantErr: "",
 		},
 		{
-			name: "empty order ID",
-			order: Order{
-				ID: "",
-			},
-			wantErr: true,
+			name:    "empty order ID",
+			order:   Order{ID: ""},
+			wantErr: "order ID required",
 		},
 		{
-			name: "missing prefix",
-			order: Order{
-				ID: "12345",
-			},
-			wantErr: true,
+			name:    "wrong prefix",
+			order:   Order{ID: "ORDER-12345"},
+			wantErr: "order ID must start with ORD-",
+		},
+		{
+			name:    "too short",
+			order:   Order{ID: "ORD-1"},
+			wantErr: "order ID too short",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := ValidateOrderID(tt.order)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateOrderID() error = %v, wantErr %v", err, tt.wantErr)
+			_, err := ValidateOrderID(ctx, tt.order)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("expected error containing %q, got nil", tt.wantErr)
+				} else if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("expected error containing %q, got %q", tt.wantErr, err.Error())
+				}
 			}
 		})
 	}
 }
 
 func TestValidateItems(t *testing.T) {
+	ctx := context.Background()
+
 	tests := []struct {
 		name    string
 		order   Order
-		wantErr bool
+		wantErr string
 	}{
 		{
 			name: "valid items",
 			order: Order{
 				Items: []OrderItem{
-					{ProductID: "PROD-A", Quantity: 2, Price: 29.99},
-					{ProductID: "PROD-B", Quantity: 1, Price: 49.99},
+					{ProductID: "PROD-001", Quantity: 2, Price: 29.99},
+					{ProductID: "PROD-002", Quantity: 1, Price: 49.99},
 				},
 			},
-			wantErr: false,
+			wantErr: "",
 		},
 		{
-			name: "no items",
-			order: Order{
-				Items: []OrderItem{},
-			},
-			wantErr: true,
-		},
-		{
-			name: "negative quantity",
-			order: Order{
-				Items: []OrderItem{
-					{ProductID: "PROD-A", Quantity: -1, Price: 29.99},
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "zero quantity",
-			order: Order{
-				Items: []OrderItem{
-					{ProductID: "PROD-A", Quantity: 0, Price: 29.99},
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "negative price",
-			order: Order{
-				Items: []OrderItem{
-					{ProductID: "PROD-A", Quantity: 1, Price: -10.00},
-				},
-			},
-			wantErr: true,
+			name:    "no items",
+			order:   Order{Items: []OrderItem{}},
+			wantErr: "order must have at least one item",
 		},
 		{
 			name: "missing product ID",
 			order: Order{
 				Items: []OrderItem{
-					{ProductID: "", Quantity: 1, Price: 29.99},
+					{ProductID: "", Quantity: 1, Price: 10.00},
 				},
 			},
-			wantErr: true,
+			wantErr: "item 0: product ID required",
+		},
+		{
+			name: "zero quantity",
+			order: Order{
+				Items: []OrderItem{
+					{ProductID: "PROD-001", Quantity: 0, Price: 10.00},
+				},
+			},
+			wantErr: "item 0: quantity must be positive",
+		},
+		{
+			name: "negative price",
+			order: Order{
+				Items: []OrderItem{
+					{ProductID: "PROD-001", Quantity: 1, Price: -10.00},
+				},
+			},
+			wantErr: "item 0: price cannot be negative",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := ValidateItems(tt.order)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateItems() error = %v, wantErr %v", err, tt.wantErr)
+			_, err := ValidateItems(ctx, tt.order)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("expected error containing %q, got nil", tt.wantErr)
+				} else if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("expected error containing %q, got %q", tt.wantErr, err.Error())
+				}
 			}
 		})
 	}
 }
 
 func TestValidateTotal(t *testing.T) {
+	ctx := context.Background()
+
 	tests := []struct {
 		name    string
 		order   Order
@@ -126,8 +140,8 @@ func TestValidateTotal(t *testing.T) {
 			name: "correct total",
 			order: Order{
 				Items: []OrderItem{
-					{ProductID: "PROD-A", Quantity: 2, Price: 29.99},
-					{ProductID: "PROD-B", Quantity: 1, Price: 49.99},
+					{ProductID: "PROD-001", Quantity: 2, Price: 29.99},
+					{ProductID: "PROD-002", Quantity: 1, Price: 49.99},
 				},
 				Total: 109.97,
 			},
@@ -137,19 +151,20 @@ func TestValidateTotal(t *testing.T) {
 			name: "incorrect total",
 			order: Order{
 				Items: []OrderItem{
-					{ProductID: "PROD-A", Quantity: 3, Price: 19.99},
+					{ProductID: "PROD-001", Quantity: 2, Price: 29.99},
+					{ProductID: "PROD-002", Quantity: 1, Price: 49.99},
 				},
-				Total: 50.00,
+				Total: 100.00, // Wrong!
 			},
 			wantErr: true,
 		},
 		{
-			name: "total within epsilon",
+			name: "floating point tolerance",
 			order: Order{
 				Items: []OrderItem{
-					{ProductID: "PROD-A", Quantity: 1, Price: 99.99},
+					{ProductID: "PROD-001", Quantity: 3, Price: 33.33},
 				},
-				Total: 99.995, // Within 0.01 epsilon
+				Total: 99.99, // 3 * 33.33 = 99.99
 			},
 			wantErr: false,
 		},
@@ -157,152 +172,183 @@ func TestValidateTotal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := ValidateTotal(tt.order)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateTotal() error = %v, wantErr %v", err, tt.wantErr)
+			_, err := ValidateTotal(ctx, tt.order)
+			if tt.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			} else if !tt.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
 			}
 		})
 	}
 }
 
 func TestValidationPipeline(t *testing.T) {
+	ctx := context.Background()
 	pipeline := CreateValidationPipeline()
 
 	tests := []struct {
 		name    string
 		order   Order
-		wantErr bool
-		errMsg  string
+		wantErr string
 	}{
 		{
 			name: "valid order",
 			order: Order{
 				ID:         "ORD-12345",
-				CustomerID: "CUST-001",
+				CustomerID: "CUST-789",
 				Items: []OrderItem{
-					{ProductID: "PROD-A", Quantity: 2, Price: 29.99},
-					{ProductID: "PROD-B", Quantity: 1, Price: 49.99},
+					{ProductID: "PROD-001", Quantity: 2, Price: 29.99},
+					{ProductID: "PROD-002", Quantity: 1, Price: 49.99},
 				},
 				Total: 109.97,
 			},
-			wantErr: false,
+			wantErr: "",
 		},
 		{
-			name: "invalid ID stops pipeline",
+			name: "fails at first validator",
 			order: Order{
-				ID:         "12345",
-				CustomerID: "CUST-001",
+				ID:         "", // Invalid
+				CustomerID: "CUST-789",
 				Items: []OrderItem{
-					{ProductID: "PROD-A", Quantity: 2, Price: 29.99},
+					{ProductID: "PROD-001", Quantity: 1, Price: 10.00},
 				},
-				Total: 59.98,
+				Total: 10.00,
 			},
-			wantErr: true,
-			errMsg:  "order ID must start with ORD-",
+			wantErr: "order ID required",
 		},
 		{
-			name: "invalid items stops pipeline",
+			name: "fails at customer validation",
 			order: Order{
 				ID:         "ORD-12345",
-				CustomerID: "CUST-001",
-				Items:      []OrderItem{},
-				Total:      0,
+				CustomerID: "789", // Invalid
+				Items: []OrderItem{
+					{ProductID: "PROD-001", Quantity: 1, Price: 10.00},
+				},
+				Total: 10.00,
 			},
-			wantErr: true,
-			errMsg:  "order must have at least one item",
+			wantErr: "customer ID must start with CUST-",
 		},
 		{
-			name: "invalid total fails validation",
+			name: "duplicate products",
 			order: Order{
 				ID:         "ORD-12345",
-				CustomerID: "CUST-001",
+				CustomerID: "CUST-789",
 				Items: []OrderItem{
-					{ProductID: "PROD-A", Quantity: 2, Price: 29.99},
+					{ProductID: "PROD-001", Quantity: 1, Price: 10.00},
+					{ProductID: "PROD-001", Quantity: 2, Price: 10.00}, // Duplicate!
 				},
-				Total: 100.00,
+				Total: 30.00,
 			},
-			wantErr: true,
-			errMsg:  "total mismatch",
+			wantErr: "duplicate product PROD-001",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := pipeline.Process(tt.order)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Process() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if err != nil && tt.errMsg != "" {
-				if !contains(err.Error(), tt.errMsg) {
-					t.Errorf("Process() error = %v, want error containing %v", err, tt.errMsg)
+			_, err := pipeline.Process(ctx, tt.order)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
 				}
-			}
-			if err == nil && result.ID != tt.order.ID {
-				t.Errorf("Process() returned different order ID: got %v, want %v", result.ID, tt.order.ID)
+			} else {
+				if err == nil {
+					t.Errorf("expected error containing %q, got nil", tt.wantErr)
+				} else if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("expected error containing %q, got %q", tt.wantErr, err.Error())
+				}
 			}
 		})
 	}
 }
 
-func TestValidationPipelineChaining(t *testing.T) {
-	// Create two separate validation pipelines
-	idValidator := pipz.NewContract[Order]()
-	idValidator.Register(pipz.Apply(ValidateOrderID))
+func TestPipelineErrorContext(t *testing.T) {
+	ctx := context.Background()
+	pipeline := CreateValidationPipeline()
 
-	itemValidator := pipz.NewContract[Order]()
-	itemValidator.Register(
-		pipz.Apply(ValidateItems),
-		pipz.Apply(ValidateTotal),
-	)
-
-	// Chain them together
-	chain := pipz.NewChain[Order]()
-	chain.Add(idValidator, itemValidator)
-
-	// Test the chained validators
-	validOrder := Order{
+	// Create an order that will fail at the total validation step
+	order := Order{
 		ID:         "ORD-12345",
-		CustomerID: "CUST-001",
+		CustomerID: "CUST-789",
 		Items: []OrderItem{
-			{ProductID: "PROD-A", Quantity: 2, Price: 29.99},
+			{ProductID: "PROD-001", Quantity: 2, Price: 29.99},
 		},
-		Total: 59.98,
+		Total: 100.00, // Wrong total
 	}
 
-	result, err := chain.Process(validOrder)
-	if err != nil {
-		t.Errorf("Chain.Process() unexpected error: %v", err)
-	}
-	if result.ID != validOrder.ID {
-		t.Errorf("Chain.Process() returned different order ID: got %v, want %v", result.ID, validOrder.ID)
-	}
-
-	// Test with invalid order ID (should fail early)
-	invalidOrder := Order{
-		ID:         "12345",
-		CustomerID: "CUST-001",
-		Items: []OrderItem{
-			{ProductID: "PROD-A", Quantity: 2, Price: 29.99},
-		},
-		Total: 59.98,
-	}
-
-	_, err = chain.Process(invalidOrder)
+	_, err := pipeline.Process(ctx, order)
 	if err == nil {
-		t.Error("Chain.Process() expected error for invalid order ID")
+		t.Fatal("expected error, got nil")
+	}
+
+	// Check that we get a PipelineError with context
+	var pipelineErr *pipz.PipelineError[Order]
+	if !errors.As(err, &pipelineErr) {
+		t.Fatalf("expected PipelineError, got %T", err)
+	}
+
+	// Verify error context
+	if pipelineErr.ProcessorName != "validate_total" {
+		t.Errorf("expected processor name 'validate_total', got %q", pipelineErr.ProcessorName)
+	}
+
+	if pipelineErr.StageIndex != 3 { // 4th processor (0-indexed)
+		t.Errorf("expected stage index 3, got %d", pipelineErr.StageIndex)
 	}
 }
 
-// Helper function
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && len(substr) > 0 && findSubstring(s, substr) != -1)
-}
+func TestStrictValidationPipeline(t *testing.T) {
+	ctx := context.Background()
+	pipeline := CreateStrictValidationPipeline()
 
-func findSubstring(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
+	tests := []struct {
+		name    string
+		order   Order
+		wantErr string
+	}{
+		{
+			name: "too many items",
+			order: Order{
+				ID:         "ORD-12345",
+				CustomerID: "CUST-789",
+				Items:      make([]OrderItem, 101), // 101 items
+				Total:      100.00,
+			},
+			wantErr: "order exceeds maximum item limit",
+		},
+		{
+			name: "total too low",
+			order: Order{
+				ID:         "ORD-12345",
+				CustomerID: "CUST-789",
+				Items: []OrderItem{
+					{ProductID: "PROD-001", Quantity: 1, Price: 0.50},
+				},
+				Total: 0.50,
+			},
+			wantErr: "order total must be at least $1.00",
+		},
 	}
-	return -1
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Initialize items properly for the test
+			if tt.name == "too many items" {
+				for i := range tt.order.Items {
+					tt.order.Items[i] = OrderItem{
+						ProductID: fmt.Sprintf("PROD-%03d", i),
+						Quantity:  1,
+						Price:     1.00,
+					}
+				}
+				tt.order.Total = float64(len(tt.order.Items))
+			}
+
+			_, err := pipeline.Process(ctx, tt.order)
+			if err == nil {
+				t.Errorf("expected error containing %q, got nil", tt.wantErr)
+			} else if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("expected error containing %q, got %q", tt.wantErr, err.Error())
+			}
+		})
+	}
 }

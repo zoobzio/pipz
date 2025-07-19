@@ -1,437 +1,693 @@
-package main
+package payment
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
+	"time"
 
-	"pipz"
+	"github.com/zoobzio/pipz"
 )
 
-func TestValidatePayment(t *testing.T) {
+func TestCategorizeError(t *testing.T) {
+	ctx := context.Background()
+
 	tests := []struct {
-		name    string
-		payment Payment
-		wantErr bool
-		errMsg  string
+		name            string
+		pe              PaymentError
+		expectedType    string
+		expectedCode    string
+		expectedRecover bool
+		expectedAction  string
 	}{
 		{
-			name: "valid payment",
-			payment: Payment{
-				ID:         "PAY-001",
-				Amount:     99.99,
-				Currency:   "USD",
-				CardNumber: "1234",
+			name: "insufficient funds",
+			pe: PaymentError{
+				Payment:       Payment{ID: "PAY-001"},
+				OriginalError: errors.New("card_declined:insufficient_funds"),
 			},
-			wantErr: false,
+			expectedType:    "card_declined",
+			expectedCode:    "insufficient_funds",
+			expectedRecover: false,
+			expectedAction:  "",
 		},
 		{
-			name: "zero amount",
-			payment: Payment{
-				ID:         "PAY-002",
-				Amount:     0,
-				Currency:   "USD",
-				CardNumber: "1234",
+			name: "network timeout",
+			pe: PaymentError{
+				Payment:       Payment{ID: "PAY-002", RetryCount: 0},
+				OriginalError: errors.New("network_error:timeout"),
 			},
-			wantErr: true,
-			errMsg:  "invalid amount",
+			expectedType:    "network_error",
+			expectedCode:    "timeout",
+			expectedRecover: true,
+			expectedAction:  "retry_with_backoff",
 		},
 		{
-			name: "negative amount",
-			payment: Payment{
-				ID:         "PAY-003",
-				Amount:     -50.00,
-				Currency:   "USD",
-				CardNumber: "1234",
+			name: "rate limit",
+			pe: PaymentError{
+				Payment:       Payment{ID: "PAY-003"},
+				OriginalError: errors.New("rate_limit_error"),
 			},
-			wantErr: true,
-			errMsg:  "invalid amount",
+			expectedType:    "rate_limit_error",
+			expectedCode:    "",
+			expectedRecover: true,
+			expectedAction:  "retry_later",
 		},
 		{
-			name: "missing card",
-			payment: Payment{
-				ID:       "PAY-004",
-				Amount:   100.00,
-				Currency: "USD",
+			name: "provider unavailable",
+			pe: PaymentError{
+				Payment:       Payment{ID: "PAY-004", Provider: "stripe"},
+				OriginalError: errors.New("provider_unavailable"),
 			},
-			wantErr: true,
-			errMsg:  "missing card information",
+			expectedType:    "provider_unavailable",
+			expectedCode:    "",
+			expectedRecover: true,
+			expectedAction:  "use_alternate_provider",
 		},
 		{
-			name: "missing currency",
-			payment: Payment{
-				ID:         "PAY-005",
-				Amount:     100.00,
-				CardNumber: "1234",
+			name: "fraud suspected",
+			pe: PaymentError{
+				Payment:       Payment{ID: "PAY-005"},
+				OriginalError: errors.New("fraud_suspected"),
 			},
-			wantErr: true,
-			errMsg:  "missing currency",
+			expectedType:    "fraud_suspected",
+			expectedCode:    "",
+			expectedRecover: false,
+			expectedAction:  "manual_review",
+		},
+		{
+			name: "unknown error",
+			pe: PaymentError{
+				Payment:       Payment{ID: "PAY-006"},
+				OriginalError: errors.New("something_went_wrong"),
+			},
+			expectedType:    "something_went_wrong",
+			expectedCode:    "",
+			expectedRecover: true,
+			expectedAction:  "manual_review",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := ValidatePayment(tt.payment)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidatePayment() error = %v, wantErr %v", err, tt.wantErr)
+			result, err := CategorizeError(ctx, tt.pe)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
 			}
-			if err != nil && tt.errMsg != "" {
-				if !contains(err.Error(), tt.errMsg) {
-					t.Errorf("ValidatePayment() error = %v, want error containing %v", err, tt.errMsg)
-				}
+
+			if result.ErrorType != tt.expectedType {
+				t.Errorf("expected error type %q, got %q", tt.expectedType, result.ErrorType)
 			}
-			if err != nil && result.ID != "" {
-				t.Error("ValidatePayment() should return zero value on error")
+
+			if result.ErrorCode != tt.expectedCode {
+				t.Errorf("expected error code %q, got %q", tt.expectedCode, result.ErrorCode)
+			}
+
+			if result.Recoverable != tt.expectedRecover {
+				t.Errorf("expected recoverable %v, got %v", tt.expectedRecover, result.Recoverable)
+			}
+
+			if result.RecoveryAction != tt.expectedAction {
+				t.Errorf("expected recovery action %q, got %q", tt.expectedAction, result.RecoveryAction)
+			}
+
+			if result.CustomerMessage == "" {
+				t.Error("expected customer message to be set")
+			}
+
+			if result.InternalMessage == "" {
+				t.Error("expected internal message to be set")
 			}
 		})
 	}
 }
 
-func TestCheckFraud(t *testing.T) {
+func TestNotifyCustomer(t *testing.T) {
+	ctx := context.Background()
+
+	// Clear email queue
+	for len(EmailQueue) > 0 {
+		<-EmailQueue
+	}
+
 	tests := []struct {
-		name    string
-		payment Payment
-		wantErr bool
-		errMsg  string
+		name          string
+		pe            PaymentError
+		expectEmail   bool
+		checkTemplate string
 	}{
 		{
-			name: "normal transaction",
-			payment: Payment{
-				Amount:   500.00,
-				Attempts: 1,
+			name: "insufficient funds notification",
+			pe: PaymentError{
+				Payment: Payment{
+					ID:            "PAY-001",
+					CustomerEmail: "test@example.com",
+					Amount:        99.99,
+					Currency:      "USD",
+					PaymentMethod: PaymentMethod{Last4: "4242"},
+				},
+				ErrorType:       "card_declined",
+				ErrorCode:       "insufficient_funds",
+				CustomerMessage: "Payment declined due to insufficient funds",
 			},
-			wantErr: false,
+			expectEmail:   true,
+			checkTemplate: "payment_declined_nsf",
 		},
 		{
-			name: "large first-time transaction",
-			payment: Payment{
-				Amount:   15000.00,
-				Attempts: 0,
+			name: "network error notification",
+			pe: PaymentError{
+				Payment: Payment{
+					ID:            "PAY-002",
+					CustomerEmail: "test@example.com",
+				},
+				ErrorType:       "network_error",
+				CustomerMessage: "Temporary issue, will retry",
+				Recoverable:     true,
 			},
-			wantErr: true,
-			errMsg:  "FRAUD: large first-time transaction",
+			expectEmail:   true,
+			checkTemplate: "payment_delayed",
 		},
 		{
-			name: "exceeds card limit",
-			payment: Payment{
-				Amount:    5000.00,
-				CardLimit: 3000.00,
-				Attempts:  1,
+			name: "no message no notification",
+			pe: PaymentError{
+				Payment: Payment{
+					ID:            "PAY-003",
+					CustomerEmail: "test@example.com",
+				},
+				CustomerMessage: "",
 			},
-			wantErr: true,
-			errMsg:  "FRAUD: amount exceeds card limit",
-		},
-		{
-			name: "within card limit",
-			payment: Payment{
-				Amount:    2000.00,
-				CardLimit: 3000.00,
-			},
-			wantErr: false,
+			expectEmail: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := CheckFraud(tt.payment)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("CheckFraud() error = %v, wantErr %v", err, tt.wantErr)
+			// Clear queue
+			for len(EmailQueue) > 0 {
+				<-EmailQueue
 			}
-			if err != nil && tt.errMsg != "" {
-				if !contains(err.Error(), tt.errMsg) {
-					t.Errorf("CheckFraud() error = %v, want error containing %v", err, tt.errMsg)
+
+			result, err := NotifyCustomer(ctx, tt.pe)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.expectEmail {
+				select {
+				case email := <-EmailQueue:
+					if email.To != tt.pe.Payment.CustomerEmail {
+						t.Errorf("expected email to %q, got %q", tt.pe.Payment.CustomerEmail, email.To)
+					}
+					if tt.checkTemplate != "" && email.Template != tt.checkTemplate {
+						t.Errorf("expected template %q, got %q", tt.checkTemplate, email.Template)
+					}
+				case <-time.After(100 * time.Millisecond):
+					t.Error("expected email to be queued")
+				}
+			} else {
+				if len(EmailQueue) > 0 {
+					t.Error("unexpected email queued")
 				}
 			}
-			if err != nil && result.ID != "" {
-				t.Error("CheckFraud() should return zero value on error")
+
+			// Verify result is unchanged
+			if result.Payment.ID != tt.pe.Payment.ID {
+				t.Error("payment error was modified unexpectedly")
 			}
 		})
 	}
 }
 
-func TestUpdatePaymentStatus(t *testing.T) {
+func TestAttemptRecovery(t *testing.T) {
+	ctx := context.Background()
+
+	// Set up test Providers
+	Providers["test_provider"] = &mockProvider{
+		name:        "test_provider",
+		available:   true,
+		shouldFail:  false,
+		failMessage: "",
+	}
+	Providers["backup_provider"] = &mockProvider{
+		name:        "backup_provider",
+		available:   true,
+		shouldFail:  false,
+		failMessage: "",
+	}
+	Providers["failing_provider"] = &mockProvider{
+		name:        "failing_provider",
+		available:   true,
+		shouldFail:  true,
+		failMessage: "network_error:timeout",
+	}
+
 	tests := []struct {
-		name           string
-		payment        Payment
-		expectedStatus string
-		expectedAttempts int
+		name          string
+		pe            PaymentError
+		expectSuccess bool
+		expectAction  string
 	}{
 		{
-			name: "new payment",
-			payment: Payment{
-				ID:       "PAY-001",
-				Attempts: 0,
+			name: "non-recoverable error",
+			pe: PaymentError{
+				Payment:        Payment{ID: "PAY-001"},
+				Recoverable:    false,
+				RecoveryAction: "",
 			},
-			expectedStatus:   "pending",
-			expectedAttempts: 1,
+			expectSuccess: false,
+			expectAction:  "",
 		},
 		{
-			name: "existing payment",
-			payment: Payment{
-				ID:       "PAY-002",
-				Status:   "processing",
-				Attempts: 2,
+			name: "retry with backoff success",
+			pe: PaymentError{
+				Payment: Payment{
+					ID:         "PAY-002",
+					Provider:   "test_provider",
+					RetryCount: 0,
+					MaxRetries: 3,
+				},
+				OriginalError:  errors.New("network_error:timeout"),
+				Recoverable:    true,
+				RecoveryAction: "retry_with_backoff",
+				RetryAfter:     1 * time.Millisecond,
 			},
-			expectedStatus:   "processing",
-			expectedAttempts: 3,
+			expectSuccess: true,
+			expectAction:  "retry_succeeded",
+		},
+		{
+			name: "max retries exceeded",
+			pe: PaymentError{
+				Payment: Payment{
+					ID:         "PAY-003",
+					Provider:   "test_provider",
+					RetryCount: 3,
+					MaxRetries: 3,
+				},
+				Recoverable:    true,
+				RecoveryAction: "retry_with_backoff",
+			},
+			expectSuccess: false,
+			expectAction:  "max_retries_exceeded",
+		},
+		{
+			name: "use alternate provider success",
+			pe: PaymentError{
+				Payment: Payment{
+					ID:       "PAY-004",
+					Provider: "failing_provider",
+				},
+				OriginalError:  errors.New("provider_unavailable"),
+				Recoverable:    true,
+				RecoveryAction: "use_alternate_provider",
+			},
+			expectSuccess: true,
+			expectAction:  "recovered_via_stripe",
+		},
+		{
+			name: "manual review",
+			pe: PaymentError{
+				Payment: Payment{
+					ID: "PAY-005",
+				},
+				Recoverable:    true,
+				RecoveryAction: "manual_review",
+			},
+			expectSuccess: false,
+			expectAction:  "queued_for_review",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := UpdatePaymentStatus(tt.payment)
-			if result.Status != tt.expectedStatus {
-				t.Errorf("UpdatePaymentStatus() status = %v, want %v", result.Status, tt.expectedStatus)
+			// Clear review queue
+			for len(ReviewQueue) > 0 {
+				<-ReviewQueue
 			}
-			if result.Attempts != tt.expectedAttempts {
-				t.Errorf("UpdatePaymentStatus() attempts = %v, want %v", result.Attempts, tt.expectedAttempts)
+
+			result, err := AttemptRecovery(ctx, tt.pe)
+			if err != nil && !strings.Contains(tt.name, "fail") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.expectSuccess {
+				if result.OriginalError != nil {
+					t.Errorf("expected recovery to succeed, but got error: %v", result.OriginalError)
+				}
+			} else {
+				if result.OriginalError == nil && tt.pe.OriginalError != nil {
+					t.Error("expected recovery to fail, but error was cleared")
+				}
+			}
+
+			if tt.expectAction != "" && result.RecoveryAction != tt.expectAction {
+				t.Errorf("expected recovery action %q, got %q", tt.expectAction, result.RecoveryAction)
 			}
 		})
 	}
 }
 
-func TestProcessWithPrimary(t *testing.T) {
-	tests := []struct {
-		name    string
-		payment Payment
-		wantErr bool
-		errMsg  string
-	}{
-		{
-			name: "small amount",
-			payment: Payment{
-				ID:     "PAY-001",
-				Amount: 100.00,
-			},
-			wantErr: false,
-		},
-		{
-			name: "large amount",
-			payment: Payment{
-				ID:     "PAY-002",
-				Amount: 6000.00,
-			},
-			wantErr: true,
-			errMsg:  "primary provider: amount too large",
-		},
+func TestErrorRecoveryPipeline(t *testing.T) {
+	ctx := context.Background()
+	pipeline := CreateErrorRecoveryPipeline()
+
+	// Set up test provider
+	Providers["pipeline_test"] = &mockProvider{
+		name:        "pipeline_test",
+		available:   true,
+		shouldFail:  false,
+		failMessage: "",
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := ProcessWithPrimary(tt.payment)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ProcessWithPrimary() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if err == nil {
-				if result.Status != "completed" {
-					t.Error("ProcessWithPrimary() should set status to completed")
-				}
-				if result.Provider != "primary" {
-					t.Error("ProcessWithPrimary() should set provider to primary")
-				}
-				if result.ProcessedAt.IsZero() {
-					t.Error("ProcessWithPrimary() should set ProcessedAt")
-				}
-			}
-		})
-	}
-}
-
-func TestPaymentPipeline(t *testing.T) {
-	pipeline := CreatePaymentPipeline()
-
 	tests := []struct {
-		name    string
-		payment Payment
-		wantErr bool
-		errMsg  string
+		name          string
+		pe            PaymentError
+		expectRecover bool
+		checkFn       func(t *testing.T, result PaymentError)
 	}{
 		{
-			name: "valid small payment",
-			payment: Payment{
-				ID:            "PAY-001",
-				Amount:        99.99,
-				Currency:      "USD",
-				CardNumber:    "1234",
-				CardLimit:     5000,
-				CustomerEmail: "customer@example.com",
+			name: "successful recovery through pipeline",
+			pe: PaymentError{
+				Payment: Payment{
+					ID:            "PAY-001",
+					CustomerEmail: "test@example.com",
+					Provider:      "pipeline_test",
+					MaxRetries:    3,
+				},
+				OriginalError: errors.New("network_error:timeout"),
 			},
-			wantErr: false,
+			expectRecover: true,
 		},
 		{
-			name: "invalid amount",
-			payment: Payment{
-				ID:         "PAY-002",
-				Amount:     -50.00,
-				Currency:   "USD",
-				CardNumber: "1234",
+			name: "non-recoverable error",
+			pe: PaymentError{
+				Payment: Payment{
+					ID:            "PAY-002",
+					CustomerEmail: "test@example.com",
+				},
+				OriginalError: errors.New("card_declined:insufficient_funds"),
 			},
-			wantErr: true,
-			errMsg:  "invalid amount",
+			expectRecover: false,
 		},
 		{
 			name: "fraud detection",
-			payment: Payment{
-				ID:         "PAY-003",
-				Amount:     15000.00,
-				Currency:   "USD",
-				CardNumber: "9999",
-				Attempts:   0,
+			pe: PaymentError{
+				Payment: Payment{
+					ID:            "PAY-003",
+					CustomerEmail: "fraud@example.com",
+				},
+				OriginalError: errors.New("fraud_suspected"),
 			},
-			wantErr: true,
-			errMsg:  "FRAUD",
-		},
-		{
-			name: "primary provider limit",
-			payment: Payment{
-				ID:         "PAY-004",
-				Amount:     6000.00,
-				Currency:   "USD",
-				CardNumber: "5678",
-				CardLimit:  10000,
+			expectRecover: false,
+			checkFn: func(t *testing.T, result PaymentError) {
+				if result.RecoveryAction != "manual_review" {
+					t.Error("expected fraud to trigger manual review")
+				}
 			},
-			wantErr: true,
-			errMsg:  "primary provider",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := pipeline.Process(tt.payment)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Process() error = %v, wantErr %v", err, tt.wantErr)
+			// Clear queues
+			for len(EmailQueue) > 0 {
+				<-EmailQueue
 			}
-			if err != nil && tt.errMsg != "" {
-				if !contains(err.Error(), tt.errMsg) {
-					t.Errorf("Process() error = %v, want error containing %v", err, tt.errMsg)
+			for len(ReviewQueue) > 0 {
+				<-ReviewQueue
+			}
+
+			result, err := pipeline.Process(ctx, tt.pe)
+			if err != nil {
+				t.Fatalf("pipeline error: %v", err)
+			}
+
+			if tt.expectRecover {
+				if result.OriginalError != nil {
+					t.Errorf("expected recovery, but still have error: %v", result.OriginalError)
+				}
+			} else {
+				if result.OriginalError == nil {
+					t.Error("expected error to persist, but it was cleared")
 				}
 			}
-			if err == nil {
-				if result.Status != "completed" {
-					t.Error("Process() should set status to completed for successful payment")
+
+			if tt.checkFn != nil {
+				tt.checkFn(t, result)
+			}
+		})
+	}
+}
+
+func TestHighValuePipeline(t *testing.T) {
+	ctx := context.Background()
+	pipeline := CreateHighValuePipeline()
+
+	pe := PaymentError{
+		Payment: Payment{
+			ID:            "PAY-HIGH-001",
+			CustomerEmail: "vip@example.com",
+			Amount:        15000.00,
+		},
+		OriginalError: errors.New("network_error:timeout"),
+	}
+
+	result, err := pipeline.Process(ctx, pe)
+	if err != nil {
+		t.Fatalf("pipeline error: %v", err)
+	}
+
+	// High-value payment should trigger manual review
+	if result.RecoveryAction != "queued_for_review" {
+		t.Errorf("expected queued_for_review for high-value payment, got %q", result.RecoveryAction)
+	}
+
+	if !strings.Contains(result.CustomerMessage, "high value") {
+		t.Error("expected high-value specific message")
+	}
+}
+
+func TestProcessPayment(t *testing.T) {
+	ctx := context.Background()
+
+	// Set up test Providers
+	Providers["process_test"] = &mockProvider{
+		name:        "process_test",
+		available:   true,
+		shouldFail:  false,
+		failMessage: "",
+	}
+	Providers["process_failing"] = &mockProvider{
+		name:        "process_failing",
+		available:   true,
+		shouldFail:  true,
+		failMessage: "card_declined:insufficient_funds",
+	}
+
+	tests := []struct {
+		name        string
+		payment     Payment
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "successful payment",
+			payment: Payment{
+				ID:            "PAY-001",
+				CustomerEmail: "success@example.com",
+				Amount:        99.99,
+				Provider:      "process_test",
+			},
+			expectError: false,
+		},
+		{
+			name: "payment failure non-recoverable",
+			payment: Payment{
+				ID:            "PAY-002",
+				CustomerEmail: "fail@example.com",
+				Amount:        49.99,
+				Provider:      "process_failing",
+			},
+			expectError: true,
+			errorMsg:    "card_declined",
+		},
+		{
+			name: "invalid provider",
+			payment: Payment{
+				ID:       "PAY-003",
+				Provider: "non_existent",
+			},
+			expectError: true,
+			errorMsg:    "not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ProcessPayment(ctx, tt.payment)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("expected error, got nil")
+				} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
 				}
-				if result.Attempts != 1 {
-					t.Error("Process() should increment attempts")
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
 				}
 			}
 		})
 	}
 }
 
-func TestPaymentChaining(t *testing.T) {
-	// Create validation pipeline
-	validator := pipz.NewContract[Payment]()
-	validator.Register(
-		pipz.Apply(ValidatePayment),
-		pipz.Apply(CheckFraud),
-	)
+func TestProviderStats(t *testing.T) {
+	// Clear stats
+	ProviderStatsMap = make(map[string]*ProviderStats)
 
-	// Create processing pipeline
-	processor := pipz.NewContract[Payment]()
-	processor.Register(
-		pipz.Transform(UpdatePaymentStatus),
-		pipz.Apply(ProcessWithPrimary),
-	)
+	// Update some stats
+	UpdateProviderStats("test_provider", true, 100*time.Millisecond)
+	UpdateProviderStats("test_provider", true, 200*time.Millisecond)
+	UpdateProviderStats("test_provider", false, 0)
 
-	// Chain them together
-	chain := pipz.NewChain[Payment]()
-	chain.Add(validator, processor)
+	stats := GetProviderStats()
 
-	// Test valid payment
-	validPayment := Payment{
-		ID:         "PAY-001",
-		Amount:     500.00,
-		Currency:   "USD",
-		CardNumber: "1234",
-		CardLimit:  5000,
+	if len(stats) != 1 {
+		t.Errorf("expected 1 provider, got %d", len(stats))
 	}
 
-	result, err := chain.Process(validPayment)
+	testStats, exists := stats["test_provider"]
+	if !exists {
+		t.Fatal("test_provider stats not found")
+	}
+
+	if testStats.TotalAttempts != 3 {
+		t.Errorf("expected 3 attempts, got %d", testStats.TotalAttempts)
+	}
+
+	if testStats.SuccessCount != 2 {
+		t.Errorf("expected 2 successes, got %d", testStats.SuccessCount)
+	}
+
+	if testStats.FailureCount != 1 {
+		t.Errorf("expected 1 failure, got %d", testStats.FailureCount)
+	}
+}
+
+func TestAuditLog(t *testing.T) {
+	// Clear audit log
+	AuditLog = make([]AuditEntry, 0)
+
+	ctx := context.Background()
+
+	// Add some entries via AuditPaymentError
+	pe1 := PaymentError{
+		Payment: Payment{
+			ID:         "PAY-001",
+			CustomerID: "CUST-123",
+			Amount:     99.99,
+			Provider:   "test",
+		},
+		ErrorType:      "card_declined",
+		RecoveryAction: "none",
+		Timestamp:      time.Now(),
+	}
+
+	if err := AuditPaymentError(ctx, pe1); err != nil {
+		t.Fatalf("audit error: %v", err)
+	}
+
+	pe2 := PaymentError{
+		Payment: Payment{
+			ID:         "PAY-002",
+			CustomerID: "CUST-456",
+			Amount:     199.99,
+			Provider:   "test",
+		},
+		ErrorType:      "network_error",
+		RecoveryAction: "retry_succeeded",
+		Timestamp:      time.Now(),
+		OriginalError:  nil, // Recovered
+	}
+
+	if err := AuditPaymentError(ctx, pe2); err != nil {
+		t.Fatalf("audit error: %v", err)
+	}
+
+	// Get audit log
+	entries := GetAuditLog(10)
+
+	if len(entries) != 2 {
+		t.Errorf("expected 2 audit entries, got %d", len(entries))
+	}
+
+	// Verify entries
+	if entries[0].PaymentID != "PAY-001" {
+		t.Errorf("expected first entry to be PAY-001, got %s", entries[0].PaymentID)
+	}
+
+	if entries[1].Success != true {
+		t.Error("expected second entry to show success")
+	}
+}
+
+func TestPipelineErrorContext(t *testing.T) {
+	ctx := context.Background()
+	pipeline := CreateErrorRecoveryPipeline()
+
+	// Create a payment error with a valid error
+	pe := PaymentError{
+		Payment:       Payment{ID: "PAY-ERR"},
+		OriginalError: errors.New("test_error"), // Provide a valid error
+	}
+
+	// This should process without issues
+	result, err := pipeline.Process(ctx, pe)
 	if err != nil {
-		t.Errorf("Chain.Process() unexpected error: %v", err)
-	}
-	if result.Status != "completed" {
-		t.Error("Chain.Process() should complete valid payment")
-	}
-
-	// Test invalid payment (should fail in validation)
-	invalidPayment := Payment{
-		ID:     "PAY-002",
-		Amount: -100.00,
-	}
-
-	_, err = chain.Process(invalidPayment)
-	if err == nil {
-		t.Error("Chain.Process() expected error for invalid payment")
-	}
-}
-
-func TestPaymentMutate(t *testing.T) {
-	// Create a pipeline that applies discounts
-	pipeline := pipz.NewContract[Payment]()
-	pipeline.Register(
-		pipz.Apply(ValidatePayment),
-		// Apply 10% discount for amounts over $1000
-		pipz.Mutate(
-			func(p Payment) Payment {
-				p.Amount = p.Amount * 0.9
-				return p
-			},
-			func(p Payment) bool {
-				return p.Amount > 1000
-			},
-		),
-		pipz.Apply(ProcessWithPrimary),
-	)
-
-	// Test payment with discount
-	payment := Payment{
-		ID:         "PAY-001",
-		Amount:     2000.00,
-		Currency:   "USD",
-		CardNumber: "1234",
-	}
-
-	result, err := pipeline.Process(payment)
-	if err != nil {
-		t.Errorf("Process() unexpected error: %v", err)
-	}
-	// Original amount was 2000, with 10% discount should be 1800
-	expectedAmount := 1800.00
-	if result.Amount != expectedAmount {
-		t.Errorf("Process() amount = %v, want %v", result.Amount, expectedAmount)
-	}
-}
-
-// TestPaymentErrorPropagation verifies zero values are returned on error
-func TestPaymentErrorPropagation(t *testing.T) {
-	pipeline := CreatePaymentPipeline()
-	
-	// Payment that will fail validation
-	payment := Payment{
-		ID:     "PAY-001",
-		Amount: -100.00, // Invalid amount
-	}
-	
-	result, err := pipeline.Process(payment)
-	if err == nil {
-		t.Error("Expected error for invalid payment")
-	}
-	
-	// Verify zero value is returned
-	if result != (Payment{}) {
-		t.Error("Expected zero value Payment on error")
-	}
-}
-
-// Helper function
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && len(substr) > 0 && findSubstring(s, substr) != -1)
-}
-
-func findSubstring(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
+		// Check if it's a pipeline error
+		var pipelineErr *pipz.PipelineError[PaymentError]
+		if !errors.As(err, &pipelineErr) {
+			t.Fatalf("expected PipelineError, got %T", err)
 		}
 	}
-	return -1
+
+	// Result should still be returned
+	if result.Payment.ID != "PAY-ERR" {
+		t.Error("expected payment ID to be preserved")
+	}
+}
+
+func TestExample(t *testing.T) {
+	// Just test that the example runs without panicking
+	Example()
+}
+
+// Mock provider for testing
+type mockProvider struct {
+	name        string
+	available   bool
+	shouldFail  bool
+	failMessage string
+}
+
+func (m *mockProvider) Name() string                   { return m.name }
+func (m *mockProvider) IsAvailable() bool              { return m.available }
+func (m *mockProvider) GetFees(amount float64) float64 { return amount * 0.03 }
+
+func (m *mockProvider) ProcessPayment(ctx context.Context, payment Payment) (*PaymentResult, error) {
+	if m.shouldFail {
+		if m.failMessage != "" {
+			return nil, fmt.Errorf(m.failMessage)
+		}
+		return nil, errors.New("mock failure")
+	}
+
+	return &PaymentResult{
+		Success:        true,
+		TransactionID:  fmt.Sprintf("mock_%s_%d", payment.ID, time.Now().Unix()),
+		Provider:       m.name,
+		ProcessingTime: 10 * time.Millisecond,
+		Fees:           payment.Amount * 0.03,
+	}, nil
 }

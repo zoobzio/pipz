@@ -1,215 +1,289 @@
-package main
+// Package security demonstrates how to use pipz for security auditing,
+// permission checks, and data redaction pipelines.
+package security
 
 import (
+	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
-	"pipz"
+	"github.com/zoobzio/pipz"
 )
 
-// AuditableData represents data that needs security auditing.
-// It wraps user data with audit metadata for tracking access and modifications.
+// AuditableData represents data that needs security processing
 type AuditableData struct {
-	Data      *User
-	UserID    string
-	Timestamp time.Time
-	Actions   []string
+	Data        *User
+	RequestorID string
+	Timestamp   time.Time
+	Actions     []string
+	Context     map[string]interface{}
 }
 
-// User represents a user record with sensitive information.
+// User represents a user with sensitive information
 type User struct {
-	Name    string
-	Email   string
-	SSN     string
-	IsAdmin bool
+	ID        string
+	Name      string
+	Email     string
+	SSN       string
+	Phone     string
+	Role      string
+	IsAdmin   bool
+	CreatedAt time.Time
 }
 
-// CheckPermissions validates that the accessing user has proper authorization.
-// It returns an error if no user ID is provided, implementing zero-trust security.
-func CheckPermissions(a AuditableData) (AuditableData, error) {
-	if a.UserID == "" {
-		return AuditableData{}, fmt.Errorf("unauthorized: no user ID")
+// AuditLog represents where audit events would be recorded
+type AuditLog struct {
+	Events []AuditEvent
+}
+
+// AuditEvent represents a single audit log entry
+type AuditEvent struct {
+	UserID    string
+	Action    string
+	Target    interface{}
+	Timestamp time.Time
+}
+
+// Global audit log for demo purposes
+var globalAuditLog = &AuditLog{
+	Events: make([]AuditEvent, 0),
+}
+
+// CheckPermissions verifies the requestor has permission to access the data
+func CheckPermissions(_ context.Context, a AuditableData) (AuditableData, error) {
+	if a.RequestorID == "" {
+		return AuditableData{}, fmt.Errorf("unauthorized: no requestor ID provided")
 	}
-	a.Actions = append(a.Actions, "permissions verified")
+
+	// Simulate permission check
+	if !strings.HasPrefix(a.RequestorID, "USER-") && !strings.HasPrefix(a.RequestorID, "ADMIN-") {
+		return AuditableData{}, fmt.Errorf("unauthorized: invalid requestor ID format")
+	}
+
+	// Check if requestor is admin
+	if strings.HasPrefix(a.RequestorID, "ADMIN-") {
+		a.Context["is_admin_request"] = true
+	}
+
+	a.Actions = append(a.Actions, fmt.Sprintf("permissions verified for %s", a.RequestorID))
 	return a, nil
 }
 
-// LogAccess records who accessed the data and when.
-// This creates an audit trail for compliance and security monitoring.
-func LogAccess(a AuditableData) AuditableData {
-	a.Actions = append(a.Actions, fmt.Sprintf("accessed by %s at %s",
-		a.UserID, a.Timestamp.Format(time.RFC3339)))
-	return a
+// LogAccess records the data access in the audit log
+func LogAccess(_ context.Context, a AuditableData) (AuditableData, error) {
+	event := AuditEvent{
+		UserID:    a.RequestorID,
+		Action:    "data_access",
+		Target:    a.Data.ID,
+		Timestamp: a.Timestamp,
+	}
+
+	// In a real system, this would persist to a database or audit service
+	globalAuditLog.Events = append(globalAuditLog.Events, event)
+
+	a.Actions = append(a.Actions, fmt.Sprintf("access logged at %s",
+		a.Timestamp.Format(time.RFC3339)))
+
+	return a, nil
 }
 
-// RedactSensitive masks personally identifiable information (PII) based on user permissions.
-// Non-admin users see redacted SSN and partially masked email addresses.
-func RedactSensitive(a AuditableData) AuditableData {
+// RedactSensitiveData removes or masks sensitive information based on permissions
+func RedactSensitiveData(_ context.Context, a AuditableData) (AuditableData, error) {
 	if a.Data == nil {
-		return a
+		return a, nil
 	}
 
-	// Clone the user data to avoid mutating the original
-	redactedUser := *a.Data
-	a.Data = &redactedUser
-
-	// Redact SSN for everyone (show only last 4 digits)
-	if len(a.Data.SSN) > 4 {
-		a.Data.SSN = "XXX-XX-" + a.Data.SSN[len(a.Data.SSN)-4:]
+	// Check if this is an admin request
+	isAdmin, ok := a.Context["is_admin_request"].(bool)
+	if !ok {
+		isAdmin = false
 	}
 
-	// Additional redaction for non-admin users
-	if !strings.Contains(a.UserID, "admin") {
-		// Partially mask email
-		if at := strings.Index(a.Data.Email, "@"); at > 1 {
-			a.Data.Email = a.Data.Email[:1] + "***" + a.Data.Email[at:]
+	// Non-admins get redacted data
+	if !isAdmin {
+		// Redact SSN - show only last 4 digits
+		if len(a.Data.SSN) > 4 {
+			a.Data.SSN = "***-**-" + a.Data.SSN[len(a.Data.SSN)-4:]
+		}
+
+		// Mask email - show only first 2 chars and domain
+		if idx := strings.Index(a.Data.Email, "@"); idx > 2 {
+			a.Data.Email = a.Data.Email[:2] + "****" + a.Data.Email[idx:]
+		}
+
+		// Redact phone - show only area code
+		if len(a.Data.Phone) >= 10 {
+			a.Data.Phone = a.Data.Phone[:3] + "-***-****"
+		}
+
+		a.Actions = append(a.Actions, "sensitive data redacted")
+	} else {
+		a.Actions = append(a.Actions, "full data access granted (admin)")
+	}
+
+	return a, nil
+}
+
+// CheckDataClassification adds data classification metadata
+func CheckDataClassification(_ context.Context, a AuditableData) (AuditableData, error) {
+	if a.Data == nil {
+		return a, nil
+	}
+
+	// Classify data sensitivity
+	sensitivity := "low"
+	if a.Data.SSN != "" {
+		sensitivity = "high"
+	} else if a.Data.Email != "" || a.Data.Phone != "" {
+		sensitivity = "medium"
+	}
+
+	a.Context["data_sensitivity"] = sensitivity
+	a.Actions = append(a.Actions, fmt.Sprintf("data classified as %s sensitivity", sensitivity))
+
+	return a, nil
+}
+
+// EnforceRateLimit checks if the requestor has exceeded access limits
+func EnforceRateLimit(_ context.Context, a AuditableData) error {
+	// Count recent accesses by this user
+	recentCount := 0
+	cutoff := time.Now().Add(-1 * time.Hour)
+
+	for _, event := range globalAuditLog.Events {
+		if event.UserID == a.RequestorID && event.Timestamp.After(cutoff) {
+			recentCount++
 		}
 	}
 
-	a.Actions = append(a.Actions, "sensitive data redacted")
-	return a
-}
-
-// TrackCompliance records that the access was compliant with regulations.
-// This processor would typically integrate with compliance monitoring systems.
-func TrackCompliance(a AuditableData) AuditableData {
-	// In production, this would send to compliance monitoring system
-	a.Actions = append(a.Actions, "GDPR/CCPA compliant access logged")
-	return a
-}
-
-// ValidateDataIntegrity ensures the audit data is properly formed
-func ValidateDataIntegrity(a AuditableData) error {
-	if a.Data == nil {
-		return fmt.Errorf("no data to audit")
+	// Non-admins have stricter limits
+	limit := 100
+	if isAdmin, ok := a.Context["is_admin_request"].(bool); !ok || !isAdmin {
+		limit = 10
 	}
-	if a.Timestamp.IsZero() {
-		return fmt.Errorf("missing timestamp")
+
+	if recentCount >= limit {
+		return fmt.Errorf("rate limit exceeded: %d accesses in the last hour", recentCount)
 	}
+
 	return nil
 }
 
-// CreateSecurityPipeline creates a security audit pipeline
-func CreateSecurityPipeline() *pipz.Contract[AuditableData] {
-	pipeline := pipz.NewContract[AuditableData]()
+// CreateSecurityPipeline creates a reusable security audit pipeline
+func CreateSecurityPipeline() *pipz.Pipeline[AuditableData] {
+	pipeline := pipz.NewPipeline[AuditableData]()
 	pipeline.Register(
-		pipz.Apply(CheckPermissions),
-		pipz.Validate(ValidateDataIntegrity),
-		pipz.Transform(LogAccess),
-		pipz.Transform(RedactSensitive),
-		pipz.Transform(TrackCompliance),
+		pipz.Apply("check_permissions", CheckPermissions),
+		pipz.Apply("log_access", LogAccess),
+		pipz.Apply("classify_data", CheckDataClassification),
+		pipz.Validate("rate_limit", EnforceRateLimit),
+		pipz.Apply("redact_sensitive", RedactSensitiveData),
 	)
 	return pipeline
 }
 
-// CreateAdminPipeline creates a pipeline for admin users with less redaction
-func CreateAdminPipeline() *pipz.Contract[AuditableData] {
-	pipeline := pipz.NewContract[AuditableData]()
-	pipeline.Register(
-		pipz.Apply(CheckPermissions),
-		pipz.Validate(ValidateDataIntegrity),
-		pipz.Transform(LogAccess),
-		// Admin users still get SSN redacted but keep full email
-		pipz.Transform(func(a AuditableData) AuditableData {
-			if a.Data != nil && len(a.Data.SSN) > 4 {
-				redactedUser := *a.Data
-				a.Data = &redactedUser
-				a.Data.SSN = "XXX-XX-" + a.Data.SSN[len(a.Data.SSN)-4:]
+// CreateStrictSecurityPipeline creates a pipeline with additional security checks
+func CreateStrictSecurityPipeline() *pipz.Pipeline[AuditableData] {
+	pipeline := CreateSecurityPipeline()
+
+	// Add additional security measures
+	pipeline.PushHead(
+		pipz.Validate("verify_timestamp", func(_ context.Context, a AuditableData) error {
+			// Ensure timestamp is recent to prevent replay attacks
+			if time.Since(a.Timestamp) > 5*time.Minute {
+				return fmt.Errorf("request timestamp too old, possible replay attack")
 			}
-			a.Actions = append(a.Actions, "admin view - minimal redaction")
-			return a
+			return nil
 		}),
-		pipz.Transform(TrackCompliance),
 	)
+
+	pipeline.PushTail(
+		pipz.Effect("security_metrics", func(_ context.Context, a AuditableData) error {
+			// In a real system, this would update security metrics
+			// Commenting out the print for benchmarks
+			// sensitivity := a.Context["data_sensitivity"]
+			// fmt.Printf("[METRICS] Data access: sensitivity=%v, requestor=%s\n",
+			//	sensitivity, a.RequestorID)
+			return nil
+		}),
+	)
+
 	return pipeline
 }
 
-func main() {
-	// Create security pipeline
-	securityPipeline := CreateSecurityPipeline()
-
-	// Test data
+// GetUserData simulates fetching user data with security controls
+func GetUserData(ctx context.Context, userID string, requestorID string) (*User, error) {
+	// Simulate database fetch
 	user := &User{
-		Name:    "John Doe",
-		Email:   "john.doe@example.com",
-		SSN:     "123-45-6789",
-		IsAdmin: false,
+		ID:        userID,
+		Name:      "John Doe",
+		Email:     "john.doe@example.com",
+		SSN:       "123-45-6789",
+		Phone:     "555-123-4567",
+		Role:      "user",
+		IsAdmin:   false,
+		CreatedAt: time.Now().Add(-30 * 24 * time.Hour),
 	}
 
-	// Test 1: Regular user access
-	fmt.Println("Test 1: Regular user access")
-	audit1 := AuditableData{
-		Data:      user,
-		UserID:    "user123",
-		Timestamp: time.Now(),
-		Actions:   []string{},
+	// Create auditable data
+	auditData := AuditableData{
+		Data:        user,
+		RequestorID: requestorID,
+		Timestamp:   time.Now(),
+		Actions:     []string{},
+		Context:     make(map[string]interface{}),
 	}
 
-	result, err := securityPipeline.Process(audit1)
+	// Process through security pipeline
+	pipeline := CreateSecurityPipeline()
+	result, err := pipeline.Process(ctx, auditData)
 	if err != nil {
-		log.Printf("Security check failed: %v", err)
-	} else {
-		fmt.Printf("✓ Access granted to %s\n", result.UserID)
-		fmt.Printf("  Email: %s\n", result.Data.Email)
-		fmt.Printf("  SSN: %s\n", result.Data.SSN)
-		fmt.Printf("  Audit trail: %v\n", result.Actions)
+		return nil, fmt.Errorf("security check failed: %w", err)
 	}
 
-	// Test 2: Admin user access
-	fmt.Println("\nTest 2: Admin user access")
-	adminPipeline := CreateAdminPipeline()
-	
-	admin := &User{
-		Name:    "Jane Admin",
-		Email:   "jane.admin@example.com",
-		SSN:     "987-65-4321",
-		IsAdmin: true,
-	}
+	return result.Data, nil
+}
 
-	audit2 := AuditableData{
-		Data:      admin,
-		UserID:    "admin456",
-		Timestamp: time.Now(),
-		Actions:   []string{},
-	}
+// GetAuditLog returns recent audit events (for demo purposes)
+func GetAuditLog() []AuditEvent {
+	return globalAuditLog.Events
+}
 
-	result, err = adminPipeline.Process(audit2)
+// ClearAuditLog clears the audit log (for testing)
+func ClearAuditLog() {
+	globalAuditLog.Events = make([]AuditEvent, 0)
+}
+
+// Example demonstrates the security pipeline in action
+func Example() {
+	ctx := context.Background()
+
+	// Regular user accessing data
+	fmt.Println("=== Regular User Access ===")
+	user1, err := GetUserData(ctx, "USER-001", "USER-123")
 	if err != nil {
-		log.Printf("Security check failed: %v", err)
-	} else {
-		fmt.Printf("✓ Admin access granted to %s\n", result.UserID)
-		fmt.Printf("  Email: %s\n", result.Data.Email)
-		fmt.Printf("  SSN: %s\n", result.Data.SSN)
-		fmt.Printf("  Audit trail: %v\n", result.Actions)
+		fmt.Printf("Error: %v\n", err)
+		return
 	}
+	fmt.Printf("User data (redacted): %+v\n", user1)
 
-	// Test 3: Unauthorized access attempt
-	fmt.Println("\nTest 3: Unauthorized access attempt")
-	audit3 := AuditableData{
-		Data:      user,
-		UserID:    "", // No user ID
-		Timestamp: time.Now(),
-		Actions:   []string{},
-	}
-
-	_, err = securityPipeline.Process(audit3)
+	// Admin accessing data
+	fmt.Println("\n=== Admin Access ===")
+	user2, err := GetUserData(ctx, "USER-001", "ADMIN-456")
 	if err != nil {
-		fmt.Printf("✗ Access denied: %v\n", err)
+		fmt.Printf("Error: %v\n", err)
+		return
 	}
+	fmt.Printf("User data (full): %+v\n", user2)
 
-	// Test 4: Invalid data
-	fmt.Println("\nTest 4: Invalid data integrity")
-	audit4 := AuditableData{
-		Data:      nil, // No data
-		UserID:    "user789",
-		Timestamp: time.Now(),
-		Actions:   []string{},
-	}
-
-	_, err = securityPipeline.Process(audit4)
-	if err != nil {
-		fmt.Printf("✗ Integrity check failed: %v\n", err)
+	// Show audit log
+	fmt.Println("\n=== Audit Log ===")
+	for _, event := range GetAuditLog() {
+		fmt.Printf("%s - User %s performed %s on %v\n",
+			event.Timestamp.Format(time.RFC3339),
+			event.UserID,
+			event.Action,
+			event.Target)
 	}
 }

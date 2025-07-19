@@ -9,30 +9,45 @@
 //
 // # Core Concepts
 //
-// The library is built around three main types:
+// The library is built around a simple, uniform interface:
 //
-//   - Processor: A function that transforms data of type T, returning (T, error)
-//   - Contract: A single processor that can be executed or composed with others
-//   - Chain: A sequence of processors executed in order
+//   - Chainable[T]: The core interface with Process(context.Context, T) (T, error)
+//   - Processors: Functions wrapped as Chainables using adapter functions
+//   - Connectors: Functions that compose multiple Chainables into complex flows
 //
-// All processors follow a uniform signature, enabling seamless composition while maintaining
-// type safety through Go generics. Execution follows a fail-fast pattern where processing
-// stops at the first error.
+// Everything implements the Chainable interface, enabling seamless composition while maintaining
+// type safety through Go generics. Context support allows for timeout control and cancellation.
+// Execution follows a fail-fast pattern where processing stops at the first error.
 //
 // # Adapter Functions
 //
 // pipz provides several adapter functions to wrap common patterns:
 //
-//   - Transform: Pure data transformations that cannot fail
-//   - Validate: Data validation without modification
-//   - Apply: Operations that might fail (parsing, network calls)
-//   - Mutate: Conditional transformations based on data state
-//   - Effect: Side effects like logging or metrics
-//   - Enrich: Best-effort data enhancement
+//   - Apply: Operations that transform data and might fail (parsing, API calls)
+//   - Validate: Data validation without modification (returns error on failure)
+//   - Effect: Side effects like logging or metrics (doesn't modify data)
+//
+// # Connectors
+//
+// Connectors compose Chainables into complex processing flows:
+//
+//   - Sequential: Process steps in order, stopping on first error
+//   - Switch: Route to different processors based on data
+//   - Fallback: Try alternatives if the primary fails
+//   - Retry: Retry operations with configurable attempts
+//   - RetryWithBackoff: Retry with exponential backoff
+//   - Timeout: Enforce time limits on operations
 //
 // # Usage Example
 //
 // Here's a simple example of building a user registration pipeline:
+//
+//	import (
+//	    "context"
+//	    "errors"
+//	    "strings"
+//	    "time"
+//	)
 //
 //	type User struct {
 //	    Email    string
@@ -41,31 +56,36 @@
 //	}
 //
 //	// Create individual processors
-//	validateEmail := pipz.Validate(func(u User) error {
+//	validateEmail := pipz.Validate("validate_email", func(_ context.Context, u User) error {
 //	    if !strings.Contains(u.Email, "@") {
 //	        return errors.New("invalid email")
 //	    }
 //	    return nil
 //	})
 //
-//	hashPassword := pipz.Transform(func(u User) User {
+//	hashPassword := pipz.Apply("hash_password", func(_ context.Context, u User) (User, error) {
 //	    u.Password = hash(u.Password)
-//	    return u
+//	    return u, nil
 //	})
 //
-//	generateID := pipz.Transform(func(u User) User {
+//	generateID := pipz.Apply("generate_id", func(_ context.Context, u User) (User, error) {
 //	    u.ID = uuid.New().String()
-//	    return u
+//	    return u, nil
 //	})
 //
 //	// Compose into a pipeline
-//	pipeline := validateEmail.
-//	    Then(hashPassword).
-//	    Then(generateID)
+//	pipeline := pipz.Sequential(
+//	    validateEmail,
+//	    hashPassword,
+//	    generateID,
+//	)
 //
-//	// Execute the pipeline
+//	// Execute with timeout context
+//	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+//	defer cancel()
+//
 //	user := User{Email: "user@example.com", Password: "secret"}
-//	result, err := pipeline.Process(user)
+//	result, err := pipeline.Process(ctx, user)
 //
 // # Benefits
 //
@@ -75,37 +95,43 @@
 //   - Reusability: Common processors can be shared across pipelines
 //   - Clarity: Business logic is clearly expressed as a sequence of steps
 //   - Type Safety: Compile-time type checking prevents runtime errors
-//   - Performance: Minimal overhead with zero allocations in hot paths
+//   - Timeout Control: Context support enables reliable timeout handling
+//   - Cancellation: Processors can be canceled mid-execution for security
+//   - Performance: Minimal overhead with predictable execution patterns
 //
-// # Pipeline Patterns
+// # Common Patterns
 //
-// pipz supports several common patterns:
+// pipz supports several powerful composition patterns:
 //
 //   - Sequential Processing: Chain operations that depend on previous results
-//   - Conditional Execution: Use Mutate for conditional transformations
-//   - Error Recovery: Implement fallback logic in Apply functions
-//   - Parallel Composition: Build and compose independent pipelines
+//   - Conditional Routing: Use Switch to route based on data attributes
+//   - Error Recovery: Use Fallback for alternative processing paths
+//   - Resilience: Add Retry and Timeout for unreliable operations
 //   - Side Effect Management: Use Effect for logging, metrics, or external calls
 //
 // # Performance
 //
 // The library is designed for minimal overhead:
 //
-//   - ~20-30ns per processor in the pipeline
-//   - Zero allocations for processor execution
-//   - No reflection, locks, or global state
+//   - Minimal per-processor overhead
+//   - Context passing adds negligible cost
+//   - No reflection, minimal locking
 //   - Predictable performance characteristics
+//   - Timeout enforcement with no goroutine overhead
 //
 // # Best Practices
 //
 // When using pipz:
 //
 //  1. Keep processors small and focused on a single responsibility
-//  2. Use the appropriate adapter for your use case
-//  3. Compose pipelines from reusable processors
-//  4. Test processors independently before composing
-//  5. Handle errors at the pipeline level, not within processors
-//  6. Use Effect for side effects to maintain processor purity
+//  2. Use descriptive names for processors to aid debugging
+//  3. Check context.Err() in long-running processors for cancellation
+//  4. Use appropriate timeouts with the Timeout connector
+//  5. Use the appropriate adapter for your use case (Apply, Validate, Effect)
+//  6. Compose pipelines from reusable processors using connectors
+//  7. Test processors independently before composing
+//  8. Handle errors at the pipeline level, not within processors
+//  9. Use Effect for side effects to maintain processor purity
 //
 // # Integration
 //
