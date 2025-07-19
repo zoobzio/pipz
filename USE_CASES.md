@@ -1,10 +1,12 @@
 # pipz Use Cases
 
-This document showcases real-world use cases for pipz pipelines. Each example demonstrates how pipz can simplify common processing patterns.
+This document showcases real-world problems that pipz solves. Each use case starts with a problem statement and demonstrates why pipz is the right solution.
 
 ## Data Validation Pipeline
 
-Validate complex data structures with reusable validators:
+**Problem**: Complex business objects require multi-step validation with clear, actionable error messages. Traditional validation approaches often result in deeply nested if-statements or validation logic scattered throughout the codebase.
+
+**Why pipz**: Compose reusable validators that each handle one concern, get detailed error locations, and maintain single responsibility principle.
 
 ```go
 type Order struct {
@@ -20,53 +22,53 @@ type OrderItem struct {
     Price     float64
 }
 
-// Validators
-func validateOrderID(o Order) (Order, error) {
+// Create validation processors
+validateOrderID := pipz.Validate("order_id", func(ctx context.Context, o Order) error {
     if o.ID == "" {
-        return Order{}, fmt.Errorf("order ID required")
+        return fmt.Errorf("order ID required")
     }
     if !strings.HasPrefix(o.ID, "ORD-") {
-        return Order{}, fmt.Errorf("order ID must start with ORD-")
+        return fmt.Errorf("order ID must start with ORD-")
     }
-    return o, nil
-}
+    return nil
+})
 
-func validateItems(o Order) (Order, error) {
+validateItems := pipz.Validate("items", func(ctx context.Context, o Order) error {
     if len(o.Items) == 0 {
-        return Order{}, fmt.Errorf("order must have at least one item")
+        return fmt.Errorf("order must have at least one item")
     }
     for i, item := range o.Items {
         if item.Quantity <= 0 {
-            return Order{}, fmt.Errorf("item %d: quantity must be positive", i)
+            return fmt.Errorf("item %d: quantity must be positive", i)
         }
         if item.Price < 0 {
-            return Order{}, fmt.Errorf("item %d: price cannot be negative", i)
+            return fmt.Errorf("item %d: price cannot be negative", i)
         }
     }
-    return o, nil
-}
+    return nil
+})
 
-func validateTotal(o Order) (Order, error) {
+validateTotal := pipz.Validate("total", func(ctx context.Context, o Order) error {
     calculated := 0.0
     for _, item := range o.Items {
         calculated += float64(item.Quantity) * item.Price
     }
     if math.Abs(calculated-o.Total) > 0.01 {
-        return Order{}, fmt.Errorf("total mismatch: expected %.2f, got %.2f", calculated, o.Total)
+        return fmt.Errorf("total mismatch: expected %.2f, got %.2f", calculated, o.Total)
     }
-    return o, nil
-}
+    return nil
+})
 
-// Usage
-validationPipeline := pipz.NewContract[Order]()
-validationPipeline.Register(
-    pipz.Apply(validateOrderID),
-    pipz.Apply(validateItems),
-    pipz.Apply(validateTotal),
+// Compose into validation pipeline
+validationPipeline := pipz.Sequential(
+    validateOrderID,
+    validateItems,
+    validateTotal,
 )
 
 // Process an order
-order, err := validationPipeline.Process(incomingOrder)
+ctx := context.Background()
+order, err := validationPipeline.Process(ctx, incomingOrder)
 if err != nil {
     return fmt.Errorf("order validation failed: %w", err)
 }
@@ -74,7 +76,9 @@ if err != nil {
 
 ## Security Audit Pipeline
 
-Track and audit data access with composable audit processors:
+**Problem**: Applications need to track data access, redact sensitive information based on user permissions, and maintain audit logs for compliance. This logic often gets tangled with business logic.
+
+**Why pipz**: Chain security checks that must happen in order, cleanly separate security concerns from business logic, and ensure audit trails are consistent.
 
 ```go
 type AuditableData struct {
@@ -91,24 +95,25 @@ type User struct {
     IsAdmin   bool
 }
 
-func checkPermissions(a AuditableData) (AuditableData, error) {
+// Create security processors
+checkPermissions := pipz.Apply("check_permissions", func(ctx context.Context, a AuditableData) (AuditableData, error) {
     if a.UserID == "" {
         return AuditableData{}, fmt.Errorf("unauthorized: no user ID")
     }
     a.Actions = append(a.Actions, "permissions verified")
     return a, nil
-}
+})
 
-func logAccess(a AuditableData) (AuditableData, error) {
+logAccess := pipz.Apply("log_access", func(ctx context.Context, a AuditableData) (AuditableData, error) {
     a.Actions = append(a.Actions, fmt.Sprintf("accessed by %s at %s", 
         a.UserID, a.Timestamp.Format(time.RFC3339)))
     
     // Log to your audit system
     auditLog.Record(a.UserID, "data_access", a.Data)
     return a, nil
-}
+})
 
-func redactSensitive(a AuditableData) (AuditableData, error) {
+redactSensitive := pipz.Apply("redact_sensitive", func(ctx context.Context, a AuditableData) (AuditableData, error) {
     if a.Data != nil && !a.Data.IsAdmin {
         // Redact SSN for non-admins
         if len(a.Data.SSN) > 4 {
@@ -121,14 +126,13 @@ func redactSensitive(a AuditableData) (AuditableData, error) {
     }
     a.Actions = append(a.Actions, "sensitive data redacted")
     return a, nil
-}
+})
 
 // Create audit pipeline
-auditPipeline := pipz.NewContract[AuditableData]()
-auditPipeline.Register(
-    pipz.Apply(checkPermissions),
-    pipz.Apply(logAccess),
-    pipz.Apply(redactSensitive),
+auditPipeline := pipz.Sequential(
+    checkPermissions,
+    logAccess,
+    redactSensitive,
 )
 
 // Use in data access layer
@@ -141,7 +145,8 @@ func getUserData(userID string, requestorID string) (*User, error) {
         Timestamp: time.Now(),
     }
     
-    result, err := auditPipeline.Process(auditData)
+    ctx := context.Background()
+    result, err := auditPipeline.Process(ctx, auditData)
     if err != nil {
         return nil, err
     }
@@ -152,7 +157,9 @@ func getUserData(userID string, requestorID string) (*User, error) {
 
 ## Data Transformation Pipeline
 
-Transform data between formats with validation and enrichment:
+**Problem**: Converting data between formats (CSV→Database) requires parsing, validation, normalization, and error handling. Each step can fail, and errors need to be handled gracefully.
+
+**Why pipz**: Each transformation step is isolated and testable, errors stop processing immediately with context about where they occurred, and the pipeline can be reused for batch processing.
 
 ```go
 type CSVRecord struct {
@@ -228,21 +235,21 @@ func normalizePhone(ctx TransformContext) (TransformContext, error) {
 }
 
 // Create transformation pipeline
-transformPipeline := pipz.NewContract[TransformContext]()
-transformPipeline.Register(
-    pipz.Apply(parseCSV),
-    pipz.Apply(validateEmail),
-    pipz.Apply(normalizePhone),
+transformPipeline := pipz.Sequential(
+    pipz.Apply("parse_csv", parseCSV),
+    pipz.Apply("validate_email", validateEmail),
+    pipz.Apply("normalize_phone", normalizePhone),
 )
 
 // Process CSV data
-ctx := TransformContext{
+data := TransformContext{
     CSV: &CSVRecord{
         Fields: []string{"123", "John Doe", "john@example.com", "555-1234"},
     },
 }
 
-result, err := transformPipeline.Process(ctx)
+ctx := context.Background()
+result, err := transformPipeline.Process(ctx, data)
 if err != nil {
     return fmt.Errorf("transformation failed: %w", err)
 }
@@ -254,7 +261,9 @@ if len(result.Errors) > 0 {
 
 ## Multi-Stage Processing Workflow
 
-Combine multiple pipelines for complex workflows:
+**Problem**: Complex workflows like user onboarding have multiple dependent stages (validation → enrichment → persistence → notification). Each stage has its own requirements and error handling needs.
+
+**Why pipz**: Compose processors into stages using Sequential, each stage remains focused, and stages can be conditionally executed or reordered based on business rules.
 
 ```go
 type WorkflowData struct {
@@ -263,71 +272,62 @@ type WorkflowData struct {
     Processed []string
 }
 
-// Create separate pipelines for each stage
-func createValidationPipeline() *pipz.Contract[WorkflowData] {
-    pipeline := pipz.NewContract[WorkflowData]()
-    pipeline.Register(
-        pipz.Validate(func(w WorkflowData) error {
-            if w.User.Email == "" {
-                return fmt.Errorf("email required")
-            }
-            return nil
-        }),
-        pipz.Effect(func(w WorkflowData) error {
-            log.Printf("Validation passed for user %s", w.User.Email)
-            return nil
-        }),
-    )
-    return pipeline
-}
+// Create stage processors
+validateUser := pipz.Validate("validate_user", func(ctx context.Context, w WorkflowData) error {
+    if w.User.Email == "" {
+        return fmt.Errorf("email required")
+    }
+    return nil
+})
 
-func createEnrichmentPipeline() *pipz.Contract[WorkflowData] {
-    pipeline := pipz.NewContract[WorkflowData]()
-    pipeline.Register(
-        pipz.Enrich(func(w WorkflowData) (WorkflowData, error) {
-            // Fetch additional data
-            profile, err := fetchUserProfile(w.User.ID)
-            if err != nil {
-                return w, err
-            }
-            w.Metadata["profile"] = profile
-            w.Processed = append(w.Processed, "enriched")
-            return w, nil
-        }),
-    )
-    return pipeline
-}
+logValidation := pipz.Effect("log_validation", func(ctx context.Context, w WorkflowData) error {
+    log.Printf("Validation passed for user %s", w.User.Email)
+    return nil
+})
 
-func createPersistencePipeline() *pipz.Contract[WorkflowData] {
-    pipeline := pipz.NewContract[WorkflowData]()
-    pipeline.Register(
-        pipz.Apply(func(w WorkflowData) (WorkflowData, error) {
-            // Save to database
-            if err := saveUser(w.User); err != nil {
-                return w, fmt.Errorf("failed to save user: %w", err)
-            }
-            w.Processed = append(w.Processed, "persisted")
-            return w, nil
-        }),
-        pipz.Effect(func(w WorkflowData) error {
-            // Send notification
-            notifyUserCreated(w.User)
-            return nil
-        }),
-    )
-    return pipeline
-}
+enrichUser := pipz.Apply("enrich_user", func(ctx context.Context, w WorkflowData) (WorkflowData, error) {
+    // Fetch additional data
+    profile, err := fetchUserProfile(w.User.ID)
+    if err != nil {
+        return w, err
+    }
+    w.Metadata["profile"] = profile
+    w.Processed = append(w.Processed, "enriched")
+    return w, nil
+})
+
+persistUser := pipz.Apply("persist_user", func(ctx context.Context, w WorkflowData) (WorkflowData, error) {
+    // Save to database
+    if err := saveUser(w.User); err != nil {
+        return w, fmt.Errorf("failed to save user: %w", err)
+    }
+    w.Processed = append(w.Processed, "persisted")
+    return w, nil
+})
+
+notifyCreation := pipz.Effect("notify_creation", func(ctx context.Context, w WorkflowData) error {
+    // Send notification
+    notifyUserCreated(w.User)
+    return nil
+})
 
 // Compose into a workflow
-workflow := pipz.NewChain[WorkflowData]()
-workflow.Add(
-    createValidationPipeline().Link(),
-    createEnrichmentPipeline().Link(),
-    createPersistencePipeline().Link(),
+workflow := pipz.Sequential(
+    // Validation stage
+    validateUser,
+    logValidation,
+    
+    // Enrichment stage
+    enrichUser,
+    
+    // Persistence stage
+    persistUser,
+    notifyCreation,
 )
 
 // Process through the complete workflow
-result, err := workflow.Process(WorkflowData{
+ctx := context.Background()
+result, err := workflow.Process(ctx, WorkflowData{
     User:     newUser,
     Metadata: make(map[string]interface{}),
 })
@@ -335,7 +335,9 @@ result, err := workflow.Process(WorkflowData{
 
 ## Request Middleware Pipeline
 
-Clean request processing with reusable middleware:
+**Problem**: HTTP requests need authentication, rate limiting, and logging applied in a specific order. Different endpoints may need different middleware combinations.
+
+**Why pipz**: Middleware order is explicit and enforced, easy to add/remove/reorder middleware based on routes, and each middleware is independently testable.
 
 ```go
 type Request struct {
@@ -384,11 +386,10 @@ func logRequest(r Request) error {
 }
 
 // Create middleware pipeline
-middlewarePipeline := pipz.NewContract[Request]()
-middlewarePipeline.Register(
-    pipz.Apply(authenticate),
-    pipz.Apply(checkRateLimit),
-    pipz.Effect(logRequest),
+middlewarePipeline := pipz.Sequential(
+    pipz.Apply("authenticate", authenticate),
+    pipz.Apply("rate_limit", checkRateLimit),
+    pipz.Effect("log_request", logRequest),
 )
 
 // Use in HTTP handler
@@ -398,7 +399,8 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
         Body:    readBody(r),
     }
     
-    processed, err := middlewarePipeline.Process(req)
+    ctx := r.Context()
+    processed, err := middlewarePipeline.Process(ctx, req)
     if err != nil {
         http.Error(w, err.Error(), getErrorCode(err))
         return
@@ -409,9 +411,11 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-## Error Handling Pipeline
+## Payment Error Recovery Pipeline
 
-Centralized error handling with recovery strategies:
+**Problem**: Payment failures need to be categorized (network errors vs insufficient funds), customers need appropriate notifications, and some errors should trigger retry logic with alternative providers.
+
+**Why pipz**: Error handling pipeline can attempt recovery strategies based on error type, customer communication is consistent, and retry logic is centralized.
 
 ```go
 type PaymentError struct {
@@ -486,12 +490,11 @@ func attemptRecovery(pe PaymentError) (PaymentError, error) {
 }
 
 // Create error handling pipeline
-errorPipeline := pipz.NewContract[PaymentError]()
-errorPipeline.Register(
-    pipz.Apply(categorizeError),
-    pipz.Apply(notifyCustomer),
-    pipz.Apply(attemptRecovery),
-    pipz.Effect(func(pe PaymentError) error {
+errorPipeline := pipz.Sequential(
+    pipz.Apply("categorize_error", categorizeError),
+    pipz.Apply("notify_customer", notifyCustomer),
+    pipz.Apply("attempt_recovery", attemptRecovery),
+    pipz.Effect("audit_error", func(ctx context.Context, pe PaymentError) error {
         // Always audit payment errors
         auditPaymentError(pe)
         return nil
@@ -501,7 +504,8 @@ errorPipeline.Register(
 // Use in payment processing
 func processPayment(p Payment) error {
     if err := chargeCard(p); err != nil {
-        result, _ := errorPipeline.Process(PaymentError{
+        ctx := context.Background()
+        result, _ := errorPipeline.Process(ctx, PaymentError{
             Payment:       p,
             OriginalError: err,
         })
@@ -519,48 +523,56 @@ func processPayment(p Payment) error {
 
 ## Testing with Pipelines
 
-Use pipelines to create testable, mockable processing:
+**Problem**: Testing complex business processes often requires mocking external services while keeping business logic intact. Traditional approaches lead to complex test setups.
+
+**Why pipz**: Swap out individual processors for test doubles, keep validation and business logic while mocking external calls, and use the same pipeline structure in tests and production.
 
 ```go
-// Production pipeline
-func createProductionPipeline() *pipz.Contract[Order] {
-    pipeline := pipz.NewContract[Order]()
-    pipeline.Register(
-        pipz.Apply(validateOrder),
-        pipz.Apply(calculateTax),
-        pipz.Apply(chargePayment),
-        pipz.Effect(sendConfirmationEmail),
-    )
-    return pipeline
-}
+// Production processors
+validateOrder := pipz.Validate("validate", validateOrderFunc)
+calculateTax := pipz.Apply("tax", calculateTaxFunc)
+chargePayment := pipz.Apply("charge", chargePaymentFunc)
+sendEmail := pipz.Effect("email", sendConfirmationEmail)
 
-// Test pipeline with mocked external calls
-func createTestPipeline() *pipz.Contract[Order] {
-    pipeline := pipz.NewContract[Order]()
-    pipeline.Register(
-        pipz.Apply(validateOrder),      // Real validation
-        pipz.Apply(calculateTax),       // Real tax calculation
-        pipz.Apply(mockChargePayment),  // Mock payment
-        pipz.Effect(func(o Order) error {
-            // Log instead of sending email
-            log.Printf("Would send email to %s", o.CustomerEmail)
-            return nil
-        }),
-    )
-    return pipeline
-}
+// Test processors
+mockChargePayment := pipz.Apply("mock_charge", func(ctx context.Context, o Order) (Order, error) {
+    // Mock successful payment
+    o.PaymentID = "MOCK-" + o.ID
+    return o, nil
+})
+
+mockSendEmail := pipz.Effect("mock_email", func(ctx context.Context, o Order) error {
+    // Log instead of sending email
+    log.Printf("Would send email to %s", o.CustomerEmail)
+    return nil
+})
+
+// Production pipeline
+productionPipeline := pipz.Sequential(
+    validateOrder,
+    calculateTax,
+    chargePayment,
+    sendEmail,
+)
+
+// Test pipeline
+testPipeline := pipz.Sequential(
+    validateOrder,      // Real validation
+    calculateTax,       // Real tax calculation
+    mockChargePayment,  // Mock payment
+    mockSendEmail,      // Mock email
+)
 
 // In tests
 func TestOrderProcessing(t *testing.T) {
-    pipeline := createTestPipeline()
-    
     order := Order{
         ID:     "TEST-001",
         Total:  100.00,
         Items:  []OrderItem{{ProductID: "PROD-1", Quantity: 2, Price: 50.00}},
     }
     
-    result, err := pipeline.Process(order)
+    ctx := context.Background()
+    result, err := testPipeline.Process(ctx, order)
     if err != nil {
         t.Fatalf("Order processing failed: %v", err)
     }
@@ -569,32 +581,37 @@ func TestOrderProcessing(t *testing.T) {
 }
 ```
 
-## Additional Use Case Concepts
+## Additional Real-World Use Cases
 
-*Note: These are theoretical examples showing how pipz could be applied to various domains. They are not included in the demo system.*
+### Stream Processing Pipeline
 
-### Event Processing Pipeline
+**Problem**: Large files or continuous data streams need processing but don't fit in memory. Progress tracking and partial failure handling are required.
+
+**Why pipz**: Process chunks through the same validation/transformation pipeline, maintain consistent error handling across chunks, and easily add progress reporting.
+
 ```go
-type Event struct {
-    ID        string
-    Type      string
-    UserID    string
-    Payload   map[string]interface{}
-    Timestamp time.Time
+type StreamContext struct {
+    Reader    io.Reader
+    ChunkSize int
+    Processed int64
+    Errors    []error
 }
 
-// Process analytics events through multiple stages
-eventPipeline := pipz.NewContract[Event]()
-eventPipeline.Register(
-    pipz.Validate(validateEventSchema),
-    pipz.Transform(enrichWithUserData),
-    pipz.Mutate(addGeolocation, isLocationEvent),
-    pipz.Effect(sendToAnalytics),
-    pipz.Apply(triggerNotifications),
+streamPipeline := pipz.Sequential(
+    pipz.Apply("read_chunk", readNextChunk),
+    pipz.Validate("validate_format", validateChunkFormat),
+    pipz.Apply("process_chunk", processChunkData),
+    pipz.Effect("update_progress", updateProgressBar),
+    pipz.Apply("write_output", writeProcessedChunk),
 )
 ```
 
 ### Webhook Processing
+
+**Problem**: Webhooks from different providers (Stripe, GitHub, Slack) need signature verification, replay attack prevention, and routing to appropriate handlers.
+
+**Why pipz**: Provider-specific processors can be composed, signature verification must happen first (fail fast), and routing logic is separate from processing logic.
+
 ```go
 type Webhook struct {
     Provider  string  // stripe, github, slack
@@ -603,131 +620,144 @@ type Webhook struct {
     Verified  bool
 }
 
-// Secure webhook processing with verification
-webhookPipeline := pipz.NewContract[Webhook]()
-webhookPipeline.Register(
-    pipz.Apply(verifySignature),
-    pipz.Apply(parsePayload),
-    pipz.Apply(validateTimestamp), // Prevent replay attacks
-    pipz.Effect(logWebhook),
-    pipz.Apply(routeToHandler),
+webhookPipeline := pipz.Sequential(
+    pipz.Apply("verify_signature", verifySignature),
+    pipz.Apply("parse_payload", parsePayload),
+    pipz.Validate("check_timestamp", preventReplayAttack), 
+    pipz.Effect("audit_log", logWebhook),
+    pipz.Apply("route", routeToHandler),
 )
 ```
 
-### Image Processing
-```go
-type ImageJob struct {
-    Original  []byte
-    Format    string
-    Metadata  map[string]interface{}
-    Processed map[string][]byte
-}
+### Content Moderation Pipeline
 
-// Multi-stage image transformation
-imagePipeline := pipz.NewContract[ImageJob]()
-imagePipeline.Register(
-    pipz.Validate(validateImageFormat),
-    pipz.Apply(extractMetadata),
-    pipz.Transform(stripEXIF),        // Privacy
-    pipz.Apply(generateThumbnails),
-    pipz.Mutate(addWatermark, isPremiumUser),
-    pipz.Apply(optimizeSize),
-)
-```
+**Problem**: User-generated content needs multiple checks (spam, profanity, PII) with different actions based on severity. Manual review may be needed for edge cases.
 
-### Message Queue Worker
-```go
-type QueueMessage struct {
-    ID       string
-    Body     interface{}
-    Attempts int
-    Status   string
-}
+**Why pipz**: Chain multiple detection algorithms, use Mutate to conditionally quarantine based on risk score, and maintain audit trail of all checks performed.
 
-// Reliable message processing
-mqPipeline := pipz.NewContract[QueueMessage]()
-mqPipeline.Register(
-    pipz.Apply(deserializeMessage),
-    pipz.Validate(checkRetryLimit),
-    pipz.Apply(processMessage),
-    pipz.Effect(acknowledgeMessage),
-    pipz.Apply(scheduleRetryIfNeeded),
-)
-```
-
-### Feature Flag Evaluation
-```go
-type FeatureContext struct {
-    UserID  string
-    Feature string
-    Enabled bool
-    Variant string
-}
-
-// Complex feature flag logic
-featurePipeline := pipz.NewContract[FeatureContext]()
-featurePipeline.Register(
-    pipz.Apply(checkUserSegment),
-    pipz.Apply(evaluateRules),
-    pipz.Mutate(applyOverrides, isInternalUser),
-    pipz.Effect(trackFeatureUsage),
-    pipz.Transform(selectVariant),
-)
-```
-
-### Content Moderation
 ```go
 type Content struct {
-    Text   string
-    Author string
-    Flags  []string
-    Score  float64
+    Text      string
+    UserID    string
+    RiskScore float64
+    Flags     []string
+    Status    string // pending, approved, quarantined
 }
 
-// Multi-stage content analysis
-moderationPipeline := pipz.NewContract[Content]()
-moderationPipeline.Register(
-    pipz.Apply(detectSpam),
-    pipz.Apply(checkProfanity),
-    pipz.Apply(scanForPII),
-    pipz.Mutate(autoQuarantine, hasHighRiskFlags),
-    pipz.Effect(notifyModerators),
+moderationPipeline := pipz.Sequential(
+    pipz.Apply("spam_check", detectSpam),
+    pipz.Apply("profanity_check", checkProfanity),
+    pipz.Apply("pii_scan", scanForPII),
+    pipz.Apply("calculate_risk", calculateRiskScore),
+    pipz.Apply("auto_action", autoQuarantine),
+    pipz.Effect("notify", notifyModerators),
 )
 ```
 
-### API Response Transformation
+### API Version Transformation
+
+**Problem**: Supporting multiple API versions requires transforming responses based on client version. New fields need to be hidden from old clients, deprecated fields need migration.
+
+**Why pipz**: Version-specific transformations can be dynamically composed, transformation order matters (deprecation → hiding → compression), and easy to test version compatibility.
+
 ```go
 type APIResponse struct {
-    StatusCode int
-    Body       interface{}
     Version    string
+    Data       interface{}
+    Deprecated []string
 }
 
-// Version compatibility and transformation
-responsePipeline := pipz.NewContract[APIResponse]()
-responsePipeline.Register(
-    pipz.Transform(versionTransform),    // v1 -> v2
-    pipz.Apply(filterSensitiveData),
-    pipz.Mutate(addDebugInfo, isDevelopment),
-    pipz.Transform(compressResponse),
-)
+// Version-specific processors
+migrateV1 := pipz.Apply("migrate_v1", migrateV1Fields)
+hideNewFields := pipz.Apply("hide_v2_fields", hideNewFieldsFunc)
+markDeprecated := pipz.Apply("mark_deprecated", markDeprecatedFields)
+formatResponse := pipz.Apply("format", formatResponseFunc)
+
+// Build pipeline based on client version
+var processors []pipz.Chainable[APIResponse]
+
+if clientVersion < 2 {
+    processors = append(processors, migrateV1, hideNewFields)
+}
+
+processors = append(processors, markDeprecated, formatResponse)
+
+responsePipeline := pipz.Sequential(processors...)
 ```
 
-These examples demonstrate pipz's versatility across different domains while maintaining the same simple, composable pattern.
+### Dynamic Pipeline Configuration
 
-## Key Patterns
+**Problem**: Different environments (dev/staging/prod) need different processing steps. Debug logging should only happen in development, extra validation in staging.
 
-### 1. Separation of Concerns
-Each processor handles one specific aspect of processing, making code easier to understand, test, and maintain.
+**Why pipz**: Compose processors dynamically based on environment configuration, keeping core business logic unchanged.
 
-### 2. Composability
-Small, focused pipelines can be combined into larger workflows using chains.
+```go
+// Core business processors
+validateOrder := pipz.Validate("validate_order", validateOrderFunc)
+calculateTax := pipz.Apply("calculate_tax", calculateTaxFunc)
+processPayment := pipz.Apply("process_payment", processPaymentFunc)
 
-### 3. Error Handling
-Errors stop processing immediately, allowing for clean error handling at the pipeline level.
+// Optional processors
+debugInput := pipz.Effect("debug_input", logInput)
+debugOutput := pipz.Effect("debug_output", logOutput)
+fraudCheck := pipz.Validate("fraud_check", performFraudCheck)
 
-### 4. Testability
-Pipelines make it easy to mock external dependencies while keeping business logic intact.
+// Build pipeline based on environment
+var processors []pipz.Chainable[Order]
 
-### 5. Reusability
-Once created, pipelines can be used anywhere in your codebase without duplication.
+// Add debug logging in development
+if config.Environment == "development" {
+    processors = append(processors, debugInput)
+}
+
+// Core business logic
+processors = append(processors, validateOrder, calculateTax)
+
+// Add fraud check in staging
+if config.Environment == "staging" {
+    processors = append(processors, fraudCheck)
+}
+
+processors = append(processors, processPayment)
+
+// Add output debugging in development
+if config.Environment == "development" {
+    processors = append(processors, debugOutput)
+}
+
+// Create the pipeline
+pipeline := pipz.Sequential(processors...)
+```
+
+## Perfect For
+
+pipz excels at:
+
+1. **Multi-step data processing** where order matters
+2. **Middleware chains** that need to be composable
+3. **ETL pipelines** with validation and transformation
+4. **Request/response processing** with multiple concerns
+5. **Error handling flows** with recovery strategies
+6. **Workflows** that need conditional steps
+7. **Stream processing** with consistent handling
+8. **Any process** that benefits from clear stages and error context
+
+## Key Benefits
+
+### 1. **Separation of Concerns**
+Each processor handles one specific aspect, making code easier to understand, test, and maintain.
+
+### 2. **Explicit Order**
+Processing order is clear and enforced, no hidden dependencies.
+
+### 3. **Error Context**
+Errors include which processor failed and at what stage, making debugging easier.
+
+### 4. **Testability**
+Each processor can be tested in isolation, and processors can be swapped for tests.
+
+### 5. **Reusability**
+Processors and pipelines can be shared across different parts of your application.
+
+### 6. **Dynamic Configuration**
+Pipelines can be modified at runtime based on configuration or feature flags.

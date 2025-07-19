@@ -8,23 +8,43 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   release:
     name: Create Release
     runs-on: ubuntu-latest
+    # Prevent multiple releases from running at the same time
+    concurrency:
+      group: release
+      cancel-in-progress: true
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # Fetch all history for svu
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
         go-version: '1.23'
     
-    - name: Install svu
-      run: go install github.com/caarlos0/svu@latest
+    - name: Install dependencies
+      run: |
+        # Install svu for version calculation
+        go install github.com/caarlos0/svu@latest
+        
+        # Install git-cliff
+        curl -LO https://github.com/orhun/git-cliff/releases/download/v2.0.0/git-cliff-2.0.0-x86_64-unknown-linux-gnu.tar.gz
+        tar -xzf git-cliff-*.tar.gz
+        sudo mv git-cliff-*/git-cliff /usr/local/bin/
+        rm -rf git-cliff-*
+    
+    - name: Configure Git
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
     
     - name: Run tests
       run: go test -v ./...
@@ -32,85 +52,63 @@ jobs:
     - name: Calculate next version
       id: version
       run: |
+        # Get the current version
+        CURRENT_VERSION=$(svu current)
+        echo "Current version: $CURRENT_VERSION"
+        
+        # Calculate next version based on conventional commits
         NEXT_VERSION=$(svu next)
-        echo "next_version=$NEXT_VERSION" >> $GITHUB_OUTPUT
-        echo "Next version will be: $NEXT_VERSION"
-    
-    - name: Check if tag exists
-      id: check_tag
-      run: |
-        if git rev-parse "${{ steps.version.outputs.next_version }}" >/dev/null 2>&1; then
-          echo "exists=true" >> $GITHUB_OUTPUT
+        echo "Next version: $NEXT_VERSION"
+        
+        # Check if we actually need a new release
+        if [ "$CURRENT_VERSION" = "$NEXT_VERSION" ]; then
+          echo "No version bump needed"
+          echo "should_release=false" >> $GITHUB_OUTPUT
         else
-          echo "exists=false" >> $GITHUB_OUTPUT
+          echo "should_release=true" >> $GITHUB_OUTPUT
+          echo "next_version=$NEXT_VERSION" >> $GITHUB_OUTPUT
         fi
     
-    - name: Create tag
-      if: steps.check_tag.outputs.exists == 'false'
+    - name: Generate changelog
+      if: steps.version.outputs.should_release == 'true'
       run: |
-        git config user.name "GitHub Actions"
-        git config user.email "actions@github.com"
-        git tag -a "${{ steps.version.outputs.next_version }}" -m "Release ${{ steps.version.outputs.next_version }}"
-        git push origin "${{ steps.version.outputs.next_version }}"
-    
-    - name: Update CHANGELOG.md
-      if: steps.check_tag.outputs.exists == 'false'
-      run: |
-        # Get the last tag
-        LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        # Generate the changelog for the new version
+        git-cliff --tag ${{ steps.version.outputs.next_version }} --output CHANGELOG.md --prepend CHANGELOG.md
         
-        # Collect commits since last tag and format them
-        echo "## [${{ steps.version.outputs.next_version }}] - $(date +%Y-%m-%d)" > new_release.md
-        echo "" >> new_release.md
-        
-        # Group commits by type
-        FEAT_COMMITS=$(git log --pretty=format:"%s" ${LAST_TAG:+$LAST_TAG..}HEAD | grep -E "^(feat|add):" | sed 's/^feat: /- /' | sed 's/^add: /- /' || true)
-        FIX_COMMITS=$(git log --pretty=format:"%s" ${LAST_TAG:+$LAST_TAG..}HEAD | grep -E "^(fix|bugfix):" | sed 's/^fix: /- /' | sed 's/^bugfix: /- /' || true)
-        CHANGE_COMMITS=$(git log --pretty=format:"%s" ${LAST_TAG:+$LAST_TAG..}HEAD | grep -E "^(change|update|refactor):" | sed 's/^change: /- /' | sed 's/^update: /- /' | sed 's/^refactor: /- /' || true)
-        
-        if [ ! -z "$FEAT_COMMITS" ]; then
-          echo "### Added" >> new_release.md
-          echo "$FEAT_COMMITS" >> new_release.md
-          echo "" >> new_release.md
-        fi
-        
-        if [ ! -z "$CHANGE_COMMITS" ]; then
-          echo "### Changed" >> new_release.md
-          echo "$CHANGE_COMMITS" >> new_release.md
-          echo "" >> new_release.md
-        fi
-        
-        if [ ! -z "$FIX_COMMITS" ]; then
-          echo "### Fixed" >> new_release.md
-          echo "$FIX_COMMITS" >> new_release.md
-          echo "" >> new_release.md
-        fi
-        
-        # Update CHANGELOG - insert new release after [Unreleased]
-        awk '/^## \[Unreleased\]/{print; print ""; system("cat new_release.md"); next} 1' CHANGELOG.md > temp_changelog.md
-        mv temp_changelog.md CHANGELOG.md
-        
-        # Commit the updated changelog
-        git config user.name "GitHub Actions"
-        git config user.email "actions@github.com"
+        # Stage the changelog
         git add CHANGELOG.md
-        git commit -m "chore: release ${{ steps.version.outputs.next_version }}" || echo "No changes to commit"
+    
+    - name: Create release commit and tag
+      if: steps.version.outputs.should_release == 'true'
+      id: commit
+      run: |
+        # Create a release commit
+        git commit -m "chore(release): prepare for ${{ steps.version.outputs.next_version }}"
+        
+        # Create annotated tag
+        git tag -a "${{ steps.version.outputs.next_version }}" -m "Release ${{ steps.version.outputs.next_version }}"
+        
+        # Push commit and tag
         git push origin main
+        git push origin "${{ steps.version.outputs.next_version }}"
+        
+        # Get the commit SHA for the release
+        echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
     
     - name: Extract release notes
+      if: steps.version.outputs.should_release == 'true'
       id: release_notes
       run: |
-        # Extract the release notes for this version
-        awk '/^## \[${{ steps.version.outputs.next_version }}\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md > release_notes.md
+        # Extract just this version's changes from the changelog
+        git-cliff --current --strip header --output release-notes.md
     
-    - name: Create Release
-      if: steps.check_tag.outputs.exists == 'false'
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Create GitHub Release
+      if: steps.version.outputs.should_release == 'true'
+      uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ steps.version.outputs.next_version }}
-        release_name: Release ${{ steps.version.outputs.next_version }}
+        name: Release ${{ steps.version.outputs.next_version }}
+        body_path: release-notes.md
         draft: false
         prerelease: false
-        body_path: release_notes.md
+        token: ${{ secrets.GITHUB_TOKEN }}

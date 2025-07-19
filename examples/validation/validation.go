@@ -1,15 +1,17 @@
-package main
+// Package validation demonstrates how to use pipz for complex data validation
+// with composable validators and clear error messages.
+package validation
 
 import (
+	"context"
 	"fmt"
-	"log"
 	"math"
 	"strings"
-	
-	"pipz"
+
+	"github.com/zoobzio/pipz"
 )
 
-// Order represents an e-commerce order.
+// Order represents a customer order with items and pricing
 type Order struct {
 	ID         string
 	CustomerID string
@@ -17,125 +19,152 @@ type Order struct {
 	Total      float64
 }
 
-// OrderItem represents a single item in an order.
+// OrderItem represents a single item in an order
 type OrderItem struct {
 	ProductID string
 	Quantity  int
 	Price     float64
 }
 
-// ValidateOrderID ensures the order ID follows the required format.
-// Orders must start with "ORD-" prefix.
-func ValidateOrderID(o Order) (Order, error) {
+// ValidateOrderID ensures the order has a valid ID format
+func ValidateOrderID(_ context.Context, o Order) (Order, error) {
 	if o.ID == "" {
-		return o, fmt.Errorf("order ID required")
+		return Order{}, fmt.Errorf("order ID required")
 	}
 	if !strings.HasPrefix(o.ID, "ORD-") {
-		return o, fmt.Errorf("order ID must start with ORD-")
+		return Order{}, fmt.Errorf("order ID must start with ORD-")
+	}
+	if len(o.ID) < 8 { // ORD-XXXX minimum
+		return Order{}, fmt.Errorf("order ID too short")
 	}
 	return o, nil
 }
 
-// ValidateItems ensures all order items have valid quantities and prices.
-func ValidateItems(o Order) (Order, error) {
-	if len(o.Items) == 0 {
-		return o, fmt.Errorf("order must have at least one item")
+// ValidateCustomerID ensures the order has a valid customer
+func ValidateCustomerID(_ context.Context, o Order) (Order, error) {
+	if o.CustomerID == "" {
+		return Order{}, fmt.Errorf("customer ID required")
 	}
-	
+	if !strings.HasPrefix(o.CustomerID, "CUST-") {
+		return Order{}, fmt.Errorf("customer ID must start with CUST-")
+	}
+	return o, nil
+}
+
+// ValidateItems ensures all order items are valid
+func ValidateItems(_ context.Context, o Order) (Order, error) {
+	if len(o.Items) == 0 {
+		return Order{}, fmt.Errorf("order must have at least one item")
+	}
+
 	for i, item := range o.Items {
+		if item.ProductID == "" {
+			return Order{}, fmt.Errorf("item %d: product ID required", i)
+		}
 		if item.Quantity <= 0 {
-			return o, fmt.Errorf("item %d: quantity must be positive", i)
+			return Order{}, fmt.Errorf("item %d: quantity must be positive", i)
 		}
 		if item.Price < 0 {
-			return o, fmt.Errorf("item %d: price cannot be negative", i)
-		}
-		if item.ProductID == "" {
-			return o, fmt.Errorf("item %d: product ID required", i)
+			return Order{}, fmt.Errorf("item %d: price cannot be negative", i)
 		}
 	}
-	
 	return o, nil
 }
 
-// ValidateTotal ensures the order total matches the sum of item prices.
-// Uses a small epsilon for floating-point comparison.
-func ValidateTotal(o Order) (Order, error) {
+// ValidateTotal ensures the order total matches the sum of items
+func ValidateTotal(_ context.Context, o Order) (Order, error) {
 	calculated := 0.0
 	for _, item := range o.Items {
 		calculated += float64(item.Quantity) * item.Price
 	}
-	
-	// Use epsilon for floating-point comparison
+
+	// Allow for small floating point differences
 	if math.Abs(calculated-o.Total) > 0.01 {
-		return o, fmt.Errorf("total mismatch: expected %.2f, got %.2f", calculated, o.Total)
+		return Order{}, fmt.Errorf("total mismatch: expected %.2f, got %.2f", calculated, o.Total)
 	}
-	
 	return o, nil
 }
 
-// CreateValidationPipeline creates a pipeline for order validation
-func CreateValidationPipeline() *pipz.Contract[Order] {
-	pipeline := pipz.NewContract[Order]()
+// ValidateBusinessRules applies business-specific validation rules
+func ValidateBusinessRules(_ context.Context, o Order) error {
+	// Example business rules
+	if o.Total > 10000 {
+		// Large orders might need additional approval
+		// This is where you'd check for approval status
+		// For demo purposes, we'll just log it
+	}
+
+	// Check for duplicate items
+	seen := make(map[string]bool)
+	for _, item := range o.Items {
+		if seen[item.ProductID] {
+			return fmt.Errorf("duplicate product %s in order", item.ProductID)
+		}
+		seen[item.ProductID] = true
+	}
+
+	return nil
+}
+
+// CreateValidationPipeline creates a reusable order validation pipeline
+func CreateValidationPipeline() *pipz.Pipeline[Order] {
+	pipeline := pipz.NewPipeline[Order]()
 	pipeline.Register(
-		pipz.Apply(ValidateOrderID),
-		pipz.Apply(ValidateItems),
-		pipz.Apply(ValidateTotal),
+		pipz.Apply("validate_order_id", ValidateOrderID),
+		pipz.Apply("validate_customer_id", ValidateCustomerID),
+		pipz.Apply("validate_items", ValidateItems),
+		pipz.Apply("validate_total", ValidateTotal),
+		pipz.Validate("business_rules", ValidateBusinessRules),
 	)
 	return pipeline
 }
 
-func main() {
-	// Create the validation pipeline
-	validator := CreateValidationPipeline()
-	
-	// Valid order
-	validOrder := Order{
+// CreateStrictValidationPipeline creates a validation pipeline with additional checks
+func CreateStrictValidationPipeline() *pipz.Pipeline[Order] {
+	pipeline := CreateValidationPipeline()
+
+	// Add additional strict validations
+	pipeline.PushTail(
+		pipz.Validate("max_items", func(_ context.Context, o Order) error {
+			if len(o.Items) > 100 {
+				return fmt.Errorf("order exceeds maximum item limit (100)")
+			}
+			return nil
+		}),
+		pipz.Validate("min_total", func(_ context.Context, o Order) error {
+			if o.Total < 1.00 {
+				return fmt.Errorf("order total must be at least $1.00")
+			}
+			return nil
+		}),
+	)
+
+	return pipeline
+}
+
+// Example shows how to use the validation pipeline
+func Example() {
+	// Create an order to validate
+	order := Order{
 		ID:         "ORD-12345",
-		CustomerID: "CUST-001",
+		CustomerID: "CUST-789",
 		Items: []OrderItem{
-			{ProductID: "PROD-A", Quantity: 2, Price: 29.99},
-			{ProductID: "PROD-B", Quantity: 1, Price: 49.99},
+			{ProductID: "PROD-001", Quantity: 2, Price: 29.99},
+			{ProductID: "PROD-002", Quantity: 1, Price: 49.99},
 		},
-		Total: 109.97, // (2 * 29.99) + 49.99
+		Total: 109.97, // 2*29.99 + 1*49.99
 	}
-	
-	fmt.Println("Validating valid order...")
-	result, err := validator.Process(validOrder)
+
+	// Create and use the validation pipeline
+	pipeline := CreateValidationPipeline()
+
+	ctx := context.Background()
+	validatedOrder, err := pipeline.Process(ctx, order)
 	if err != nil {
-		log.Printf("Validation failed: %v", err)
-	} else {
-		fmt.Printf("✓ Order %s validated successfully\n", result.ID)
+		// In a real application, you'd handle the error appropriately
+		fmt.Printf("Validation failed: %v\n", err)
+		return
 	}
-	
-	// Invalid order - wrong total
-	invalidOrder := Order{
-		ID:         "ORD-12346",
-		CustomerID: "CUST-002",
-		Items: []OrderItem{
-			{ProductID: "PROD-C", Quantity: 3, Price: 19.99},
-		},
-		Total: 50.00, // Wrong! Should be 59.97
-	}
-	
-	fmt.Println("\nValidating invalid order...")
-	_, err = validator.Process(invalidOrder)
-	if err != nil {
-		fmt.Printf("✗ Validation failed: %v\n", err)
-	}
-	
-	// Invalid order - missing order ID prefix
-	badIDOrder := Order{
-		ID:         "12347", // Missing ORD- prefix
-		CustomerID: "CUST-003",
-		Items: []OrderItem{
-			{ProductID: "PROD-D", Quantity: 1, Price: 99.99},
-		},
-		Total: 99.99,
-	}
-	
-	fmt.Println("\nValidating order with bad ID...")
-	_, err = validator.Process(badIDOrder)
-	if err != nil {
-		fmt.Printf("✗ Validation failed: %v\n", err)
-	}
+
+	fmt.Printf("Order %s validated successfully\n", validatedOrder.ID)
 }
