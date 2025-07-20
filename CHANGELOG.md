@@ -1,5 +1,21 @@
 # Changelog
 
+
+## [v0.6.0] - 2025-07-20
+
+### Added
+- feat!: refactor w/ connectors (5371bf6)
+
+### Fixed
+- fix: ci actions & godoc (522a09f)
+
+### Changed
+
+
+### Other
+
+
+
 All notable changes to pipz will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
