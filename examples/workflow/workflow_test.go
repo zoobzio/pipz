@@ -468,6 +468,9 @@ func TestFulfillmentRouting(t *testing.T) {
 }
 
 func TestFullOrderPipeline(t *testing.T) {
+	// Reset global stats to avoid test pollution
+	ResetStats()
+	
 	// Create services
 	inventory := NewInventoryService()
 	fraud := NewFraudService()
@@ -622,10 +625,7 @@ func TestCompensatingPipeline(t *testing.T) {
 
 func TestOrderStats(t *testing.T) {
 	// Reset stats
-	globalStats = &OrderStats{
-		ByType:   make(map[OrderType]int64),
-		ByStatus: make(map[OrderStatus]int64),
-	}
+	ResetStats()
 
 	// Update with various orders
 	orders := []Order{
@@ -656,7 +656,7 @@ func TestOrderStats(t *testing.T) {
 		t.Errorf("Expected 3 completed orders, got %d", stats.ByStatus[StatusCompleted])
 	}
 
-	expectedRevenue := 500.00 // Only completed orders count
+	expectedRevenue := 350.00 // Only completed orders count (100 + 200 + 50)
 	if stats.TotalRevenue != expectedRevenue {
 		t.Errorf("Expected revenue %.2f, got %.2f", expectedRevenue, stats.TotalRevenue)
 	}
@@ -667,6 +667,9 @@ func TestOrderStats(t *testing.T) {
 }
 
 func TestConcurrentOrders(t *testing.T) {
+	// Reset global stats to avoid test pollution
+	ResetStats()
+	
 	// Create services
 	inventory := NewInventoryService()
 	fraud := NewFraudService()

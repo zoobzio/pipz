@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -372,7 +373,15 @@ func AttemptRecovery(ctx context.Context, pe PaymentError) (PaymentError, error)
 	case "use_alternate_provider":
 		// Find an alternative provider
 		var alternativeProvider PaymentProvider
-		for name, provider := range Providers {
+		// Sort provider names for deterministic selection
+		var providerNames []string
+		for name := range Providers {
+			providerNames = append(providerNames, name)
+		}
+		sort.Strings(providerNames)
+		
+		for _, name := range providerNames {
+			provider := Providers[name]
 			if name != pe.Payment.Provider && provider.IsAvailable() {
 				alternativeProvider = provider
 				pe.Payment.Provider = name

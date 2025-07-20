@@ -303,7 +303,7 @@ func TestAttemptRecovery(t *testing.T) {
 				RecoveryAction: "use_alternate_provider",
 			},
 			expectSuccess: true,
-			expectAction:  "recovered_via_stripe",
+			expectAction:  "recovered_via_backup_provider",
 		},
 		{
 			name: "manual review",

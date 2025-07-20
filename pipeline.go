@@ -19,6 +19,16 @@ var (
 // Processor defines a named processing stage that transforms a value of type T.
 // It contains a descriptive name for debugging and a function that processes the value.
 // The function receives a context for cancellation and timeout control.
+//
+// Processor is the basic building block created by adapter functions like
+// Apply, Transform, Effect, and others. The name field is crucial for debugging,
+// appearing in error messages and logs to identify exactly where failures occur.
+//
+// Best practices for processor names:
+//   - Use descriptive, action-oriented names ("validate_email", not "email")
+//   - Include the operation type ("parse_json", "fetch_user", "log_event")
+//   - Keep names concise but meaningful
+//   - Use consistent naming conventions across your application
 type Processor[T any] struct {
 	Fn   func(context.Context, T) (T, error)
 	Name string
@@ -26,18 +36,53 @@ type Processor[T any] struct {
 
 // Process implements the Chainable interface, allowing individual processors
 // to be used directly in connectors.
+//
+// This means a single Processor can be used anywhere a Chainable is expected:
+//
+//	validator := pipz.Effect("validate", validateFunc)
+//	// Can be used directly
+//	result, err := validator.Process(ctx, data)
+//	// Or in connectors
+//	pipeline := pipz.Sequential(validator, transformer)
 func (p Processor[T]) Process(ctx context.Context, data T) (T, error) {
 	return p.Fn(ctx, data)
 }
 
 // Pipeline provides a type-safe pipeline for processing values of type T.
 // It maintains an ordered list of processors that are executed sequentially.
+//
+// Pipeline offers a richer API than simple Sequential composition, with
+// methods to dynamically modify the processor chain. This makes it ideal
+// for scenarios where the processing steps need to be configured at runtime
+// or modified based on conditions.
+//
+// Key features:
+//   - Thread-safe for concurrent access
+//   - Dynamic modification of processor chain
+//   - Named processors for debugging
+//   - Rich API for reordering and modification
+//   - Fail-fast execution with detailed errors
+//
+// Use Pipeline when you need runtime control over processing steps.
+// Use Sequential when the steps are fixed at compile time.
 type Pipeline[T any] struct {
 	processors []Processor[T]
 	mu         sync.RWMutex
 }
 
 // NewPipeline creates a new Pipeline with no processors.
+// The pipeline is ready to use immediately and can be safely
+// accessed concurrently. Processors can be added using Register
+// or the various modification methods.
+//
+// Example:
+//
+//	pipeline := pipz.NewPipeline[User]()
+//	pipeline.Register(
+//	    pipz.Effect("validate", validateUser),
+//	    pipz.Apply("enrich", enrichUser),
+//	    pipz.Effect("audit", auditUser),
+//	)
 func NewPipeline[T any]() *Pipeline[T] {
 	return &Pipeline[T]{
 		processors: make([]Processor[T], 0),
@@ -46,6 +91,17 @@ func NewPipeline[T any]() *Pipeline[T] {
 
 // Register adds processors to this Pipeline's pipeline.
 // Processors are executed in the order they are registered.
+//
+// This method is thread-safe and can be called concurrently.
+// New processors are appended to the existing chain, making
+// Register ideal for building pipelines incrementally:
+//
+//	pipeline := pipz.NewPipeline[Order]()
+//	pipeline.Register(validateOrder)
+//	pipeline.Register(calculateTax, applyDiscount)
+//	if config.RequiresApproval {
+//	    pipeline.Register(requireApproval)
+//	}
 func (c *Pipeline[T]) Register(processors ...Processor[T]) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -56,8 +112,22 @@ func (c *Pipeline[T]) Register(processors ...Processor[T]) {
 // Each processor receives the output of the previous processor.
 // The context is checked before each processor execution - if the context
 // is canceled or expired, processing stops immediately.
-// If any processor returns an error, execution stops and the zero
-// value of T is returned along with the error.
+// If any processor returns an error, execution stops and a PipelineError
+// is returned with rich debugging information.
+//
+// Process is thread-safe and can be called concurrently. The pipeline's
+// processor list is locked during execution to prevent modifications.
+//
+// Error handling includes:
+//   - Processor name and stage index for debugging
+//   - Original input data that caused the failure
+//   - Execution duration for performance analysis
+//   - Timeout/cancellation detection
+//
+// Context best practices:
+//   - Always use context with timeout for production
+//   - Check ctx.Err() in long-running processors
+//   - Pass context through to external calls
 func (c *Pipeline[T]) Process(ctx context.Context, value T) (T, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -105,6 +175,18 @@ func (c *Pipeline[T]) Process(ctx context.Context, value T) (T, error) {
 
 // Link returns the Pipeline as a Chainable interface, allowing it to be
 // composed with other Pipelines that process the same type T.
+//
+// This enables powerful composition patterns where entire pipelines
+// become building blocks in larger systems:
+//
+//	validationPipeline := createValidationPipeline()
+//	processingPipeline := createProcessingPipeline()
+//
+//	combined := pipz.Sequential(
+//	    validationPipeline.Link(),
+//	    processingPipeline.Link(),
+//	    pipz.Effect("log_completion", logCompletion),
+//	)
 func (c *Pipeline[T]) Link() Chainable[T] {
 	return c
 }

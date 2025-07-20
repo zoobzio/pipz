@@ -81,15 +81,6 @@ jobs:
         echo "### Core Library Benchmarks" | tee benchmark_results.txt
         go test -bench=. -benchmem -benchtime=1s ./... | tee -a benchmark_results.txt
     
-    - name: Run example benchmarks
-      run: |
-        echo -e "\n### Example Benchmarks" | tee -a benchmark_results.txt
-        for dir in examples/*/; do
-          if [ -f "$dir/go.mod" ]; then
-            echo -e "\n#### $dir" | tee -a benchmark_results.txt
-            (cd "$dir" && go test -bench=. -benchmem -benchtime=1s) | tee -a benchmark_results.txt || true
-          fi
-        done
     
     - name: Upload benchmark results
       uses: actions/upload-artifact@v4

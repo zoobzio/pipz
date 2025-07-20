@@ -18,9 +18,14 @@ func getAllExamples() []Example {
 	return []Example{
 		&ValidationExample{},
 		&SecurityExample{},
-		// &TransformExample{},
-		// &MiddlewareExample{},
-		// &PaymentExample{},
+		&ETLExample{},
+		&WebhookExample{},
+		&PaymentExample{},
+		&EventsExample{},
+		&AIExample{},
+		&MiddlewareExample{},
+		&WorkflowExample{},
+		&ModerationExample{},
 	}
 }
 

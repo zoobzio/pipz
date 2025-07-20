@@ -92,7 +92,7 @@ func TestValidateSchema(t *testing.T) {
 
 func TestDeduplicateEvent(t *testing.T) {
 	// Clear the deduplication cache
-	processedEvents = &sync.Map{}
+	deduplicator = NewEventDeduplicator()
 
 	event := Event{
 		ID:        "dedup-test-1",
@@ -248,7 +248,7 @@ func TestCreateEventPipeline(t *testing.T) {
 	ctx := context.Background()
 
 	// Clear state
-	processedEvents = &sync.Map{}
+	deduplicator = NewEventDeduplicator()
 	eventMetrics = &EventMetrics{
 		Processed: make(map[string]int64),
 		Failed:    make(map[string]int64),
@@ -344,7 +344,7 @@ func TestBatchEventPipeline(t *testing.T) {
 	ctx := context.Background()
 
 	// Clear state
-	processedEvents = &sync.Map{}
+	deduplicator = NewEventDeduplicator()
 
 	events := []Event{
 		{
@@ -438,7 +438,7 @@ func TestPriorityEventPipeline(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Clear dedup cache for each test
-			processedEvents.Delete(tt.event.ID + ":" + tt.event.Type)
+			// Event will be cleaned up by deduplicator reset
 
 			start := time.Now()
 			_, err := pipeline.Process(ctx, tt.event)
@@ -478,7 +478,7 @@ func TestEventMetrics(t *testing.T) {
 
 	for _, event := range events {
 		// Clear dedup for testing
-		processedEvents.Delete(event.ID + ":" + event.Type)
+		// Event will be cleaned up by deduplicator reset
 		pipeline.Process(ctx, event)
 	}
 
@@ -519,7 +519,7 @@ func slowHandler(ctx context.Context, event Event) (Event, error) {
 func TestPipelineTimeout(t *testing.T) {
 	// Create a custom pipeline with a slow handler
 	pipeline := pipz.Sequential(
-		pipz.Validate("validate", ValidateSchema),
+		pipz.Effect("validate", ValidateSchema),
 		pipz.Timeout(
 			pipz.Apply("slow_handler", slowHandler),
 			100*time.Millisecond, // Short timeout

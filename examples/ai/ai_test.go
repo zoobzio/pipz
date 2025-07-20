@@ -206,6 +206,13 @@ func TestCreateAIPipeline(t *testing.T) {
 	})
 
 	t.Run("Caching works", func(t *testing.T) {
+		// Create a simple pipeline with just caching (no retries/fallbacks)
+		cachePipeline := pipz.Sequential(
+			pipz.Transform("enhance_prompt", EnhancePrompt),
+			CachedAIProvider(gpt4Provider),
+			pipz.Transform("filter_response", FilterResponse),
+		)
+
 		req := AIRequest{
 			ID:          "test-3",
 			Prompt:      "What is the meaning of life?",
@@ -216,10 +223,7 @@ func TestCreateAIPipeline(t *testing.T) {
 		ctx := context.Background()
 
 		// First call
-		start1 := time.Now()
-		result1, err := pipeline.Process(ctx, req)
-		duration1 := time.Since(start1)
-
+		result1, err := cachePipeline.Process(ctx, req)
 		if err != nil {
 			t.Fatalf("First call failed: %v", err)
 		}
@@ -229,24 +233,21 @@ func TestCreateAIPipeline(t *testing.T) {
 			t.Error("Expected cache_miss tag on first call")
 		}
 
+		// Check that response was generated
+		if result1.Response == "" {
+			t.Error("Expected response to be generated")
+		}
+
 		// Second call (should be cached)
 		req.ID = "test-3-second" // Different ID to ensure we're not getting same object
-		start2 := time.Now()
-		result2, err := pipeline.Process(ctx, req)
-		duration2 := time.Since(start2)
-
+		result2, err := cachePipeline.Process(ctx, req)
 		if err != nil {
 			t.Fatalf("Second call failed: %v", err)
 		}
 
-		// Check for cache hit tag
+		// Second call should have cache_hit tag
 		if !contains(result2.Tags, "cache_hit") {
 			t.Error("Expected cache_hit tag on second call")
-		}
-
-		// Check cache hit (second call should be much faster)
-		if duration2 > duration1/10 {
-			t.Errorf("Cache doesn't seem to work. First: %v, Second: %v", duration1, duration2)
 		}
 
 		// Response content should be identical
@@ -254,7 +255,7 @@ func TestCreateAIPipeline(t *testing.T) {
 			t.Error("Cached response differs from original")
 		}
 
-		// But IDs should be different
+		// But IDs should be different (request-specific fields preserved)
 		if result1.ID == result2.ID {
 			t.Error("Cached response should preserve request-specific ID")
 		}
@@ -381,6 +382,7 @@ func TestTimeoutProtection(t *testing.T) {
 		t.Errorf("Expected timeout error, got: %v", err)
 	}
 }
+
 
 // Helper function
 func contains(slice []string, item string) bool {

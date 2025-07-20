@@ -422,9 +422,9 @@ func CreateStandardMiddleware() *pipz.Pipeline[Request] {
 	pipeline.Register(
 		pipz.Apply("generate_request_id", GenerateRequestID),
 		pipz.Apply("parse_headers", ParseHeaders),
-		pipz.Validate("validate_request", ValidateRequest),
+		pipz.Effect("validate_request", ValidateRequest),
 		pipz.Apply("authenticate", AuthenticateToken),
-		pipz.Validate("check_permissions", CheckPermissions),
+		pipz.Effect("check_permissions", CheckPermissions),
 		pipz.Apply("enforce_rate_limit", EnforceRateLimit),
 		pipz.Effect("log_request", LogRequest),
 		pipz.Apply("add_security_headers", AddSecurityHeaders),
@@ -440,7 +440,7 @@ func CreatePublicMiddleware() *pipz.Pipeline[Request] {
 	pipeline.Register(
 		pipz.Apply("generate_request_id", GenerateRequestID),
 		pipz.Apply("parse_headers", ParseHeaders),
-		pipz.Validate("validate_request", ValidateRequest),
+		pipz.Effect("validate_request", ValidateRequest),
 		pipz.Apply("add_security_headers", AddSecurityHeaders),
 		pipz.Effect("log_request", func(_ context.Context, req Request) error {
 			fmt.Printf("[PUBLIC] %s %s %s - IP: %s\n",
@@ -462,7 +462,7 @@ func CreateAdminMiddleware() *pipz.Pipeline[Request] {
 
 	// Add additional admin-specific middleware
 	pipeline.InsertAt(6, // After rate limiting
-		pipz.Validate("require_admin", func(_ context.Context, req Request) error {
+		pipz.Effect("require_admin", func(_ context.Context, req Request) error {
 			if !req.IsAdmin {
 				return fmt.Errorf("admin access required")
 			}

@@ -177,7 +177,7 @@ func CreateSecurityPipeline() *pipz.Pipeline[AuditableData] {
 		pipz.Apply("check_permissions", CheckPermissions),
 		pipz.Apply("log_access", LogAccess),
 		pipz.Apply("classify_data", CheckDataClassification),
-		pipz.Validate("rate_limit", EnforceRateLimit),
+		pipz.Effect("rate_limit", EnforceRateLimit),
 		pipz.Apply("redact_sensitive", RedactSensitiveData),
 	)
 	return pipeline
@@ -189,7 +189,7 @@ func CreateStrictSecurityPipeline() *pipz.Pipeline[AuditableData] {
 
 	// Add additional security measures
 	pipeline.PushHead(
-		pipz.Validate("verify_timestamp", func(_ context.Context, a AuditableData) error {
+		pipz.Effect("verify_timestamp", func(_ context.Context, a AuditableData) error {
 			// Ensure timestamp is recent to prevent replay attacks
 			if time.Since(a.Timestamp) > 5*time.Minute {
 				return fmt.Errorf("request timestamp too old, possible replay attack")

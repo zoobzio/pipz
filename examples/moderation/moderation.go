@@ -440,17 +440,18 @@ func CreateModerationPipeline(analyzer *MockImageAnalyzer, thresholds Thresholds
 		if content.Type == TypeMixed {
 			// Run text and image analysis in parallel
 			var textErr, imageErr error
+			var textResult, imageResult Content
 			var wg sync.WaitGroup
 			wg.Add(2)
 
 			go func() {
 				defer wg.Done()
-				content, textErr = AnalyzeText(ctx, content)
+				textResult, textErr = AnalyzeText(ctx, content)
 			}()
 
 			go func() {
 				defer wg.Done()
-				content, imageErr = analyzer.Analyze(ctx, content)
+				imageResult, imageErr = analyzer.Analyze(ctx, content)
 			}()
 
 			wg.Wait()
@@ -461,6 +462,12 @@ func CreateModerationPipeline(analyzer *MockImageAnalyzer, thresholds Thresholds
 			if imageErr != nil {
 				return content, imageErr
 			}
+
+			// Merge results
+			content.TextScore = textResult.TextScore
+			content.Flags = append(content.Flags, textResult.Flags...)
+			content.ImageScore = imageResult.ImageScore
+			content.Flags = append(content.Flags, imageResult.Flags...)
 		} else if content.Type == TypeText {
 			return AnalyzeText(ctx, content)
 		} else {

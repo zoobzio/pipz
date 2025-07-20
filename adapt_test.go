@@ -117,9 +117,9 @@ func TestApply(t *testing.T) {
 	})
 }
 
-func TestValidate(t *testing.T) {
-	t.Run("Validate Pass", func(t *testing.T) {
-		validator := Validate("check_positive", func(_ context.Context, n int) error {
+func TestEffect(t *testing.T) {
+	t.Run("Effect Pass", func(t *testing.T) {
+		validator := Effect("check_positive", func(_ context.Context, n int) error {
 			if n <= 0 {
 				return errors.New("must be positive")
 			}
@@ -135,12 +135,12 @@ func TestValidate(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if result != 5 {
-			t.Errorf("Validate should return input unchanged, got %d", result)
+			t.Errorf("Effect should return input unchanged, got %d", result)
 		}
 	})
 
-	t.Run("Validate Fail", func(t *testing.T) {
-		validator := Validate("check_positive", func(_ context.Context, n int) error {
+	t.Run("Effect Fail", func(t *testing.T) {
+		validator := Effect("check_positive", func(_ context.Context, n int) error {
 			if n <= 0 {
 				return errors.New("must be positive")
 			}
@@ -155,17 +155,17 @@ func TestValidate(t *testing.T) {
 			t.Errorf("unexpected error: %v", err)
 		}
 		if result != 0 {
-			t.Errorf("Validate should return zero value on error, got %d", result)
+			t.Errorf("Effect should return zero value on error, got %d", result)
 		}
 	})
 
-	t.Run("Validate Does Not Modify", func(t *testing.T) {
+	t.Run("Effect Does Not Modify", func(t *testing.T) {
 		type User struct {
 			Name string
 			Age  int
 		}
 
-		validator := Validate("check_age", func(_ context.Context, u User) error {
+		validator := Effect("check_age", func(_ context.Context, u User) error {
 			if u.Age < 18 {
 				return errors.New("must be 18+")
 			}
@@ -179,7 +179,7 @@ func TestValidate(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if result != user {
-			t.Errorf("Validate should not modify input")
+			t.Errorf("Effect should not modify input")
 		}
 	})
 }
@@ -284,7 +284,7 @@ func TestMutate(t *testing.T) {
 	})
 }
 
-func TestEffect(t *testing.T) {
+func TestEffectLogging(t *testing.T) {
 	t.Run("Effect Success", func(t *testing.T) {
 		var logged []string
 		logger := Effect("log", func(_ context.Context, s string) error {
@@ -475,10 +475,10 @@ func TestContextUsage(t *testing.T) {
 			t.Errorf("unexpected error: %v", err)
 		}
 
-		// Validate
-		validate := Validate("test", func(ctx context.Context, _ string) error {
+		// Effect
+		validate := Effect("test", func(ctx context.Context, _ string) error {
 			if ctx.Value(contextKey("test-key")) != "test-value" {
-				t.Error("Validate: context not passed correctly")
+				t.Error("Effect: context not passed correctly")
 			}
 			return nil
 		})

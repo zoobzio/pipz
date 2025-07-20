@@ -243,7 +243,7 @@ func TestWebhookPipeline(t *testing.T) {
 	ctx := context.Background()
 
 	// Clear state
-	processedWebhooks = &sync.Map{}
+	ResetWebhookState()
 
 	t.Run("Valid Stripe webhook", func(t *testing.T) {
 		webhook := Webhook{

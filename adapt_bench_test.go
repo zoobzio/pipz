@@ -64,11 +64,11 @@ func BenchmarkAdapt_Apply(b *testing.B) {
 	})
 }
 
-func BenchmarkAdapt_Validate(b *testing.B) {
+func BenchmarkAdapt_Effect(b *testing.B) {
 	ctx := context.Background()
 
-	b.Run("SuccessfulValidate", func(b *testing.B) {
-		processor := pipz.Validate("positive", func(_ context.Context, value int) error {
+	b.Run("SuccessfulEffect", func(b *testing.B) {
+		processor := pipz.Effect("positive", func(_ context.Context, value int) error {
 			if value > 0 {
 				return nil
 			}
@@ -81,8 +81,8 @@ func BenchmarkAdapt_Validate(b *testing.B) {
 		}
 	})
 
-	b.Run("FailingValidate", func(b *testing.B) {
-		processor := pipz.Validate("positive", func(_ context.Context, value int) error {
+	b.Run("FailingEffect", func(b *testing.B) {
+		processor := pipz.Effect("positive", func(_ context.Context, value int) error {
 			if value > 0 {
 				return nil
 			}
@@ -132,7 +132,7 @@ func BenchmarkAdapt_Mutate(b *testing.B) {
 	})
 }
 
-func BenchmarkAdapt_Effect(b *testing.B) {
+func BenchmarkAdapt_EffectLogging(b *testing.B) {
 	ctx := context.Background()
 
 	b.Run("SuccessfulEffect", func(b *testing.B) {
@@ -207,8 +207,8 @@ func BenchmarkAdapt_ProcessorTypes(b *testing.B) {
 			}),
 		},
 		{
-			name: "Validate",
-			proc: pipz.Validate("positive", func(_ context.Context, value int) error {
+			name: "Effect",
+			proc: pipz.Effect("positive", func(_ context.Context, value int) error {
 				if value > 0 {
 					return nil
 				}
@@ -270,8 +270,8 @@ func BenchmarkAdapt_ComplexOperations(b *testing.B) {
 		}
 	})
 
-	b.Run("ComplexValidate", func(b *testing.B) {
-		processor := pipz.Validate("all_positive", func(_ context.Context, value []int) error {
+	b.Run("ComplexEffect", func(b *testing.B) {
+		processor := pipz.Effect("all_positive", func(_ context.Context, value []int) error {
 			for _, v := range value {
 				if v <= 0 {
 					return errors.New("all values must be positive")

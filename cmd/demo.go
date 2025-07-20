@@ -25,9 +25,14 @@ When run with an example name, runs that specific demo.
 Available examples:
   validation  Data validation with composable validators
   security    Security audit with permission-based redaction
-  transform   ETL transformation pipeline (coming soon)
-  middleware  Request middleware composition (coming soon)
-  payment     Payment processing with error recovery (coming soon)`,
+  etl         Extract, transform, and load data pipelines
+  webhook     Multi-provider webhook processing
+  payment     Payment processing with error recovery
+  events      Event routing and deduplication with real-time processing
+  ai          LLM integration with caching, fallbacks, and rate limiting
+  middleware  HTTP middleware patterns for request/response processing
+  workflow    Complex multi-stage business workflows with compensating transactions
+  moderation  Content moderation with text analysis and automated decision making`,
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 			if len(args) != 0 {
 				return nil, cobra.ShellCompDirectiveNoFileComp
@@ -222,22 +227,7 @@ func (d *Demo) printExamplesMenu() {
 		fmt.Printf("%s%d.%s %s - %s\n", colorWhite, i+1, colorReset, ex.Name(), ex.Description())
 	}
 
-	// Show placeholders for upcoming examples
-	upcomingExamples := []struct {
-		name string
-		desc string
-	}{
-		{"transform", "ETL transformation with validation"},
-		{"middleware", "Request middleware composition"},
-		{"payment", "Payment processing with error recovery"},
-	}
-
-	startIdx := len(examples) + 1
-	for i, ex := range upcomingExamples {
-		fmt.Printf("%s%d.%s %s - %s %s(coming soon)%s\n",
-			colorGray, startIdx+i, colorReset, ex.name, ex.desc,
-			colorYellow, colorReset)
-	}
+	// All examples are now available - no "coming soon" section needed
 
 	fmt.Printf("%sb.%s Back to main menu\n", colorWhite, colorReset)
 }
@@ -254,28 +244,28 @@ func (d *Demo) showFeatures() {
 	}{
 		{
 			"Transform",
-			"Modifies data and returns the result",
-			"func(ctx, T) (T, error)",
+			"Always modifies data, cannot fail",
+			"func(ctx, T) T",
 		},
 		{
-			"Validate",
-			"Checks data validity without modification",
-			"func(ctx, T) error",
+			"Apply",
+			"Can modify data and can fail",
+			"func(ctx, T) (T, error)",
 		},
 		{
 			"Effect",
-			"Performs side effects (logging, metrics)",
+			"Side effects only (validation, logging)",
 			"func(ctx, T) error",
-		},
-		{
-			"Enrich",
-			"Adds data from external sources",
-			"func(ctx, T) (T, error)",
 		},
 		{
 			"Mutate",
 			"Conditionally modifies data",
-			"func(ctx, T) (T, error) + predicate",
+			"func(ctx, T) T + condition",
+		},
+		{
+			"Enrich",
+			"Best-effort enhancement",
+			"func(ctx, T) (T, error)",
 		},
 	}
 
@@ -344,7 +334,7 @@ func (d *Demo) showQuickStart() {
 	fmt.Println(colorGray + `   pipeline := pipz.NewPipeline[string]()
    pipeline.Register(
        pipz.Transform("upper", strings.ToUpper),
-       pipz.Validate("not_empty", checkNotEmpty),
+       pipz.Effect("not_empty", checkNotEmpty),
    )` + colorReset)
 
 	fmt.Println("\n3. Process data:")
