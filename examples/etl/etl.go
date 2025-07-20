@@ -534,7 +534,7 @@ func CreateCSVToJSONPipeline(schema Schema, outputFile string) pipz.Chainable[[]
 		}),
 
 		// Write to JSON
-		pipz.Validate("write_json", WriteJSON(outputFile)),
+		pipz.Effect("write_json", WriteJSON(outputFile)),
 
 		// Track progress
 		pipz.Effect("progress", func(ctx context.Context, records []Record) error {
@@ -599,7 +599,7 @@ func CreateStreamingETLPipeline(schema Schema) pipz.Chainable[Record] {
 
 	return pipz.Sequential(
 		// Validate
-		pipz.Validate("validate", validator),
+		pipz.Effect("validate", validator),
 
 		// Transform
 		pipz.Transform("normalize", normalizer),

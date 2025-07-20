@@ -75,6 +75,7 @@ var providers = map[string]ProviderConfig{
 
 // Replay attack prevention
 var processedWebhooks = &sync.Map{} // event_id -> timestamp
+var cleanupOnce sync.Once
 
 // Signature Verification
 
@@ -279,8 +280,16 @@ func PreventReplay(_ context.Context, webhook Webhook) error {
 	// Mark as processed
 	processedWebhooks.Store(key, time.Now())
 
-	// Clean up old entries periodically
-	go cleanupOldWebhooks()
+	// Start cleanup goroutine only once
+	cleanupOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				cleanupOldWebhooks()
+			}
+		}()
+	})
 
 	return nil
 }
@@ -439,8 +448,8 @@ func CreateWebhookPipeline(secrets map[string]string) pipz.Chainable[Webhook] {
 		pipz.Apply("parse_payload", ParsePayload),
 
 		// Security checks
-		pipz.Validate("prevent_replay", PreventReplay),
-		pipz.Validate("validate_payload", ValidatePayload),
+		pipz.Effect("prevent_replay", PreventReplay),
+		pipz.Effect("validate_payload", ValidatePayload),
 
 		// Route to provider handler
 		pipz.Switch(routeByProvider, handlers),
@@ -503,6 +512,14 @@ func cleanupOldWebhooks() {
 				processedWebhooks.Delete(key)
 			}
 		}
+		return true
+	})
+}
+
+// ResetWebhookState clears all processed webhooks (for testing)
+func ResetWebhookState() {
+	processedWebhooks.Range(func(key, value interface{}) bool {
+		processedWebhooks.Delete(key)
 		return true
 	})
 }

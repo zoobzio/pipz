@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
@@ -41,7 +40,7 @@ func BenchmarkEventPipeline(b *testing.B) {
 
 	b.Run("UserEvent", func(b *testing.B) {
 		// Clear dedup cache periodically
-		processedEvents = &sync.Map{}
+		deduplicator = NewEventDeduplicator()
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -55,7 +54,7 @@ func BenchmarkEventPipeline(b *testing.B) {
 	})
 
 	b.Run("OrderEvent", func(b *testing.B) {
-		processedEvents = &sync.Map{}
+		deduplicator = NewEventDeduplicator()
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -112,7 +111,7 @@ func BenchmarkBatchPipeline(b *testing.B) {
 	for _, size := range benchmarks {
 		b.Run(fmt.Sprintf("BatchSize_%d", size), func(b *testing.B) {
 			batch := createBatch(size)
-			processedEvents = &sync.Map{} // Clear cache
+			deduplicator = NewEventDeduplicator() // Clear cache
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -170,7 +169,7 @@ func BenchmarkRouting(b *testing.B) {
 
 	for _, et := range eventTypes {
 		b.Run(et.name, func(b *testing.B) {
-			processedEvents = &sync.Map{}
+			deduplicator = NewEventDeduplicator()
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -194,7 +193,7 @@ func BenchmarkPriorityRouting(b *testing.B) {
 			Version:   "1.0",
 			Timestamp: time.Now(),
 		}
-		processedEvents = &sync.Map{}
+		deduplicator = NewEventDeduplicator()
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -212,7 +211,7 @@ func BenchmarkPriorityRouting(b *testing.B) {
 			Version:   "1.0",
 			Timestamp: time.Now(),
 		}
-		processedEvents = &sync.Map{}
+		deduplicator = NewEventDeduplicator()
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -247,7 +246,7 @@ func BenchmarkIndividualStages(b *testing.B) {
 	})
 
 	b.Run("Deduplication", func(b *testing.B) {
-		processedEvents = &sync.Map{}
+		deduplicator = NewEventDeduplicator()
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -286,7 +285,7 @@ func BenchmarkConcurrentEvents(b *testing.B) {
 
 	for _, level := range concurrencyLevels {
 		b.Run(fmt.Sprintf("Concurrency_%d", level), func(b *testing.B) {
-			processedEvents = &sync.Map{}
+			deduplicator = NewEventDeduplicator()
 
 			b.ResetTimer()
 			b.RunParallel(func(pb *testing.PB) {
@@ -318,7 +317,7 @@ func BenchmarkMemoryAllocation(b *testing.B) {
 	ctx := context.Background()
 
 	b.Run("EventProcessing", func(b *testing.B) {
-		processedEvents = &sync.Map{}
+		deduplicator = NewEventDeduplicator()
 
 		b.ReportAllocs()
 		b.ResetTimer()

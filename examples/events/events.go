@@ -43,9 +43,36 @@ const (
 	EventPaymentSuccess = "payment.success"
 )
 
+// EventDeduplicator handles event deduplication
+type EventDeduplicator struct {
+	processed map[string]time.Time
+	mu        sync.RWMutex
+}
+
+func NewEventDeduplicator() *EventDeduplicator {
+	return &EventDeduplicator{
+		processed: make(map[string]time.Time),
+	}
+}
+
+func (d *EventDeduplicator) IsProcessed(eventID, eventType string) (time.Time, bool) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	key := fmt.Sprintf("%s:%s", eventID, eventType)
+	t, exists := d.processed[key]
+	return t, exists
+}
+
+func (d *EventDeduplicator) MarkProcessed(eventID, eventType string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	key := fmt.Sprintf("%s:%s", eventID, eventType)
+	d.processed[key] = time.Now()
+}
+
 // Processing results storage (in production, use proper storage)
 var (
-	processedEvents = &sync.Map{} // Deduplication cache
+	deduplicator    = NewEventDeduplicator()
 	auditLog        = &sync.Map{} // Audit trail
 	deadLetterQueue = &sync.Map{} // Failed events
 	eventMetrics    = &EventMetrics{
@@ -113,20 +140,13 @@ func validateV2Schema(event Event) error {
 
 // DeduplicateEvent prevents processing the same event multiple times
 func DeduplicateEvent(_ context.Context, event Event) (Event, error) {
-	// Create deduplication key
-	dedupKey := fmt.Sprintf("%s:%s", event.ID, event.Type)
-
 	// Check if already processed
-	if processed, exists := processedEvents.Load(dedupKey); exists {
-		processedTime := processed.(time.Time)
+	if processedTime, exists := deduplicator.IsProcessed(event.ID, event.Type); exists {
 		return event, fmt.Errorf("event already processed at %v", processedTime)
 	}
 
 	// Mark as processed
-	processedEvents.Store(dedupKey, time.Now())
-
-	// Clean up old entries periodically (in production, use TTL cache)
-	go cleanupOldEvents()
+	deduplicator.MarkProcessed(event.ID, event.Type)
 
 	return event, nil
 }
@@ -309,7 +329,7 @@ func CreateEventPipeline() pipz.Chainable[Event] {
 	// Build the main pipeline
 	return pipz.Sequential(
 		// Validation and deduplication
-		pipz.Validate("validate_schema", ValidateSchema),
+		pipz.Effect("validate_schema", ValidateSchema),
 		pipz.Apply("deduplicate", DeduplicateEvent),
 		pipz.Transform("enrich", EnrichEvent),
 
@@ -392,7 +412,7 @@ func CreatePriorityEventPipeline() pipz.Chainable[Event] {
 
 	// High priority pipeline - no retries, fail fast
 	highPriorityPipeline := pipz.Sequential(
-		pipz.Validate("validate_schema", ValidateSchema),
+		pipz.Effect("validate_schema", ValidateSchema),
 		pipz.Transform("enrich", EnrichEvent),
 		pipz.Timeout(
 			CreateEventPipeline(),
@@ -410,21 +430,6 @@ func CreatePriorityEventPipeline() pipz.Chainable[Event] {
 }
 
 // Utility functions
-
-func cleanupOldEvents() {
-	// In production, implement proper TTL-based cleanup
-	// For demo, we'll just count entries
-	count := 0
-	processedEvents.Range(func(key, value interface{}) bool {
-		count++
-		return true
-	})
-
-	if count > 10000 {
-		// Clear old entries (simplified for demo)
-		processedEvents = &sync.Map{}
-	}
-}
 
 // GetMetrics returns current processing metrics
 func GetMetrics() map[string]interface{} {

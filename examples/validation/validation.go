@@ -114,7 +114,7 @@ func CreateValidationPipeline() *pipz.Pipeline[Order] {
 		pipz.Apply("validate_customer_id", ValidateCustomerID),
 		pipz.Apply("validate_items", ValidateItems),
 		pipz.Apply("validate_total", ValidateTotal),
-		pipz.Validate("business_rules", ValidateBusinessRules),
+		pipz.Effect("business_rules", ValidateBusinessRules),
 	)
 	return pipeline
 }
@@ -125,13 +125,13 @@ func CreateStrictValidationPipeline() *pipz.Pipeline[Order] {
 
 	// Add additional strict validations
 	pipeline.PushTail(
-		pipz.Validate("max_items", func(_ context.Context, o Order) error {
+		pipz.Effect("max_items", func(_ context.Context, o Order) error {
 			if len(o.Items) > 100 {
 				return fmt.Errorf("order exceeds maximum item limit (100)")
 			}
 			return nil
 		}),
-		pipz.Validate("min_total", func(_ context.Context, o Order) error {
+		pipz.Effect("min_total", func(_ context.Context, o Order) error {
 			if o.Total < 1.00 {
 				return fmt.Errorf("order total must be at least $1.00")
 			}

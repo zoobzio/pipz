@@ -185,7 +185,7 @@ func (s *SecurityExample) Demo(ctx context.Context) error {
 	fmt.Println("    pipz.Apply(\"check_permissions\", CheckPermissions),")
 	fmt.Println("    pipz.Apply(\"log_access\", LogAccess),")
 	fmt.Println("    pipz.Apply(\"classify_data\", CheckDataClassification),")
-	fmt.Println("    pipz.Validate(\"rate_limit\", EnforceRateLimit),")
+	fmt.Println("    pipz.Effect(\"rate_limit\", EnforceRateLimit),")
 	fmt.Println("    pipz.Apply(\"redact_sensitive\", RedactSensitiveData),")
 	fmt.Println(")")
 	fmt.Println("```")

@@ -378,23 +378,37 @@ func ParallelChecks(inventory *InventoryService, fraud *FraudService) func(conte
 		var fraudScore float64
 
 		var wg sync.WaitGroup
+		var mu sync.Mutex
 		wg.Add(2)
+
+		// Extract values needed for concurrent operations
+		orderID := order.ID
+		orderItems := order.Items
 
 		// Inventory check and reservation
 		go func() {
 			defer wg.Done()
-			reservationIDs, inventoryErr = inventory.Reserve(order.ID, order.Items)
+			reservationIDs, inventoryErr = inventory.Reserve(orderID, orderItems)
 			if inventoryErr == nil {
+				mu.Lock()
 				order.InventoryReserved = true
 				order.ReservationIDs = reservationIDs
+				mu.Unlock()
 			}
 		}()
 
 		// Fraud check
 		go func() {
 			defer wg.Done()
-			fraudScore, fraudErr = fraud.CheckFraud(order)
+			mu.Lock()
+			orderForFraud := order // Read under mutex
+			mu.Unlock()
+			
+			fraudScore, fraudErr = fraud.CheckFraud(orderForFraud)
+			
+			mu.Lock()
 			order.FraudScore = fraudScore
+			mu.Unlock()
 		}()
 
 		wg.Wait()
@@ -616,8 +630,11 @@ func CreateOrderPipeline(inventory *InventoryService, fraud *FraudService,
 		// Parallel checks (inventory + fraud)
 		pipz.Apply("parallel_checks", ParallelChecks(inventory, fraud)),
 
-		// Payment processing with rollback
-		pipz.Apply("process_payment", ProcessPayment(payment, inventory)),
+		// Payment processing with rollback and retry
+		pipz.Retry(
+			pipz.Apply("process_payment", ProcessPayment(payment, inventory)),
+			3, // Retry up to 3 times for transient payment failures
+		),
 
 		// Route to appropriate fulfillment
 		pipz.Switch(routeByType, fulfillmentHandlers),
@@ -701,8 +718,15 @@ func UpdateStats(order Order) {
 	globalStats.Total++
 	globalStats.ByType[order.Type]++
 	globalStats.ByStatus[order.Status]++
-	globalStats.TotalRevenue += order.Total
-	globalStats.AverageValue = globalStats.TotalRevenue / float64(globalStats.Total)
+	
+	// Only count revenue for completed orders
+	if order.Status == StatusCompleted {
+		globalStats.TotalRevenue += order.Total
+	}
+	
+	if globalStats.Total > 0 {
+		globalStats.AverageValue = globalStats.TotalRevenue / float64(globalStats.Total)
+	}
 
 	if !order.CompletedAt.IsZero() && !order.CreatedAt.IsZero() {
 		processingTime := order.CompletedAt.Sub(order.CreatedAt)
@@ -724,6 +748,18 @@ func GetStats() OrderStats {
 		AverageValue:   globalStats.AverageValue,
 		ProcessingTime: globalStats.ProcessingTime,
 	}
+}
+
+// ResetStats clears global statistics (for testing)
+func ResetStats() {
+	globalStats.mu.Lock()
+	defer globalStats.mu.Unlock()
+	globalStats.Total = 0
+	globalStats.TotalRevenue = 0
+	globalStats.AverageValue = 0
+	globalStats.ProcessingTime = 0
+	globalStats.ByType = make(map[OrderType]int64)
+	globalStats.ByStatus = make(map[OrderStatus]int64)
 }
 
 func copyTypeMap(m map[OrderType]int64) map[OrderType]int64 {

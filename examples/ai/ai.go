@@ -75,10 +75,7 @@ func (p *mockProvider) Complete(ctx context.Context, req AIRequest) (AIRequest, 
 		return req, ctx.Err()
 	}
 
-	// Simulate failures (10% failure rate for demo)
-	if rand.Float32() < 0.1 {
-		return req, errors.New("model overloaded")
-	}
+	// No random failures - deterministic behavior
 
 	// Generate mock response
 	req.Model = p.name
@@ -211,9 +208,11 @@ func CachedAIProvider(provider AIProvider) pipz.Processor[AIRequest] {
 			return result, err
 		}
 
+		// Add cache miss tag
+		result.Tags = append(result.Tags, "cache_miss")
+
 		// Cache successful result
 		cache.Store(cacheKey, result)
-		result.Tags = append(result.Tags, "cache_miss")
 		return result, nil
 	})
 }
@@ -229,8 +228,8 @@ func CreateAIPipeline() pipz.Chainable[AIRequest] {
 	return pipz.Sequential(
 		// Pre-processing
 		pipz.Transform("enhance_prompt", EnhancePrompt),
-		pipz.Validate("safety_check", ValidateSafety),
-		pipz.Validate("content_policy", CheckContentPolicy),
+		pipz.Effect("safety_check", ValidateSafety),
+		pipz.Effect("content_policy", CheckContentPolicy),
 
 		// AI calling with resilience
 		pipz.RetryWithBackoff(
@@ -284,26 +283,26 @@ func CreateRoutingPipeline() pipz.Chainable[AIRequest] {
 				req.Temperature = 0.2 // Lower temperature for code
 				return req
 			}),
-			CachedAIProvider(gpt4Provider), // GPT-4 for code
+			pipz.Retry(CachedAIProvider(gpt4Provider), 3), // GPT-4 for code with retry
 		),
 		"creative": pipz.Sequential(
 			pipz.Transform("creative_context", func(_ context.Context, req AIRequest) AIRequest {
 				req.Temperature = 0.8 // Higher temperature for creativity
 				return req
 			}),
-			CachedAIProvider(claudeProvider), // Claude for creative
+			pipz.Retry(CachedAIProvider(claudeProvider), 3), // Claude for creative with retry
 		),
 		"complex": pipz.Timeout(
-			CachedAIProvider(gpt4Provider), // GPT-4 for complex
+			pipz.Retry(CachedAIProvider(gpt4Provider), 3), // GPT-4 for complex with retry
 			15*time.Second,
 		),
-		"simple": CachedAIProvider(gpt35Provider), // GPT-3.5 for simple (already cached)
+		"simple": pipz.Retry(CachedAIProvider(gpt35Provider), 3), // GPT-3.5 for simple with retry
 	}
 
 	// Build routing pipeline
 	return pipz.Sequential(
 		pipz.Transform("enhance_prompt", EnhancePrompt),
-		pipz.Validate("safety_check", ValidateSafety),
+		pipz.Effect("safety_check", ValidateSafety),
 		pipz.Switch(routeByComplexity, routes),
 		pipz.Transform("filter_response", FilterResponse),
 	)
@@ -393,6 +392,11 @@ func removeRepetitions(text string) string {
 	}
 
 	return strings.Join(result, "\n")
+}
+
+// ResetRateLimits clears all rate limits (for testing)
+func ResetRateLimits() {
+	rateLimits = &sync.Map{}
 }
 
 func isRateLimited(provider string) bool {

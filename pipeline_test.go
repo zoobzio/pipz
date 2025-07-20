@@ -51,7 +51,7 @@ func TestPipelineRegister(t *testing.T) {
 			Transform("lower", func(_ context.Context, s string) string {
 				return strings.ToLower(s)
 			}),
-			Validate("non_empty", func(_ context.Context, s string) error {
+			Effect("non_empty", func(_ context.Context, s string) error {
 				if s == "" {
 					return errors.New("empty string")
 				}
@@ -261,7 +261,7 @@ func TestPipelineProcess(t *testing.T) {
 
 		Pipeline := NewPipeline[User]()
 		Pipeline.Register(
-			Validate("check_email", func(_ context.Context, u User) error {
+			Effect("check_email", func(_ context.Context, u User) error {
 				if !strings.Contains(u.Email, "@") {
 					return errors.New("invalid email")
 				}
@@ -278,12 +278,12 @@ func TestPipelineProcess(t *testing.T) {
 		}
 
 		// InputData contains what the failed processor was trying to output
-		// Since Validate returns zero value on error, InputData will be empty
+		// Since Effect returns zero value on error, InputData will be empty
 		if pipelineErr.InputData.Name != "" || pipelineErr.InputData.Email != "" {
-			t.Errorf("Validate returns zero value on error, got %+v", pipelineErr.InputData)
+			t.Errorf("Effect returns zero value on error, got %+v", pipelineErr.InputData)
 		}
 
-		// The actual input user data is lost because Validate doesn't preserve it
+		// The actual input user data is lost because Effect doesn't preserve it
 		// This is a limitation of the current design
 	})
 }
@@ -312,7 +312,7 @@ func TestPipelineIntrospection(t *testing.T) {
 		Pipeline.Register(
 			Transform("step1", func(_ context.Context, s string) string { return s }),
 			Apply("step2", func(_ context.Context, s string) (string, error) { return s, nil }),
-			Validate("step3", func(_ context.Context, _ string) error { return nil }),
+			Effect("step3", func(_ context.Context, _ string) error { return nil }),
 		)
 
 		names := Pipeline.Names()

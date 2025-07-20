@@ -53,10 +53,10 @@ func BenchmarkPipeline_ProcessorTypes(b *testing.B) {
 		}
 	})
 
-	b.Run("Validate", func(b *testing.B) {
+	b.Run("Effect", func(b *testing.B) {
 		pipeline := pipz.NewPipeline[int]()
 		pipeline.Register(
-			pipz.Validate("positive", func(_ context.Context, n int) error {
+			pipz.Effect("positive", func(_ context.Context, n int) error {
 				if n <= 0 {
 					return fmt.Errorf("not positive")
 				}

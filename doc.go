@@ -56,7 +56,7 @@
 //	}
 //
 //	// Create individual processors
-//	validateEmail := pipz.Validate("validate_email", func(_ context.Context, u User) error {
+//	validateEmail := pipz.Effect("validate_email", func(_ context.Context, u User) error {
 //	    if !strings.Contains(u.Email, "@") {
 //	        return errors.New("invalid email")
 //	    }
