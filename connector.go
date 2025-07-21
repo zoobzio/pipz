@@ -103,15 +103,34 @@ func Sequential[T any](chainables ...Chainable[T]) Chainable[T] {
 // branching beyond simple if/else logic. A special "default" route
 // can handle cases where no specific route matches.
 //
+// IMPORTANT: The routes map is captured by reference, not copied.
+// This means you can modify the map after creating the Switch to dynamically
+// add, remove, or update routes. This is an intentional feature that enables
+// runtime reconfiguration without rebuilding the Switch.
+//
+// Thread Safety: The routes map is NOT synchronized. If you modify routes
+// concurrently with Process calls, you MUST handle synchronization yourself
+// using sync.Map, a mutex, or other synchronization primitives. Concurrent
+// map access without synchronization will cause a panic.
+//
 // Switch is perfect for:
 //   - Type-based processing (route by data.Type field)
 //   - Status-based workflows (route by order.Status)
 //   - Region-specific logic (route by user.Country)
 //   - Priority handling (route by priority level)
 //   - A/B testing (route by experiment group)
+//   - Dynamic routing tables that change at runtime
+//   - Feature flag controlled processing paths
 //
 // Example:
 //
+//	routes := map[string]pipz.Chainable[Payment]{
+//	    "standard":   standardProcessor,
+//	    "high_value": highValueProcessor,
+//	    "crypto":     cryptoProcessor,
+//	    "default":    fallbackProcessor,
+//	}
+//	
 //	processPayment := pipz.Switch(
 //	    func(ctx context.Context, p Payment) string {
 //	        if p.Amount > 10000 {
@@ -121,13 +140,17 @@ func Sequential[T any](chainables ...Chainable[T]) Chainable[T] {
 //	        }
 //	        return "standard"
 //	    },
-//	    map[string]pipz.Chainable[Payment]{
-//	        "high_value": highValueProcessor,
-//	        "crypto":     cryptoProcessor,
-//	        "standard":   standardProcessor,
-//	        "default":    fallbackProcessor,
-//	    },
+//	    routes,
 //	)
+//	
+//	// Later: Add new route without rebuilding
+//	routes["express"] = expressProcessor
+//	
+//	// Or: Update existing route
+//	routes["crypto"] = newCryptoProcessor
+//	
+//	// Or: Remove route (will fallback to "default")
+//	delete(routes, "high_value")
 func Switch[T any](condition Condition[T], routes map[string]Chainable[T]) Chainable[T] {
 	return ProcessorFunc[T](func(ctx context.Context, data T) (T, error) {
 		route := condition(ctx, data)
