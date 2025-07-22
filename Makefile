@@ -1,4 +1,4 @@
-.PHONY: test bench bench-all lint coverage clean all help test-examples demo demo-list demo-run demo-all build install run-example try
+.PHONY: test bench bench-all lint coverage clean all help test-examples run-example
 
 # Default target
 all: test lint
@@ -7,17 +7,6 @@ all: test lint
 help:
 	@echo "pipz Development Commands"
 	@echo "========================"
-	@echo ""
-	@echo "Quick Start:"
-	@echo "  make try          - Run interactive demo menu (alias for 'make demo')"
-	@echo ""
-	@echo "Interactive Demos:"
-	@echo "  make demo         - Run interactive demo menu"
-	@echo "  make demo-list    - List available demos"
-	@echo "  make demo-run DEMO=name - Run a specific demo"
-	@echo "                      Examples: make demo-run DEMO=payment"
-	@echo "                               make demo-run DEMO=etl"
-	@echo "  make demo-all     - Run all demos sequentially"
 	@echo ""
 	@echo "Testing & Quality:"
 	@echo "  make test         - Run all tests with race detector"
@@ -29,14 +18,10 @@ help:
 	@echo "  make coverage     - Generate coverage report (HTML)"
 	@echo "  make check        - Run tests and lint (quick check)"
 	@echo ""
-	@echo "Build & Install:"
-	@echo "  make build        - Build the CLI tool (./pipz)"
-	@echo "  make install      - Install pipz CLI to GOPATH/bin"
-	@echo "  make clean        - Clean generated files"
-	@echo ""
 	@echo "Other:"
 	@echo "  make run-example EXAMPLE=name - Run an example's main.go"
 	@echo "  make install-tools- Install required development tools"
+	@echo "  make clean        - Clean generated files"
 	@echo "  make all          - Run tests and lint (default)"
 
 # Run tests with race detector
@@ -73,43 +58,6 @@ bench-all:
 		fi \
 	done
 
-# Build the CLI tool
-build:
-	@echo "Building pipz CLI..."
-	@cd cmd && go build -o ../pipz .
-
-# Install the CLI tool to GOPATH/bin
-install: build
-	@echo "Installing pipz CLI..."
-	@go install ./cmd/...
-
-# Run interactive demo menu
-demo: build
-	@echo "Starting interactive demo..."
-	@./pipz demo
-
-# Quick start - alias for demo
-try: demo
-
-# List available demos
-demo-list: build
-	@./pipz demo --help | grep -A20 "Available examples:" || ./pipz demo --help
-
-# Run a specific demo (usage: make demo-run DEMO=validation)
-demo-run: build
-	@if [ -z "$(DEMO)" ]; then \
-		echo "Usage: make demo-run DEMO=<demo-name>"; \
-		echo "Available demos:"; \
-		./pipz demo --help | grep -A20 "Available examples:" | grep "  " || true; \
-	else \
-		echo "Running $(DEMO) demo..."; \
-		./pipz demo $(DEMO); \
-	fi
-
-# Run all demos sequentially
-demo-all: build
-	@echo "Running all demos..."
-	@./pipz demo --all
 
 # Run a specific example's main.go (usage: make run-example EXAMPLE=validation)
 run-example:
@@ -148,7 +96,7 @@ coverage:
 # Clean generated files
 clean:
 	@echo "Cleaning..."
-	@rm -f coverage.out coverage.html pipz
+	@rm -f coverage.out coverage.html
 	@find . -name "*.test" -delete
 	@find . -name "*.prof" -delete
 	@find . -name "*.out" -delete

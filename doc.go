@@ -23,9 +23,11 @@
 //
 // pipz provides several adapter functions to wrap common patterns:
 //
+//   - Transform: Pure transformations that cannot fail
 //   - Apply: Operations that transform data and might fail (parsing, API calls)
-//   - Validate: Data validation without modification (returns error on failure)
 //   - Effect: Side effects like logging or metrics (doesn't modify data)
+//   - Mutate: Conditional modifications based on predicates
+//   - Enrich: Best-effort enhancements that don't fail the pipeline
 //
 // # Connectors
 //
@@ -33,10 +35,13 @@
 //
 //   - Sequential: Process steps in order, stopping on first error
 //   - Switch: Route to different processors based on data
+//   - Concurrent: Run processors in parallel with isolated data (requires Cloner interface)
+//   - Race: Return first successful result from parallel processors
 //   - Fallback: Try alternatives if the primary fails
 //   - Retry: Retry operations with configurable attempts
 //   - RetryWithBackoff: Retry with exponential backoff
 //   - Timeout: Enforce time limits on operations
+//   - WithErrorHandler: Add error observation without changing behavior
 //
 // # Usage Example
 //
@@ -115,9 +120,9 @@
 //
 //   - Minimal per-processor overhead
 //   - Context passing adds negligible cost
-//   - No reflection, minimal locking
+//   - No reflection or runtime type assertions
 //   - Predictable performance characteristics
-//   - Timeout enforcement with no goroutine overhead
+//   - Zero allocations in core operations
 //
 // # Best Practices
 //
@@ -143,5 +148,5 @@
 //   - Can wrap existing functions with adapters
 //   - Supports gradual adoption in existing codebases
 //
-// For more examples and use cases, see the examples directory and USE_CASES.md.
+// For more examples and documentation, see the examples directory and docs directory.
 package pipz

@@ -584,7 +584,7 @@ func CreateMultiSourcePipeline(schema Schema) pipz.Chainable[string] {
 
 					return filename + ".transformed.json", WriteJSON(filename+".transformed.json")(ctx, transformed)
 				}),
-				"default": pipz.Apply("unsupported", func(_ context.Context, filename string) (string, error) {
+				"unknown": pipz.Apply("unsupported", func(_ context.Context, filename string) (string, error) {
 					return "", fmt.Errorf("unsupported file type: %s", filename)
 				}),
 			},
