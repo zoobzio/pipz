@@ -3,7 +3,6 @@ package pipz
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"sync"
 	"time"
 )
@@ -47,17 +46,24 @@ func (f ProcessorFunc[T]) Process(ctx context.Context, data T) (T, error) {
 }
 
 // Condition determines routing based on input data.
-// Returns a route string (not boolean) for multi-way branching.
+// Returns a route key of any comparable type for multi-way branching.
 //
-// Using strings instead of booleans enables rich routing logic
-// beyond simple if/else, supporting multiple destinations based
-// on data attributes. Common patterns include routing by:
-//   - Type fields ("user", "admin", "guest")
-//   - Status values ("pending", "approved", "rejected")
-//   - Priority levels ("high", "medium", "low")
-//   - Geographic regions ("us-east", "eu-west", "asia")
-//   - Feature flags ("experiment-a", "experiment-b", "control")
-type Condition[T any] func(context.Context, T) string
+// Using generic keys instead of strings enables type-safe routing
+// beyond simple string matching. Define custom types for your routes:
+//
+//	type PaymentRoute string
+//	const (
+//	    RouteStandard   PaymentRoute = "standard"
+//	    RouteHighValue  PaymentRoute = "high_value"
+//	    RouteCrypto     PaymentRoute = "crypto"
+//	    RouteDefault    PaymentRoute = "default"
+//	)
+//
+// Common patterns include routing by:
+//   - Typed enums for business states
+//   - Integer codes for priority levels
+//   - Custom types for domain concepts
+type Condition[T any, K comparable] func(context.Context, T) K
 
 // Sequential runs chainables in order, passing output to input.
 // Sequential is the most fundamental connector - it executes each step
@@ -99,9 +105,9 @@ func Sequential[T any](chainables ...Chainable[T]) Chainable[T] {
 // on the input data. The condition function examines the data and
 // returns a route key that determines which processor to use.
 //
-// The condition returns a string (not boolean) to support multi-way
-// branching beyond simple if/else logic. A special "default" route
-// can handle cases where no specific route matches.
+// The key type K must be comparable (can be used as map key). This enables
+// type-safe routing with custom types, avoiding magic strings. If no route
+// exists for the returned key, an error is returned.
 //
 // IMPORTANT: The routes map is captured by reference, not copied.
 // This means you can modify the map after creating the Switch to dynamically
@@ -114,52 +120,50 @@ func Sequential[T any](chainables ...Chainable[T]) Chainable[T] {
 // map access without synchronization will cause a panic.
 //
 // Switch is perfect for:
-//   - Type-based processing (route by data.Type field)
-//   - Status-based workflows (route by order.Status)
-//   - Region-specific logic (route by user.Country)
-//   - Priority handling (route by priority level)
-//   - A/B testing (route by experiment group)
+//   - Type-based processing with enum safety
+//   - Status-based workflows with defined states
+//   - Region-specific logic with typed regions
+//   - Priority handling with numeric levels
+//   - A/B testing with experiment types
 //   - Dynamic routing tables that change at runtime
 //   - Feature flag controlled processing paths
 //
-// Example:
+// Example with type-safe keys:
 //
-//	routes := map[string]pipz.Chainable[Payment]{
-//	    "standard":   standardProcessor,
-//	    "high_value": highValueProcessor,
-//	    "crypto":     cryptoProcessor,
-//	    "default":    fallbackProcessor,
+//	type PaymentRoute string
+//	const (
+//	    RouteStandard   PaymentRoute = "standard"
+//	    RouteHighValue  PaymentRoute = "high_value"
+//	    RouteCrypto     PaymentRoute = "crypto"
+//	)
+//
+//	routes := map[PaymentRoute]pipz.Chainable[Payment]{
+//	    RouteStandard:   standardProcessor,
+//	    RouteHighValue:  highValueProcessor,
+//	    RouteCrypto:     cryptoProcessor,
 //	}
-//	
+//
 //	processPayment := pipz.Switch(
-//	    func(ctx context.Context, p Payment) string {
+//	    func(ctx context.Context, p Payment) PaymentRoute {
 //	        if p.Amount > 10000 {
-//	            return "high_value"
+//	            return RouteHighValue
 //	        } else if p.Method == "crypto" {
-//	            return "crypto"
+//	            return RouteCrypto
 //	        }
-//	        return "standard"
+//	        return RouteStandard  // Explicit default
 //	    },
 //	    routes,
 //	)
-//	
+//
 //	// Later: Add new route without rebuilding
-//	routes["express"] = expressProcessor
-//	
-//	// Or: Update existing route
-//	routes["crypto"] = newCryptoProcessor
-//	
-//	// Or: Remove route (will fallback to "default")
-//	delete(routes, "high_value")
-func Switch[T any](condition Condition[T], routes map[string]Chainable[T]) Chainable[T] {
+//	const RouteExpress PaymentRoute = "express"
+//	routes[RouteExpress] = expressProcessor
+func Switch[T any, K comparable](condition Condition[T, K], routes map[K]Chainable[T]) Chainable[T] {
 	return ProcessorFunc[T](func(ctx context.Context, data T) (T, error) {
 		route := condition(ctx, data)
 		chainable, exists := routes[route]
 		if !exists {
-			if defaultChainable, hasDefault := routes["default"]; hasDefault {
-				return defaultChainable.Process(ctx, data)
-			}
-			return data, fmt.Errorf("no route for condition result: %s", route)
+			return data, fmt.Errorf("no route for condition result: %v", route)
 		}
 		return chainable.Process(ctx, data)
 	})
@@ -353,89 +357,43 @@ func Timeout[T any](chainable Chainable[T], duration time.Duration) Chainable[T]
 	})
 }
 
-// deepCopy creates a deep copy of the input value using reflection.
-// This is used by Concurrent to ensure each processor gets an isolated copy.
-// Note: This uses reflection and will have performance overhead.
+// Cloner is an interface for types that can create deep copies of themselves.
+// Implementing this interface allows types to be used with ConcurrentClone,
+// providing a type-safe and performant alternative to reflection-based copying.
 //
-// TODO: This implementation uses an unsafe type assertion pattern (Interface().(T))
-// which isn't ideal. Consider alternatives like requiring a Clone() interface or
-// using a type-safe deep copy library to eliminate the type casting.
-func deepCopy[T any](original T) T {
-	v := reflect.ValueOf(original)
-	copyValue := reflect.New(v.Type()).Elem()
-	deepCopyValue(v, copyValue)
-	// Type assertion required due to reflection limitations with generics
-	result, ok := copyValue.Interface().(T)
-	if !ok {
-		// This should never happen with correct generic usage, but handle gracefully
-		panic("deepCopy: type assertion failed - this indicates a programming error")
-	}
-	return result
-}
-
-func deepCopyValue(src, dst reflect.Value) {
-	switch src.Kind() {
-	case reflect.Ptr:
-		if src.IsNil() {
-			return
-		}
-		dst.Set(reflect.New(src.Type().Elem()))
-		deepCopyValue(src.Elem(), dst.Elem())
-
-	case reflect.Interface:
-		if src.IsNil() {
-			return
-		}
-		copyValue := reflect.New(src.Elem().Type()).Elem()
-		deepCopyValue(src.Elem(), copyValue)
-		dst.Set(copyValue)
-
-	case reflect.Struct:
-		for i := 0; i < src.NumField(); i++ {
-			if src.Type().Field(i).PkgPath != "" {
-				// Skip unexported fields
-				continue
-			}
-			deepCopyValue(src.Field(i), dst.Field(i))
-		}
-
-	case reflect.Slice:
-		if src.IsNil() {
-			return
-		}
-		dst.Set(reflect.MakeSlice(src.Type(), src.Len(), src.Cap()))
-		for i := 0; i < src.Len(); i++ {
-			deepCopyValue(src.Index(i), dst.Index(i))
-		}
-
-	case reflect.Array:
-		for i := 0; i < src.Len(); i++ {
-			deepCopyValue(src.Index(i), dst.Index(i))
-		}
-
-	case reflect.Map:
-		if src.IsNil() {
-			return
-		}
-		dst.Set(reflect.MakeMap(src.Type()))
-		for _, key := range src.MapKeys() {
-			copyKey := reflect.New(key.Type()).Elem()
-			deepCopyValue(key, copyKey)
-			copyValue := reflect.New(src.MapIndex(key).Type()).Elem()
-			deepCopyValue(src.MapIndex(key), copyValue)
-			dst.SetMapIndex(copyKey, copyValue)
-		}
-
-	default:
-		// For basic types (int, string, bool, etc.), just set the value
-		dst.Set(src)
-	}
+// The Clone method should return a deep copy where modifications to the clone
+// do not affect the original value. For types containing pointers, slices, or maps,
+// ensure these are also copied to achieve true isolation.
+//
+// Example implementation:
+//
+//	type Order struct {
+//	    ID     string
+//	    Items  []Item
+//	    Status string
+//	}
+//
+//	func (o Order) Clone() Order {
+//	    items := make([]Item, len(o.Items))
+//	    copy(items, o.Items)
+//	    return Order{
+//	        ID:     o.ID,
+//	        Items:  items,
+//	        Status: o.Status,
+//	    }
+//	}
+type Cloner[T any] interface {
+	Clone() T
 }
 
 // Concurrent runs all processors in parallel, each with an isolated copy of the input.
 // Concurrent enables parallel execution of independent operations that don't need
 // to coordinate or share results. Each processor receives a deep copy of the input,
 // ensuring complete isolation. The original input is always returned unchanged.
+//
+// The input type T must implement the Cloner[T] interface to provide efficient,
+// type-safe copying without reflection. This ensures predictable performance and
+// allows types to control their own copying semantics.
 //
 // This pattern is powerful for "fire and forget" operations where you need multiple
 // side effects to happen simultaneously:
@@ -446,7 +404,7 @@ func deepCopyValue(src, dst reflect.Value) {
 //   - Warming multiple caches
 //
 // Important characteristics:
-//   - Uses reflection for deep copying (performance overhead)
+//   - Input type must implement Cloner[T] interface
 //   - All processors run regardless of individual failures
 //   - Original input always returned (processors can't modify it)
 //   - Context cancellation stops all processors
@@ -454,13 +412,29 @@ func deepCopyValue(src, dst reflect.Value) {
 //
 // Example:
 //
+//	type Order struct {
+//	    ID     string
+//	    Items  []Item
+//	    Status string
+//	}
+//
+//	func (o Order) Clone() Order {
+//	    items := make([]Item, len(o.Items))
+//	    copy(items, o.Items)
+//	    return Order{
+//	        ID:     o.ID,
+//	        Items:  items,
+//	        Status: o.Status,
+//	    }
+//	}
+//
 //	notifyOrder := pipz.Concurrent(
 //	    sendEmailNotification,
 //	    sendSMSNotification,
 //	    updateInventorySystem,
 //	    logToAnalytics,
 //	)
-func Concurrent[T any](processors ...Chainable[T]) Chainable[T] {
+func Concurrent[T Cloner[T]](processors ...Chainable[T]) Chainable[T] {
 	return ProcessorFunc[T](func(ctx context.Context, input T) (T, error) {
 		if len(processors) == 0 {
 			return input, nil
@@ -477,8 +451,8 @@ func Concurrent[T any](processors ...Chainable[T]) Chainable[T] {
 			go func(p Chainable[T]) {
 				defer wg.Done()
 
-				// Create an isolated copy for this processor
-				inputCopy := deepCopy(input)
+				// Create an isolated copy using the Clone method
+				inputCopy := input.Clone()
 
 				// Process with the copy, ignoring any returns
 				if _, err := p.Process(concCtx, inputCopy); err != nil {
@@ -555,6 +529,10 @@ func WithErrorHandler[T any](
 // matters more than which specific processor succeeds. The first successful
 // result wins and cancels all other processors.
 //
+// The input type T must implement the Cloner[T] interface to provide efficient,
+// type-safe copying without reflection. This ensures predictable performance and
+// allows types to control their own copying semantics.
+//
 // This pattern excels when you have multiple ways to get the same result
 // and want the fastest one:
 //   - Querying multiple replicas or regions
@@ -566,18 +544,19 @@ func WithErrorHandler[T any](
 // Key behaviors:
 //   - First success wins and cancels others
 //   - All failures returns the last error
-//   - Each processor gets an isolated copy (reflection overhead)
+//   - Each processor gets an isolated copy via Clone()
 //   - Useful for reducing p99 latencies
 //   - Can increase load (all processors run)
 //
 // Example:
 //
+//	// UserQuery must implement Cloner[UserQuery]
 //	fetchUserData := pipz.Race(
 //	    fetchFromLocalCache,
 //	    fetchFromRegionalCache,
 //	    fetchFromDatabase,
 //	)
-func Race[T any](processors ...Chainable[T]) Chainable[T] {
+func Race[T Cloner[T]](processors ...Chainable[T]) Chainable[T] {
 	return ProcessorFunc[T](func(ctx context.Context, input T) (T, error) {
 		if len(processors) == 0 {
 			return input, fmt.Errorf("no processors provided to Race")
@@ -597,8 +576,8 @@ func Race[T any](processors ...Chainable[T]) Chainable[T] {
 		// Launch all processors
 		for i, processor := range processors {
 			go func(idx int, p Chainable[T]) {
-				// Create an isolated copy for this processor
-				inputCopy := deepCopy(input)
+				// Create an isolated copy using the Clone method
+				inputCopy := input.Clone()
 
 				data, err := p.Process(raceCtx, inputCopy)
 				select {

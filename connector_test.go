@@ -118,24 +118,30 @@ func TestSwitch(t *testing.T) {
 		}
 	})
 
-	t.Run("Default Route", func(t *testing.T) {
+	t.Run("Multiple Routes", func(t *testing.T) {
 		condition := func(_ context.Context, n int) string {
 			if n > 0 {
 				return "positive"
+			} else if n < 0 {
+				return "negative"
 			}
-			return "negative"
+			return "zero"
 		}
 
 		positiveRoute := ProcessorFunc[int](func(_ context.Context, n int) (int, error) {
 			return n * 2, nil
 		})
-		defaultRoute := ProcessorFunc[int](func(_ context.Context, n int) (int, error) {
+		negativeRoute := ProcessorFunc[int](func(_ context.Context, n int) (int, error) {
 			return n * -1, nil
+		})
+		zeroRoute := ProcessorFunc[int](func(_ context.Context, _ int) (int, error) {
+			return 100, nil
 		})
 
 		sw := Switch(condition, map[string]Chainable[int]{
 			"positive": positiveRoute,
-			"default":  defaultRoute,
+			"negative": negativeRoute,
+			"zero":     zeroRoute,
 		})
 
 		// Test positive route
@@ -147,13 +153,22 @@ func TestSwitch(t *testing.T) {
 			t.Errorf("expected 10, got %d", result)
 		}
 
-		// Test default route (negative)
+		// Test negative route
 		result, err = sw.Process(context.Background(), -5)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 		if result != 5 {
 			t.Errorf("expected 5, got %d", result)
+		}
+
+		// Test zero route
+		result, err = sw.Process(context.Background(), 0)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result != 100 {
+			t.Errorf("expected 100, got %d", result)
 		}
 	})
 
@@ -176,6 +191,76 @@ func TestSwitch(t *testing.T) {
 		}
 		if result != "c" {
 			t.Errorf("expected input 'c' to be returned, got '%s'", result)
+		}
+	})
+
+	t.Run("Generic Key Type", func(t *testing.T) {
+		// Define a custom type for payment routes
+		type PaymentRoute string
+		const (
+			RouteStandard  PaymentRoute = "standard"
+			RouteHighValue PaymentRoute = "high_value"
+			RouteCrypto    PaymentRoute = "crypto"
+		)
+
+		type Payment struct {
+			Amount int
+			Method string
+		}
+
+		condition := func(_ context.Context, p Payment) PaymentRoute {
+			if p.Amount > 10000 {
+				return RouteHighValue
+			} else if p.Method == "crypto" {
+				return RouteCrypto
+			}
+			return RouteStandard
+		}
+
+		standardProcessor := ProcessorFunc[Payment](func(_ context.Context, p Payment) (Payment, error) {
+			p.Method = "processed_standard"
+			return p, nil
+		})
+		highValueProcessor := ProcessorFunc[Payment](func(_ context.Context, p Payment) (Payment, error) {
+			p.Method = "processed_high_value"
+			return p, nil
+		})
+		cryptoProcessor := ProcessorFunc[Payment](func(_ context.Context, p Payment) (Payment, error) {
+			p.Method = "processed_crypto"
+			return p, nil
+		})
+
+		sw := Switch(condition, map[PaymentRoute]Chainable[Payment]{
+			RouteStandard:  standardProcessor,
+			RouteHighValue: highValueProcessor,
+			RouteCrypto:    cryptoProcessor,
+		})
+
+		// Test standard route
+		result, err := sw.Process(context.Background(), Payment{Amount: 100, Method: "card"})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result.Method != "processed_standard" {
+			t.Errorf("expected processed_standard, got %s", result.Method)
+		}
+
+		// Test high value route
+		result, err = sw.Process(context.Background(), Payment{Amount: 15000, Method: "wire"})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result.Method != "processed_high_value" {
+			t.Errorf("expected processed_high_value, got %s", result.Method)
+		}
+
+		// Test crypto route
+		result, err = sw.Process(context.Background(), Payment{Amount: 500, Method: "crypto"})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result.Method != "processed_crypto" {
+			t.Errorf("expected processed_crypto, got %s", result.Method)
 		}
 	})
 }
@@ -491,35 +576,58 @@ func TestTimeout(t *testing.T) {
 	})
 }
 
+// Test types for Race.
+type raceInt struct {
+	Value int
+}
+
+func (r raceInt) Clone() raceInt {
+	return raceInt{Value: r.Value}
+}
+
+type raceData struct {
+	Value int
+	Slice []int
+}
+
+func (d raceData) Clone() raceData {
+	newSlice := make([]int, len(d.Slice))
+	copy(newSlice, d.Slice)
+	return raceData{
+		Value: d.Value,
+		Slice: newSlice,
+	}
+}
+
 func TestRace(t *testing.T) {
 	t.Run("Empty Race", func(t *testing.T) {
-		race := Race[int]()
-		_, err := race.Process(context.Background(), 5)
+		race := Race[raceInt]()
+		_, err := race.Process(context.Background(), raceInt{Value: 5})
 		if err == nil || !strings.Contains(err.Error(), "no processors provided") {
 			t.Errorf("expected 'no processors provided' error, got: %v", err)
 		}
 	})
 
 	t.Run("First Success Wins", func(t *testing.T) {
-		fast := ProcessorFunc[int](func(_ context.Context, n int) (int, error) {
+		fast := ProcessorFunc[raceInt](func(_ context.Context, n raceInt) (raceInt, error) {
 			time.Sleep(10 * time.Millisecond)
-			return n * 2, nil
+			return raceInt{Value: n.Value * 2}, nil
 		})
-		slow := ProcessorFunc[int](func(_ context.Context, n int) (int, error) {
+		slow := ProcessorFunc[raceInt](func(_ context.Context, n raceInt) (raceInt, error) {
 			time.Sleep(50 * time.Millisecond)
-			return n * 3, nil
+			return raceInt{Value: n.Value * 3}, nil
 		})
 
 		race := Race(fast, slow)
 		start := time.Now()
-		result, err := race.Process(context.Background(), 5)
+		result, err := race.Process(context.Background(), raceInt{Value: 5})
 		elapsed := time.Since(start)
 
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
-		if result != 10 {
-			t.Errorf("expected fast processor result (10), got %d", result)
+		if result.Value != 10 {
+			t.Errorf("expected fast processor result (10), got %d", result.Value)
 		}
 		// Should complete shortly after fast processor
 		if elapsed > 20*time.Millisecond {
@@ -528,17 +636,17 @@ func TestRace(t *testing.T) {
 	})
 
 	t.Run("All Fail", func(t *testing.T) {
-		fail1 := ProcessorFunc[int](func(_ context.Context, n int) (int, error) {
+		fail1 := ProcessorFunc[raceInt](func(_ context.Context, n raceInt) (raceInt, error) {
 			time.Sleep(10 * time.Millisecond)
 			return n, errors.New("error 1")
 		})
-		fail2 := ProcessorFunc[int](func(_ context.Context, n int) (int, error) {
+		fail2 := ProcessorFunc[raceInt](func(_ context.Context, n raceInt) (raceInt, error) {
 			time.Sleep(20 * time.Millisecond)
 			return n, errors.New("error 2")
 		})
 
 		race := Race(fail1, fail2)
-		result, err := race.Process(context.Background(), 5)
+		result, err := race.Process(context.Background(), raceInt{Value: 5})
 
 		if err == nil {
 			t.Error("expected error when all processors fail")
@@ -546,16 +654,16 @@ func TestRace(t *testing.T) {
 		if !strings.Contains(err.Error(), "all processors failed") {
 			t.Errorf("unexpected error message: %v", err)
 		}
-		if result != 5 {
-			t.Errorf("expected input value 5, got %d", result)
+		if result.Value != 5 {
+			t.Errorf("expected input value 5, got %d", result.Value)
 		}
 	})
 
 	t.Run("Context Cancellation", func(t *testing.T) {
-		slow := ProcessorFunc[int](func(ctx context.Context, n int) (int, error) {
+		slow := ProcessorFunc[raceInt](func(ctx context.Context, n raceInt) (raceInt, error) {
 			select {
 			case <-time.After(100 * time.Millisecond):
-				return n * 2, nil
+				return raceInt{Value: n.Value * 2}, nil
 			case <-ctx.Done():
 				return n, ctx.Err()
 			}
@@ -565,26 +673,21 @@ func TestRace(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 		defer cancel()
 
-		_, err := race.Process(ctx, 5)
+		_, err := race.Process(ctx, raceInt{Value: 5})
 		if err == nil || !errors.Is(err, context.DeadlineExceeded) {
 			t.Errorf("expected deadline exceeded error, got: %v", err)
 		}
 	})
 
 	t.Run("Mutations Are Isolated", func(t *testing.T) {
-		type Data struct {
-			Value int
-			Slice []int
-		}
-
-		proc1 := Apply("race1", func(_ context.Context, d Data) (Data, error) {
+		proc1 := Apply("race1", func(_ context.Context, d raceData) (raceData, error) {
 			time.Sleep(10 * time.Millisecond)
 			d.Value = 100
 			d.Slice[0] = 100
 			return d, nil
 		})
 
-		proc2 := Apply("race2", func(_ context.Context, d Data) (Data, error) {
+		proc2 := Apply("race2", func(_ context.Context, d raceData) (raceData, error) {
 			time.Sleep(20 * time.Millisecond)
 			d.Value = 200
 			d.Slice[0] = 200
@@ -592,7 +695,7 @@ func TestRace(t *testing.T) {
 		})
 
 		race := Race(proc1, proc2)
-		original := Data{Value: 42, Slice: []int{1, 2, 3}}
+		original := raceData{Value: 42, Slice: []int{1, 2, 3}}
 		result, err := race.Process(context.Background(), original)
 
 		if err != nil {
@@ -728,34 +831,58 @@ func TestComposition(t *testing.T) {
 	})
 }
 
+// Test types for Concurrent tests.
+type testInt struct {
+	Value int
+}
+
+func (t testInt) Clone() testInt {
+	return testInt{Value: t.Value}
+}
+
+type testData struct {
+	Value int
+	Slice []int
+}
+
+func (d testData) Clone() testData {
+	newSlice := make([]int, len(d.Slice))
+	copy(newSlice, d.Slice)
+	return testData{
+		Value: d.Value,
+		Slice: newSlice,
+	}
+}
+
 func TestConcurrent(t *testing.T) {
 	t.Run("Empty Concurrent", func(t *testing.T) {
-		concurrent := Concurrent[int]()
-		result, err := concurrent.Process(context.Background(), 42)
+		concurrent := Concurrent[testInt]()
+		input := testInt{Value: 42}
+		result, err := concurrent.Process(context.Background(), input)
 		if err != nil {
 			t.Errorf("empty concurrent should not error: %v", err)
 		}
-		if result != 42 {
-			t.Errorf("concurrent should return input unchanged: got %d, want 42", result)
+		if result.Value != 42 {
+			t.Errorf("concurrent should return input unchanged: got %d, want 42", result.Value)
 		}
 	})
 
 	t.Run("Multiple Processors Execute", func(t *testing.T) {
 		var count1, count2, count3 atomic.Int32
 
-		proc1 := Effect("counter1", func(_ context.Context, _ int) error {
+		proc1 := Effect("counter1", func(_ context.Context, _ testInt) error {
 			count1.Add(1)
 			time.Sleep(10 * time.Millisecond)
 			return nil
 		})
 
-		proc2 := Effect("counter2", func(_ context.Context, _ int) error {
+		proc2 := Effect("counter2", func(_ context.Context, _ testInt) error {
 			count2.Add(1)
 			time.Sleep(20 * time.Millisecond)
 			return nil
 		})
 
-		proc3 := Effect("counter3", func(_ context.Context, _ int) error {
+		proc3 := Effect("counter3", func(_ context.Context, _ testInt) error {
 			count3.Add(1)
 			time.Sleep(15 * time.Millisecond)
 			return nil
@@ -764,14 +891,15 @@ func TestConcurrent(t *testing.T) {
 		concurrent := Concurrent(proc1, proc2, proc3)
 
 		start := time.Now()
-		result, err := concurrent.Process(context.Background(), 100)
+		input := testInt{Value: 100}
+		result, err := concurrent.Process(context.Background(), input)
 		elapsed := time.Since(start)
 
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
-		if result != 100 {
-			t.Errorf("concurrent should return original input: got %d, want 100", result)
+		if result.Value != 100 {
+			t.Errorf("concurrent should return original input: got %d, want 100", result.Value)
 		}
 
 		// All processors should have executed
@@ -792,18 +920,13 @@ func TestConcurrent(t *testing.T) {
 	})
 
 	t.Run("Mutations Are Isolated", func(t *testing.T) {
-		type Data struct {
-			Value int
-			Slice []int
-		}
-
-		proc1 := Apply("mutate1", func(_ context.Context, d Data) (Data, error) {
+		proc1 := Apply("mutate1", func(_ context.Context, d testData) (testData, error) {
 			d.Value = 999
 			d.Slice[0] = 999
 			return d, nil
 		})
 
-		proc2 := Apply("mutate2", func(_ context.Context, d Data) (Data, error) {
+		proc2 := Apply("mutate2", func(_ context.Context, d testData) (testData, error) {
 			d.Value = 777
 			d.Slice[0] = 777
 			return d, nil
@@ -811,7 +934,7 @@ func TestConcurrent(t *testing.T) {
 
 		concurrent := Concurrent(proc1, proc2)
 
-		original := Data{Value: 42, Slice: []int{1, 2, 3}}
+		original := testData{Value: 42, Slice: []int{1, 2, 3}}
 		result, err := concurrent.Process(context.Background(), original)
 
 		if err != nil {
@@ -830,25 +953,25 @@ func TestConcurrent(t *testing.T) {
 	t.Run("Errors Are Ignored", func(t *testing.T) {
 		var executed atomic.Bool
 
-		failing := Effect("fail", func(_ context.Context, _ int) error {
+		failing := Effect("fail", func(_ context.Context, _ testInt) error {
 			return errors.New("this processor fails")
 		})
 
-		succeeding := Effect("succeed", func(_ context.Context, _ int) error {
+		succeeding := Effect("succeed", func(_ context.Context, _ testInt) error {
 			executed.Store(true)
 			return nil
 		})
 
 		concurrent := Concurrent(failing, succeeding)
 
-		result, err := concurrent.Process(context.Background(), 42)
+		result, err := concurrent.Process(context.Background(), testInt{Value: 42})
 
 		// Should not return error
 		if err != nil {
 			t.Errorf("concurrent should not return errors from processors: %v", err)
 		}
-		if result != 42 {
-			t.Errorf("concurrent should return original input: got %d, want 42", result)
+		if result.Value != 42 {
+			t.Errorf("concurrent should return original input: got %d, want 42", result.Value)
 		}
 		if !executed.Load() {
 			t.Errorf("succeeding processor should have executed despite failing processor")
@@ -858,7 +981,7 @@ func TestConcurrent(t *testing.T) {
 	t.Run("Context Cancellation", func(t *testing.T) {
 		var started, completed atomic.Int32
 
-		slowProc := Effect("slow", func(ctx context.Context, _ int) error {
+		slowProc := Effect("slow", func(ctx context.Context, _ testInt) error {
 			started.Add(1)
 			select {
 			case <-time.After(100 * time.Millisecond):
@@ -874,7 +997,7 @@ func TestConcurrent(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 		defer cancel()
 
-		_, err := concurrent.Process(ctx, 42)
+		_, err := concurrent.Process(ctx, testInt{Value: 42})
 
 		if err == nil || !errors.Is(err, context.DeadlineExceeded) {
 			t.Errorf("expected deadline exceeded error, got: %v", err)
@@ -977,11 +1100,11 @@ func TestWithErrorHandler(t *testing.T) {
 		var collectedErrors []string
 		var mu sync.Mutex
 
-		proc1 := Effect("fail1", func(_ context.Context, _ int) error {
+		proc1 := Effect("fail1", func(_ context.Context, _ testInt) error {
 			return errors.New("error from proc1")
 		})
 
-		proc2 := Effect("fail2", func(_ context.Context, _ int) error {
+		proc2 := Effect("fail2", func(_ context.Context, _ testInt) error {
 			return errors.New("error from proc2")
 		})
 
@@ -997,7 +1120,7 @@ func TestWithErrorHandler(t *testing.T) {
 			WithErrorHandler(proc2, errorCollector),
 		)
 
-		_, err := concurrent.Process(context.Background(), 42)
+		_, err := concurrent.Process(context.Background(), testInt{Value: 42})
 
 		if err != nil {
 			t.Errorf("concurrent should not return error: %v", err)

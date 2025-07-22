@@ -41,3 +41,6 @@ benchmarks/benchmark_results.txt
 # Local environment
 .env
 .env.local
+
+# Demo binary 
+pipz

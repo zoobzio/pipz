@@ -434,20 +434,58 @@ func BenchmarkConnectorScaling(b *testing.B) {
 	}
 }
 
+// benchData is a simple struct for concurrent benchmarks.
+type benchData struct {
+	ID     int
+	Values []int
+	Name   string
+}
+
+func (d benchData) Clone() benchData {
+	newValues := make([]int, len(d.Values))
+	copy(newValues, d.Values)
+	return benchData{
+		ID:     d.ID,
+		Values: newValues,
+		Name:   d.Name,
+	}
+}
+
+// benchLargeData is a larger struct to measure copy overhead.
+type benchLargeData struct {
+	ID      int
+	Matrix  [][]int
+	Strings []string
+	Map     map[string]int
+}
+
+func (d benchLargeData) Clone() benchLargeData {
+	newMatrix := make([][]int, len(d.Matrix))
+	for i := range d.Matrix {
+		newMatrix[i] = make([]int, len(d.Matrix[i]))
+		copy(newMatrix[i], d.Matrix[i])
+	}
+	newStrings := make([]string, len(d.Strings))
+	copy(newStrings, d.Strings)
+	newMap := make(map[string]int, len(d.Map))
+	for k, v := range d.Map {
+		newMap[k] = v
+	}
+	return benchLargeData{
+		ID:      d.ID,
+		Matrix:  newMatrix,
+		Strings: newStrings,
+		Map:     newMap,
+	}
+}
+
 // BenchmarkConcurrent measures the performance of Concurrent connector.
 func BenchmarkConcurrent(b *testing.B) {
 	ctx := context.Background()
 
-	// Simple struct for testing
-	type Data struct {
-		ID     int
-		Values []int
-		Name   string
-	}
-
 	b.Run("Empty", func(b *testing.B) {
-		concurrent := pipz.Concurrent[Data]()
-		data := Data{ID: 1, Values: []int{1, 2, 3}, Name: "test"}
+		concurrent := pipz.Concurrent[benchData]()
+		data := benchData{ID: 1, Values: []int{1, 2, 3}, Name: "test"}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			_, _ = concurrent.Process(ctx, data) //nolint:errcheck
@@ -456,21 +494,21 @@ func BenchmarkConcurrent(b *testing.B) {
 
 	b.Run("ThreeEffects_Sequential", func(b *testing.B) {
 		// Simulate I/O-bound operations
-		effect1 := pipz.Effect("io1", func(_ context.Context, _ Data) error {
+		effect1 := pipz.Effect("io1", func(_ context.Context, _ benchData) error {
 			time.Sleep(1 * time.Millisecond)
 			return nil
 		})
-		effect2 := pipz.Effect("io2", func(_ context.Context, _ Data) error {
+		effect2 := pipz.Effect("io2", func(_ context.Context, _ benchData) error {
 			time.Sleep(1 * time.Millisecond)
 			return nil
 		})
-		effect3 := pipz.Effect("io3", func(_ context.Context, _ Data) error {
+		effect3 := pipz.Effect("io3", func(_ context.Context, _ benchData) error {
 			time.Sleep(1 * time.Millisecond)
 			return nil
 		})
 
 		seq := pipz.Sequential(effect1, effect2, effect3)
-		data := Data{ID: 1, Values: []int{1, 2, 3}, Name: "test"}
+		data := benchData{ID: 1, Values: []int{1, 2, 3}, Name: "test"}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			_, _ = seq.Process(ctx, data) //nolint:errcheck
@@ -479,21 +517,21 @@ func BenchmarkConcurrent(b *testing.B) {
 
 	b.Run("ThreeEffects_Concurrent", func(b *testing.B) {
 		// Same I/O-bound operations but concurrent
-		effect1 := pipz.Effect("io1", func(_ context.Context, _ Data) error {
+		effect1 := pipz.Effect("io1", func(_ context.Context, _ benchData) error {
 			time.Sleep(1 * time.Millisecond)
 			return nil
 		})
-		effect2 := pipz.Effect("io2", func(_ context.Context, _ Data) error {
+		effect2 := pipz.Effect("io2", func(_ context.Context, _ benchData) error {
 			time.Sleep(1 * time.Millisecond)
 			return nil
 		})
-		effect3 := pipz.Effect("io3", func(_ context.Context, _ Data) error {
+		effect3 := pipz.Effect("io3", func(_ context.Context, _ benchData) error {
 			time.Sleep(1 * time.Millisecond)
 			return nil
 		})
 
 		concurrent := pipz.Concurrent(effect1, effect2, effect3)
-		data := Data{ID: 1, Values: []int{1, 2, 3}, Name: "test"}
+		data := benchData{ID: 1, Values: []int{1, 2, 3}, Name: "test"}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			_, _ = concurrent.Process(ctx, data) //nolint:errcheck
@@ -502,12 +540,12 @@ func BenchmarkConcurrent(b *testing.B) {
 
 	b.Run("DeepCopyOverhead_SmallStruct", func(b *testing.B) {
 		// Measure just the copy overhead with fast processors
-		proc := pipz.Effect("fast", func(_ context.Context, _ Data) error {
+		proc := pipz.Effect("fast", func(_ context.Context, _ benchData) error {
 			return nil
 		})
 
 		concurrent := pipz.Concurrent(proc, proc, proc)
-		data := Data{ID: 1, Values: []int{1, 2, 3}, Name: "test"}
+		data := benchData{ID: 1, Values: []int{1, 2, 3}, Name: "test"}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			_, _ = concurrent.Process(ctx, data) //nolint:errcheck
@@ -516,14 +554,7 @@ func BenchmarkConcurrent(b *testing.B) {
 
 	b.Run("DeepCopyOverhead_LargeStruct", func(b *testing.B) {
 		// Larger struct to measure copy overhead
-		type LargeData struct {
-			ID      int
-			Matrix  [][]int
-			Strings []string
-			Map     map[string]int
-		}
-
-		proc := pipz.Effect("fast", func(_ context.Context, _ LargeData) error {
+		proc := pipz.Effect("fast", func(_ context.Context, _ benchLargeData) error {
 			return nil
 		})
 
@@ -543,7 +574,7 @@ func BenchmarkConcurrent(b *testing.B) {
 			mapping[fmt.Sprintf("key_%d", i)] = i
 		}
 
-		data := LargeData{
+		data := benchLargeData{
 			ID:      1,
 			Matrix:  matrix,
 			Strings: strings,
@@ -558,7 +589,7 @@ func BenchmarkConcurrent(b *testing.B) {
 
 	b.Run("WithErrorHandler", func(b *testing.B) {
 		// Measure error handling overhead
-		failingProc := pipz.Effect("fail", func(_ context.Context, _ Data) error {
+		failingProc := pipz.Effect("fail", func(_ context.Context, _ benchData) error {
 			return errors.New("expected error")
 		})
 
@@ -569,7 +600,7 @@ func BenchmarkConcurrent(b *testing.B) {
 		wrapped := pipz.WithErrorHandler(failingProc, errorHandler)
 		concurrent := pipz.Concurrent(wrapped, wrapped, wrapped)
 
-		data := Data{ID: 1, Values: []int{1, 2, 3}, Name: "test"}
+		data := benchData{ID: 1, Values: []int{1, 2, 3}, Name: "test"}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			_, _ = concurrent.Process(ctx, data) //nolint:errcheck
