@@ -635,11 +635,17 @@ func EnableFraudDetection() {
 			CalculateFraudScore,
 			router,
 		),
-		pipz.Apply(ProcessorPaymentErrorHandler, func(_ context.Context, err *pipz.Error[Order]) (*pipz.Error[Order], error) {
+		pipz.Apply(ProcessorPaymentErrorHandler, func(ctx context.Context, err *pipz.Error[Order]) (*pipz.Error[Order], error) {
 			// Handle payment failures by saving for retry.
 			if strings.Contains(err.Error(), "payment") {
 				err.InputData.Status = StatusPending
-				err.InputData.ProcessingLog = append(err.InputData.ProcessingLog, "payment failed - saved for retry")
+				err.InputData.ProcessingLog = append(err.InputData.ProcessingLog, "saved for retry")
+				
+				// Save the order with pending status.
+				if saveErr := OrderDB.Save(ctx, err.InputData); saveErr != nil {
+					// If save fails, keep original error but log the save failure.
+					err.InputData.ProcessingLog = append(err.InputData.ProcessingLog, fmt.Sprintf("save failed: %v", saveErr))
+				}
 			}
 			// Handle manual review cases - preserve existing status and fraud score.
 			if strings.Contains(err.Error(), "manual review") {
