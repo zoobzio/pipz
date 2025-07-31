@@ -2,7 +2,9 @@ package pipz
 
 import (
 	"context"
+	"errors"
 	"sync"
+	"time"
 )
 
 // Fallback attempts processors in order, falling back to the next on error.
@@ -54,13 +56,13 @@ func NewFallback[T any](name Name, processors ...Chainable[T]) *Fallback[T] {
 
 // Process implements the Chainable interface.
 // Tries each processor in order until one succeeds or all fail.
-func (f *Fallback[T]) Process(ctx context.Context, data T) (T, *Error[T]) {
+func (f *Fallback[T]) Process(ctx context.Context, data T) (T, error) {
 	f.mu.RLock()
 	processors := make([]Chainable[T], len(f.processors))
 	copy(processors, f.processors)
 	f.mu.RUnlock()
 
-	var lastErr *Error[T]
+	var lastErr error
 
 	for _, processor := range processors {
 		result, err := processor.Process(ctx, data)
@@ -77,9 +79,20 @@ func (f *Fallback[T]) Process(ctx context.Context, data T) (T, *Error[T]) {
 
 	// All processors failed, return the last error with path
 	if lastErr != nil {
-		lastErr.Path = append([]Name{f.name}, lastErr.Path...)
+		var pipeErr *Error[T]
+		if errors.As(lastErr, &pipeErr) {
+			pipeErr.Path = append([]Name{f.name}, pipeErr.Path...)
+			return data, pipeErr
+		}
+		// Wrap non-pipeline errors
+		return data, &Error[T]{
+			Timestamp: time.Now(),
+			InputData: data,
+			Err:       lastErr,
+			Path:      []Name{f.name},
+		}
 	}
-	return data, lastErr
+	return data, nil
 }
 
 // SetProcessors replaces all processors with the provided ones.

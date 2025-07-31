@@ -442,35 +442,35 @@ var (
 
 	// OrderFailureHandler provides comprehensive error handling.
 	// Added: Sprint 6 - Production-grade error recovery.
-	OrderFailureHandler = pipz.Apply(ProcessorOrderFailureHandler, func(ctx context.Context, err *pipz.Error[Order]) (*pipz.Error[Order], error) {
+	OrderFailureHandler = pipz.Apply(ProcessorOrderFailureHandler, func(ctx context.Context, pipeErr *pipz.Error[Order]) (*pipz.Error[Order], error) {
 		// Log the error.
 		fmt.Printf("[ERROR] Order %s failed: %v at %v\n",
-			err.InputData.ID, err.Err, err.Path)
+			pipeErr.InputData.ID, pipeErr.Err, pipeErr.Path)
 
 		// Clean up based on order state.
-		if err.InputData.ReservationID != "" {
-			_ = Inventory.Release(ctx, err.InputData.ReservationID) //nolint:errcheck // best effort cleanup.
+		if pipeErr.InputData.ReservationID != "" {
+			_ = Inventory.Release(ctx, pipeErr.InputData.ReservationID) //nolint:errcheck // best effort cleanup.
 		}
 
 		// Set status based on error type.
-		if strings.Contains(err.Error(), "database") {
+		if strings.Contains(pipeErr.Error(), "database") {
 			// Database errors - save as pending for retry.
-			err.InputData.Status = StatusPending
+			pipeErr.InputData.Status = StatusPending
 		} else {
 			// Other errors - cancel the order.
-			err.InputData.Status = StatusCanceled
+			pipeErr.InputData.Status = StatusCanceled
 		}
 
-		err.InputData.Timestamps["failed"] = time.Now()
-		err.InputData.ProcessingLog = append(err.InputData.ProcessingLog,
-			fmt.Sprintf("pipeline failed: %v", err.Err))
+		pipeErr.InputData.Timestamps["failed"] = time.Now()
+		pipeErr.InputData.ProcessingLog = append(pipeErr.InputData.ProcessingLog,
+			fmt.Sprintf("pipeline failed: %v", pipeErr.Err))
 
 		// Try to save failed order for analysis (skip if database is down).
-		if !strings.Contains(err.Error(), "database") {
-			_ = OrderDB.Save(ctx, err.InputData) //nolint:errcheck // best effort logging.
+		if !strings.Contains(pipeErr.Error(), "database") {
+			_ = OrderDB.Save(ctx, pipeErr.InputData) //nolint:errcheck // best effort logging.
 		}
 
-		return err, nil
+		return pipeErr, nil
 	})
 )
 
@@ -541,13 +541,13 @@ func EnableInventoryManagement() {
 			ConfirmInventory,
 			SaveOrder,
 		),
-		pipz.Apply(ProcessorInventoryCleanup, func(ctx context.Context, err *pipz.Error[Order]) (*pipz.Error[Order], error) {
+		pipz.Apply(ProcessorInventoryCleanup, func(ctx context.Context, pipeErr *pipz.Error[Order]) (*pipz.Error[Order], error) {
 			// Release inventory on failure.
-			if err.InputData.ReservationID != "" {
-				_ = Inventory.Release(ctx, err.InputData.ReservationID) //nolint:errcheck // best effort cleanup.
-				err.InputData.ProcessingLog = append(err.InputData.ProcessingLog, "inventory released on failure")
+			if pipeErr.InputData.ReservationID != "" {
+				_ = Inventory.Release(ctx, pipeErr.InputData.ReservationID) //nolint:errcheck // best effort cleanup.
+				pipeErr.InputData.ProcessingLog = append(pipeErr.InputData.ProcessingLog, "inventory released on failure")
 			}
-			return err, nil
+			return pipeErr, nil
 		}),
 	)
 
@@ -571,13 +571,13 @@ func EnableNotifications() {
 			SaveOrder,
 			NotificationBroadcast, // Add notifications here.
 		),
-		pipz.Apply(ProcessorInventoryCleanup, func(ctx context.Context, err *pipz.Error[Order]) (*pipz.Error[Order], error) {
+		pipz.Apply(ProcessorInventoryCleanup, func(ctx context.Context, pipeErr *pipz.Error[Order]) (*pipz.Error[Order], error) {
 			// Release inventory on failure.
-			if err.InputData.ReservationID != "" {
-				_ = Inventory.Release(ctx, err.InputData.ReservationID) //nolint:errcheck // best effort cleanup.
-				err.InputData.ProcessingLog = append(err.InputData.ProcessingLog, "inventory released on failure")
+			if pipeErr.InputData.ReservationID != "" {
+				_ = Inventory.Release(ctx, pipeErr.InputData.ReservationID) //nolint:errcheck // best effort cleanup.
+				pipeErr.InputData.ProcessingLog = append(pipeErr.InputData.ProcessingLog, "inventory released on failure")
 			}
-			return err, nil
+			return pipeErr, nil
 		}),
 	)
 
@@ -635,25 +635,25 @@ func EnableFraudDetection() {
 			CalculateFraudScore,
 			router,
 		),
-		pipz.Apply(ProcessorPaymentErrorHandler, func(ctx context.Context, err *pipz.Error[Order]) (*pipz.Error[Order], error) {
+		pipz.Apply(ProcessorPaymentErrorHandler, func(ctx context.Context, pipeErr *pipz.Error[Order]) (*pipz.Error[Order], error) {
 			// Handle payment failures by saving for retry.
-			if strings.Contains(err.Error(), "payment") {
-				err.InputData.Status = StatusPending
-				err.InputData.ProcessingLog = append(err.InputData.ProcessingLog, "saved for retry")
+			if strings.Contains(pipeErr.Error(), "payment") {
+				pipeErr.InputData.Status = StatusPending
+				pipeErr.InputData.ProcessingLog = append(pipeErr.InputData.ProcessingLog, "saved for retry")
 				
 				// Save the order with pending status.
-				if saveErr := OrderDB.Save(ctx, err.InputData); saveErr != nil {
+				if saveErr := OrderDB.Save(ctx, pipeErr.InputData); saveErr != nil {
 					// If save fails, keep original error but log the save failure.
-					err.InputData.ProcessingLog = append(err.InputData.ProcessingLog, fmt.Sprintf("save failed: %v", saveErr))
+					pipeErr.InputData.ProcessingLog = append(pipeErr.InputData.ProcessingLog, fmt.Sprintf("save failed: %v", saveErr))
 				}
 			}
 			// Handle manual review cases - preserve existing status and fraud score.
-			if strings.Contains(err.Error(), "manual review") {
+			if strings.Contains(pipeErr.Error(), "manual review") {
 				// Set status to canceled as ManualReview intended.
-				err.InputData.Status = StatusCanceled
-				err.InputData.ProcessingLog = append(err.InputData.ProcessingLog, "order canceled pending manual review")
+				pipeErr.InputData.Status = StatusCanceled
+				pipeErr.InputData.ProcessingLog = append(pipeErr.InputData.ProcessingLog, "order canceled pending manual review")
 			}
-			return err, nil
+			return pipeErr, nil
 		}),
 	)
 
@@ -720,7 +720,7 @@ func EnableEnterpriseFeatures() {
 }
 
 // ProcessOrder handles an order through the pipeline.
-func ProcessOrder(ctx context.Context, order Order) (Order, *pipz.Error[Order]) {
+func ProcessOrder(ctx context.Context, order Order) (Order, error) {
 	// Set defaults.
 	if order.ID == "" {
 		order.ID = fmt.Sprintf("ORD-%d", time.Now().UnixNano())

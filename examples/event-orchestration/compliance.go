@@ -400,7 +400,7 @@ func InitializeCompliance() {
 }
 
 // ProcessComplianceCheck is the public API for the compliance domain.
-func ProcessComplianceCheck(ctx context.Context, check ComplianceCheck) (ComplianceCheck, *pipz.Error[ComplianceCheck]) {
+func ProcessComplianceCheck(ctx context.Context, check ComplianceCheck) (ComplianceCheck, error) {
 	// Process through internal pipeline.
 	return compliancePipeline.Process(ctx, check)
 }

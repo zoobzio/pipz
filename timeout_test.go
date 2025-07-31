@@ -117,9 +117,14 @@ func TestTimeout(t *testing.T) {
 		}
 
 		// Check error path includes timeout name
-		expectedPath := []Name{"error-timeout", "error-proc"}
-		if len(err.Path) != 2 || err.Path[0] != "error-timeout" || err.Path[1] != "error-proc" {
-			t.Errorf("expected error path %v, got %v", expectedPath, err.Path)
+		var pipeErr *Error[int]
+		if errors.As(err, &pipeErr) {
+			expectedPath := []Name{"error-timeout", "error-proc"}
+			if len(pipeErr.Path) != 2 || pipeErr.Path[0] != "error-timeout" || pipeErr.Path[1] != "error-proc" {
+				t.Errorf("expected error path %v, got %v", expectedPath, pipeErr.Path)
+			}
+		} else {
+			t.Error("expected error to be of type *pipz.Error[int]")
 		}
 	})
 }

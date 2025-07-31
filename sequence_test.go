@@ -336,8 +336,13 @@ func TestSequenceProcess(t *testing.T) {
 			t.Errorf("expected empty string on error, got %q", result)
 		}
 
-		if err.InputData != "test_1" {
-			t.Errorf("expected InputData to be \"test_1\", got %q", err.InputData)
+		var pipeErr *Error[string]
+		if errors.As(err, &pipeErr) {
+			if pipeErr.InputData != "test_1" {
+				t.Errorf("expected InputData to be \"test_1\", got %q", pipeErr.InputData)
+			}
+		} else {
+			t.Error("expected error to be of type *pipz.Error[string]")
 		}
 	})
 
@@ -379,8 +384,13 @@ func TestSequenceProcess(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected timeout error")
 		}
-		if !err.Timeout {
-			t.Error("expected Timeout flag to be true")
+		var pipeErr *Error[int]
+		if errors.As(err, &pipeErr) {
+			if !pipeErr.Timeout {
+				t.Error("expected Timeout flag to be true")
+			}
+		} else {
+			t.Error("expected error to be of type *pipz.Error[int]")
 		}
 	})
 
@@ -397,8 +407,13 @@ func TestSequenceProcess(t *testing.T) {
 
 		_, err := Sequence.Process(context.Background(), 5)
 
-		if err.InputData != 10 {
-			t.Errorf("expected InputData to be 10, got %d", err.InputData)
+		var pipeErr *Error[int]
+		if errors.As(err, &pipeErr) {
+			if pipeErr.InputData != 10 {
+				t.Errorf("expected InputData to be 10, got %d", pipeErr.InputData)
+			}
+		} else {
+			t.Error("expected error to be of type *pipz.Error[int]")
 		}
 	})
 }
@@ -606,21 +621,28 @@ func TestSequenceConcurrency(t *testing.T) {
 
 		var wg sync.WaitGroup
 		results := make([]int, 10)
-		errors := make([]*Error[int], 10)
+		errs := make([]*Error[int], 10)
 
 		for i := 0; i < 10; i++ {
 			wg.Add(1)
 			go func(idx int) {
 				defer wg.Done()
-				results[idx], errors[idx] = Sequence.Process(context.Background(), idx)
+				var err error
+				results[idx], err = Sequence.Process(context.Background(), idx)
+				if err != nil {
+					var pipeErr *Error[int]
+					if errors.As(err, &pipeErr) {
+						errs[idx] = pipeErr
+					}
+				}
 			}(i)
 		}
 
 		wg.Wait()
 
 		for i := 0; i < 10; i++ {
-			if errors[i] != nil {
-				t.Errorf("unexpected error for input %d: %v", i, errors[i])
+			if errs[i] != nil {
+				t.Errorf("unexpected error for input %d: %v", i, errs[i])
 			}
 			expected := i*2 + 1
 			if results[i] != expected {

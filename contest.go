@@ -61,7 +61,7 @@ func NewContest[T Cloner[T]](name Name, condition func(context.Context, T) bool,
 }
 
 // Process implements the Chainable interface.
-func (c *Contest[T]) Process(ctx context.Context, input T) (T, *Error[T]) {
+func (c *Contest[T]) Process(ctx context.Context, input T) (T, error) {
 	c.mu.RLock()
 	processors := make([]Chainable[T], len(c.processors))
 	copy(processors, c.processors)
@@ -93,7 +93,7 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (T, *Error[T]) {
 	// Create channels for results and completion tracking
 	type result struct {
 		data T
-		err  *Error[T]
+		err  error
 		idx  int
 	}
 
@@ -116,7 +116,7 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (T, *Error[T]) {
 	}
 
 	// Collect results and check conditions
-	var allErrors []*Error[T]
+	var allErrors []error
 	completedCount := 0
 
 	for completedCount < len(processors) {
@@ -135,8 +135,6 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (T, *Error[T]) {
 			} else {
 				// Track errors for potential return if all fail
 				if res.err != nil {
-					// Prepend this contest's name to the path
-					res.err.Path = append([]Name{c.name}, res.err.Path...)
 					allErrors = append(allErrors, res.err)
 				}
 			}

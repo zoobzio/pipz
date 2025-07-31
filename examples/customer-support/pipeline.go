@@ -487,15 +487,15 @@ var (
 
 	// ErrorRecovery handles pipeline failures gracefully.
 	// Added: Sprint 11 - Never show errors to customers.
-	ErrorRecovery = pipz.Apply("error_recovery", func(_ context.Context, err *pipz.Error[SupportQuery]) (*pipz.Error[SupportQuery], error) {
+	ErrorRecovery = pipz.Apply("error_recovery", func(_ context.Context, pipeErr *pipz.Error[SupportQuery]) (*pipz.Error[SupportQuery], error) {
 		// Provide a graceful fallback response.
-		err.InputData.Response = "I apologize, but I'm having trouble processing your request right now. Please try again in a moment, or contact us directly at support@example.com for immediate assistance."
-		err.InputData.ProcessingLog = append(err.InputData.ProcessingLog, fmt.Sprintf("error: %v", err.Err))
+		pipeErr.InputData.Response = "I apologize, but I'm having trouble processing your request right now. Please try again in a moment, or contact us directly at support@example.com for immediate assistance."
+		pipeErr.InputData.ProcessingLog = append(pipeErr.InputData.ProcessingLog, fmt.Sprintf("error: %v", pipeErr.Err))
 
 		// Log the error for monitoring.
-		fmt.Printf("[ERROR] Query %s failed: %v at %v\n", err.InputData.ID, err.Err, err.Path)
+		fmt.Printf("[ERROR] Query %s failed: %v at %v\n", pipeErr.InputData.ID, pipeErr.Err, pipeErr.Path)
 
-		return err, nil
+		return pipeErr, nil
 	})
 
 	// TimeoutWrapper adds timeout protection.

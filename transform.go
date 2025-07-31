@@ -23,7 +23,7 @@ import "context"
 func Transform[T any](name Name, fn func(context.Context, T) T) Processor[T] {
 	return Processor[T]{
 		name: name,
-		fn: func(ctx context.Context, value T) (T, *Error[T]) {
+		fn: func(ctx context.Context, value T) (T, error) {
 			return fn(ctx, value), nil
 		},
 	}

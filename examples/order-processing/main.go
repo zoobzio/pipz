@@ -15,9 +15,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"time"
+
+	"github.com/zoobzio/pipz"
 )
 
 func main() {
@@ -172,7 +175,12 @@ func runFullDemo(ctx context.Context) {
 		}
 		result, err := ProcessOrder(ctx, orders[i])
 		if err != nil {
-			fmt.Printf("❌ Order %d failed: %v\n", i+1, err) //nolint:errcheck // demo code.
+			var pipeErr *pipz.Error[Order]
+			if errors.As(err, &pipeErr) {
+				fmt.Printf("❌ Order %d failed: %v\n", i+1, pipeErr.Err) //nolint:errcheck // demo code.
+			} else {
+				fmt.Printf("❌ Order %d failed: %v\n", i+1, err) //nolint:errcheck // demo code.
+			}
 		} else {
 			fmt.Printf("✅ Order %d: %s (%.2f risk score, %v processing time)\n", //nolint:errcheck // demo code.
 				i+1, result.Status, result.FraudScore,
@@ -274,7 +282,12 @@ func runSprint(ctx context.Context, sprintNum int) {
 		duration := time.Since(start)
 
 		if err != nil {
-			fmt.Printf("❌ Failed: %v\n", err.Err)        //nolint:errcheck // demo code.
+			var pipeErr *pipz.Error[Order]
+			if errors.As(err, &pipeErr) {
+				fmt.Printf("❌ Failed: %v\n", pipeErr.Err)        //nolint:errcheck // demo code.
+			} else {
+				fmt.Printf("❌ Failed: %v\n", err)        //nolint:errcheck // demo code.
+			}
 			fmt.Printf("   Status: %s\n", result.Status) //nolint:errcheck // demo code.
 			if sprintNum >= 4 && result.FraudScore > 0 {
 				fmt.Printf("   Fraud Score: %.2f\n", result.FraudScore) //nolint:errcheck // demo code.

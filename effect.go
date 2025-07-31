@@ -35,7 +35,7 @@ import (
 func Effect[T any](name Name, fn func(context.Context, T) error) Processor[T] {
 	return Processor[T]{
 		name: name,
-		fn: func(ctx context.Context, value T) (T, *Error[T]) {
+		fn: func(ctx context.Context, value T) (T, error) {
 			start := time.Now()
 			if err := fn(ctx, value); err != nil {
 				var zero T

@@ -248,7 +248,7 @@ func selectCheapestAvailable(shipment Shipment) (Shipment, error) {
 }
 
 // ProcessShipment runs a shipment through the pipeline.
-func ProcessShipment(ctx context.Context, shipment Shipment) (Shipment, *pipz.Error[Shipment]) {
+func ProcessShipment(ctx context.Context, shipment Shipment) (Shipment, error) {
 	// Initialize tracking
 	shipment.CreatedAt = time.Now()
 	shipment.ProcessingLog = []string{"🚀 Starting shipping fulfillment"}

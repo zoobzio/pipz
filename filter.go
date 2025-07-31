@@ -2,7 +2,9 @@ package pipz
 
 import (
 	"context"
+	"errors"
 	"sync"
+	"time"
 )
 
 // Filter creates a conditional processor that either continues the pipeline unchanged
@@ -67,7 +69,7 @@ func NewFilter[T any](name Name, condition func(context.Context, T) bool, proces
 
 // Process implements the Chainable interface.
 // Evaluates the condition and either executes the processor or passes data through unchanged.
-func (f *Filter[T]) Process(ctx context.Context, data T) (T, *Error[T]) {
+func (f *Filter[T]) Process(ctx context.Context, data T) (T, error) {
 	f.mu.RLock()
 	condition := f.condition
 	processor := f.processor
@@ -83,9 +85,20 @@ func (f *Filter[T]) Process(ctx context.Context, data T) (T, *Error[T]) {
 	result, err := processor.Process(ctx, data)
 	if err != nil {
 		// Prepend this filter's name to the error path
-		err.Path = append([]Name{f.name}, err.Path...)
+		var pipeErr *Error[T]
+		if errors.As(err, &pipeErr) {
+			pipeErr.Path = append([]Name{f.name}, pipeErr.Path...)
+			return result, pipeErr
+		}
+		// Wrap non-pipeline errors
+		return data, &Error[T]{
+			Timestamp: time.Now(),
+			InputData: data,
+			Err:       err,
+			Path:      []Name{f.name},
+		}
 	}
-	return result, err
+	return result, nil
 }
 
 // SetCondition updates the condition function.
