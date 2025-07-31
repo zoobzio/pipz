@@ -23,25 +23,29 @@ Welcome to the pipz documentation! This guide covers everything you need to know
 - [Testing Pipelines](./guides/testing.md)
 - [Best Practices](./guides/best-practices.md)
 
-### Examples Walkthrough
-- [Payment Processing](./examples/payment-processing.md) - Multi-provider payment handling
-- [ETL Pipeline](./examples/etl-pipeline.md) - Data transformation workflows
-- [Event Processing](./examples/event-processing.md) - Event-driven architectures
-- [AI/LLM Pipeline](./examples/ai-pipeline.md) - AI service integration
-- [Middleware Stack](./examples/middleware.md) - HTTP middleware patterns
-- [Content Moderation](./examples/moderation.md) - Content filtering pipeline
-- [Security Pipeline](./examples/security.md) - Security and access control
-- [Validation Pipeline](./examples/validation.md) - Data validation patterns
-- [Webhook Router](./examples/webhook-router.md) - Webhook handling
 
 ### API Reference
-- [Processors API](./api/processors.md)
-- [Connectors API](./api/connectors.md)
-- [Pipeline API](./api/pipeline.md)
-- [Error Types](./api/errors.md)
+
+#### Processors
+- [Transform](./api/transform.md) - Pure transformations that cannot fail
+- [Apply](./api/apply.md) - Operations that can fail
+- [Effect](./api/effect.md) - Side effects without modifying data
+- [Mutate](./api/mutate.md) - Conditional modifications
+- [Enrich](./api/enrich.md) - Optional enhancements
+
+#### Connectors
+- [Sequence](./api/sequence.md) - Sequential execution with runtime modification
+- [Concurrent](./api/concurrent.md) - Parallel execution of processors
+- [Race](./api/race.md) - First successful result wins
+- [Fallback](./api/fallback.md) - Try alternatives on error
+- [Retry](./api/retry.md) - Retry with attempts and backoff
+- [Handle](./api/handle.md) - Error observation and recovery
+- [Switch](./api/switch.md) - Conditional routing
+- [Timeout](./api/timeout.md) - Enforce time constraints
 
 ## Quick Links
 
 - [GitHub Repository](https://github.com/zoobzio/pipz)
 - [Examples Directory](https://github.com/zoobzio/pipz/tree/main/examples)
-- [Contributing Guide](../CONTRIBUTING.md)
+- [Contributing Guide](./CONTRIBUTING.md)
+- [Performance Benchmarks](./PERFORMANCE.md)

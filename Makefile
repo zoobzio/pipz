@@ -42,7 +42,7 @@ test-examples:
 # Run core benchmarks
 bench:
 	@echo "Running core benchmarks..."
-	@go test -bench=. -benchmem -benchtime=1s ./...
+	@go test -bench=. -benchmem -benchtime=1s .
 
 # Run all benchmarks including examples
 bench-all:

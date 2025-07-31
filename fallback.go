@@ -1,0 +1,195 @@
+package pipz
+
+import (
+	"context"
+	"sync"
+)
+
+// Fallback attempts processors in order, falling back to the next on error.
+// Fallback provides automatic failover through a chain of alternative processors
+// when earlier ones fail. This creates resilient processing chains that can recover
+// from failures gracefully.
+//
+// Unlike Retry which attempts the same operation multiple times,
+// Fallback switches to completely different implementations. Each processor
+// is tried in order until one succeeds or all fail.
+//
+// Common use cases:
+//   - Primary/backup/tertiary service failover
+//   - Graceful degradation strategies
+//   - Multiple payment provider support
+//   - Cache miss handling (try local cache, then redis, then database)
+//   - API version compatibility chains
+//
+// Example:
+//
+//	fallback := pipz.NewFallback("payment-providers",
+//	    stripeProcessor,       // Try Stripe first
+//	    paypalProcessor,       // Fall back to PayPal on error
+//	    squareProcessor,       // Finally try Square
+//	)
+type Fallback[T any] struct { //nolint:govet // field alignment acceptable
+	mu         sync.RWMutex
+	processors []Chainable[T]
+	name       Name
+}
+
+// NewFallback creates a new Fallback connector that tries processors in order.
+// At least one processor must be provided. Each processor is tried in order
+// until one succeeds or all fail.
+//
+// Examples:
+//
+//	fallback := pipz.NewFallback("payment", stripe, paypal, square)
+//	fallback := pipz.NewFallback("cache", redis, database)
+func NewFallback[T any](name Name, processors ...Chainable[T]) *Fallback[T] {
+	if len(processors) == 0 {
+		panic("NewFallback requires at least one processor")
+	}
+	return &Fallback[T]{
+		name:       name,
+		processors: processors,
+	}
+}
+
+// Process implements the Chainable interface.
+// Tries each processor in order until one succeeds or all fail.
+func (f *Fallback[T]) Process(ctx context.Context, data T) (T, *Error[T]) {
+	f.mu.RLock()
+	processors := make([]Chainable[T], len(f.processors))
+	copy(processors, f.processors)
+	f.mu.RUnlock()
+
+	var lastErr *Error[T]
+
+	for _, processor := range processors {
+		result, err := processor.Process(ctx, data)
+		if err == nil {
+			// Success! Return immediately
+			return result, nil
+		}
+
+		// Store the error for potential return
+		lastErr = err
+
+		// Continue to next processor (if any)
+	}
+
+	// All processors failed, return the last error with path
+	if lastErr != nil {
+		lastErr.Path = append([]Name{f.name}, lastErr.Path...)
+	}
+	return data, lastErr
+}
+
+// SetProcessors replaces all processors with the provided ones.
+func (f *Fallback[T]) SetProcessors(processors ...Chainable[T]) *Fallback[T] {
+	if len(processors) == 0 {
+		panic("SetProcessors requires at least one processor")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.processors = make([]Chainable[T], len(processors))
+	copy(f.processors, processors)
+	return f
+}
+
+// AddFallback appends a processor to the end of the fallback chain.
+func (f *Fallback[T]) AddFallback(processor Chainable[T]) *Fallback[T] {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.processors = append(f.processors, processor)
+	return f
+}
+
+// InsertAt inserts a processor at the specified index.
+func (f *Fallback[T]) InsertAt(index int, processor Chainable[T]) *Fallback[T] {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if index < 0 || index > len(f.processors) {
+		panic("index out of bounds")
+	}
+	f.processors = append(f.processors[:index], append([]Chainable[T]{processor}, f.processors[index:]...)...)
+	return f
+}
+
+// RemoveAt removes the processor at the specified index.
+func (f *Fallback[T]) RemoveAt(index int) *Fallback[T] {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if index < 0 || index >= len(f.processors) {
+		panic("index out of bounds")
+	}
+	if len(f.processors) == 1 {
+		panic("cannot remove last processor from fallback")
+	}
+	f.processors = append(f.processors[:index], f.processors[index+1:]...)
+	return f
+}
+
+// Name returns the name of this connector.
+func (f *Fallback[T]) Name() Name {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.name
+}
+
+// GetProcessors returns a copy of all processors in order.
+func (f *Fallback[T]) GetProcessors() []Chainable[T] {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	processors := make([]Chainable[T], len(f.processors))
+	copy(processors, f.processors)
+	return processors
+}
+
+// Len returns the number of processors in the fallback chain.
+func (f *Fallback[T]) Len() int {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return len(f.processors)
+}
+
+// GetPrimary returns the first processor (for backward compatibility).
+func (f *Fallback[T]) GetPrimary() Chainable[T] {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if len(f.processors) > 0 {
+		return f.processors[0]
+	}
+	return nil
+}
+
+// GetFallback returns the second processor (for backward compatibility).
+// Returns nil if there's no second processor.
+func (f *Fallback[T]) GetFallback() Chainable[T] {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if len(f.processors) > 1 {
+		return f.processors[1]
+	}
+	return nil
+}
+
+// SetPrimary updates the first processor (for backward compatibility).
+func (f *Fallback[T]) SetPrimary(processor Chainable[T]) *Fallback[T] {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.processors) > 0 {
+		f.processors[0] = processor
+	}
+	return f
+}
+
+// SetFallback updates the second processor (for backward compatibility).
+// If there's no second processor, adds one.
+func (f *Fallback[T]) SetFallback(processor Chainable[T]) *Fallback[T] {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.processors) > 1 {
+		f.processors[1] = processor
+	} else if len(f.processors) == 1 {
+		f.processors = append(f.processors, processor)
+	}
+	return f
+}

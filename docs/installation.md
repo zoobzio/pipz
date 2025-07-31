@@ -110,4 +110,4 @@ pipz uses standard Go idioms and generics. Any editor with Go 1.21+ support will
 
 - [Quick Start](./quick-start.md) - Build your first pipeline
 - [Core Concepts](./concepts/processors.md) - Understand pipz fundamentals
-- [Examples](./examples/payment-processing.md) - Learn from real implementations
+- [Examples](../examples/) - Learn from real implementations

@@ -9,25 +9,22 @@ import (
 	"time"
 )
 
-func TestPipelineError(t *testing.T) {
+func TestError(t *testing.T) {
 	t.Run("Error Message Formatting", func(t *testing.T) {
 		baseErr := errors.New("something went wrong")
 
 		t.Run("Basic Error", func(t *testing.T) {
-			err := &PipelineError[string]{
-				Err:           baseErr,
-				ProcessorName: "validate",
-				StageIndex:    0,
-				InputData:     "test data",
-				Duration:      100 * time.Millisecond,
+			err := &Error[string]{
+				Err:       baseErr,
+				Path:      []string{"sequence", "validate"},
+				InputData: "test data",
+				Duration:  100 * time.Millisecond,
+				Timestamp: time.Now(),
 			}
 
 			msg := err.Error()
-			if !strings.Contains(msg, "processor \"validate\"") {
-				t.Errorf("expected processor name in error, got: %s", msg)
-			}
-			if !strings.Contains(msg, "(stage 0)") {
-				t.Errorf("expected stage index in error, got: %s", msg)
+			if !strings.Contains(msg, "sequence -> validate") {
+				t.Errorf("expected path elements joined in error, got: %s", msg)
 			}
 			if !strings.Contains(msg, "failed after 100ms") {
 				t.Errorf("expected duration in error, got: %s", msg)
@@ -37,64 +34,82 @@ func TestPipelineError(t *testing.T) {
 			}
 		})
 
-		t.Run("Chain Error", func(t *testing.T) {
-			err := &PipelineError[string]{
-				Err:           baseErr,
-				ProcessorName: "transform",
-				StageIndex:    2,
-				InputData:     "test",
-				Duration:      50 * time.Millisecond,
+		t.Run("Connector With Processor Error", func(t *testing.T) {
+			err := &Error[string]{
+				Err:       baseErr,
+				Path:      []string{"pipeline", "transform"},
+				InputData: "test",
+				Duration:  50 * time.Millisecond,
+				Timestamp: time.Now(),
 			}
 
 			msg := err.Error()
-			if !strings.Contains(msg, "processor \"transform\"") {
-				t.Errorf("expected processor name in error, got: %s", msg)
+			if !strings.Contains(msg, "pipeline -> transform") {
+				t.Errorf("expected path elements joined in error, got: %s", msg)
 			}
-			if !strings.Contains(msg, "(stage 2)") {
-				t.Errorf("expected stage index in error, got: %s", msg)
+			if !strings.Contains(msg, "failed after 50ms") {
+				t.Errorf("expected duration in error, got: %s", msg)
 			}
 		})
 
 		t.Run("Timeout Error", func(t *testing.T) {
-			err := &PipelineError[string]{
-				Err:           context.DeadlineExceeded,
-				ProcessorName: "slow_process",
-				StageIndex:    1,
-				InputData:     "data",
-				Timeout:       true,
-				Duration:      5 * time.Second,
+			err := &Error[string]{
+				Err:       context.DeadlineExceeded,
+				Path:      []string{"api", "slow_process"},
+				InputData: "data",
+				Timeout:   true,
+				Duration:  5 * time.Second,
+				Timestamp: time.Now(),
 			}
 
 			msg := err.Error()
-			if !strings.Contains(msg, "timed out after 5s") {
+			if !strings.Contains(msg, "api -> slow_process timed out after 5s") {
 				t.Errorf("expected timeout message, got: %s", msg)
 			}
 		})
 
 		t.Run("Canceled Error", func(t *testing.T) {
-			err := &PipelineError[string]{
-				Err:           context.Canceled,
-				ProcessorName: "process",
-				StageIndex:    0,
-				InputData:     "data",
-				Canceled:      true,
-				Duration:      200 * time.Millisecond,
+			err := &Error[string]{
+				Err:       context.Canceled,
+				Path:      []string{"worker", "process"},
+				InputData: "data",
+				Canceled:  true,
+				Duration:  200 * time.Millisecond,
+				Timestamp: time.Now(),
 			}
 
 			msg := err.Error()
-			if !strings.Contains(msg, "canceled after 200ms") {
+			if !strings.Contains(msg, "worker -> process canceled after 200ms") {
 				t.Errorf("expected canceled message, got: %s", msg)
+			}
+		})
+
+		t.Run("Single Path Element Error", func(t *testing.T) {
+			err := &Error[string]{
+				Err:       baseErr,
+				Path:      []string{"http"},
+				InputData: "request data",
+				Duration:  75 * time.Millisecond,
+				Timestamp: time.Now(),
+			}
+
+			msg := err.Error()
+			if !strings.Contains(msg, "http failed after 75ms") {
+				t.Errorf("expected single path element error format, got: %s", msg)
+			}
+			if strings.Contains(msg, " -> ") {
+				t.Errorf("should not contain arrow when only one path element, got: %s", msg)
 			}
 		})
 	})
 
 	t.Run("Unwrap", func(t *testing.T) {
 		baseErr := errors.New("base error")
-		pipelineErr := &PipelineError[int]{
-			Err:           baseErr,
-			ProcessorName: "test",
-			StageIndex:    0,
-			InputData:     42,
+		pipelineErr := &Error[int]{
+			Err:       baseErr,
+			Path:      []string{"pipeline", "test"},
+			InputData: 42,
+			Timestamp: time.Now(),
 		}
 
 		unwrapped := pipelineErr.Unwrap()
@@ -143,9 +158,11 @@ func TestPipelineError(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				err := &PipelineError[string]{
-					Err:     tt.err,
-					Timeout: tt.timeout,
+				err := &Error[string]{
+					Err:       tt.err,
+					Timeout:   tt.timeout,
+					Path:      []string{"test"},
+					Timestamp: time.Now(),
 				}
 
 				if got := err.IsTimeout(); got != tt.expected {
@@ -190,9 +207,11 @@ func TestPipelineError(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				err := &PipelineError[string]{
-					Err:      tt.err,
-					Canceled: tt.canceled,
+				err := &Error[string]{
+					Err:       tt.err,
+					Canceled:  tt.canceled,
+					Path:      []string{"test"},
+					Timestamp: time.Now(),
 				}
 
 				if got := err.IsCanceled(); got != tt.expected {
@@ -205,10 +224,11 @@ func TestPipelineError(t *testing.T) {
 	t.Run("Type Safety", func(t *testing.T) {
 		// Test with different types
 		t.Run("String Type", func(t *testing.T) {
-			err := &PipelineError[string]{
-				Err:           errors.New("failed"),
-				ProcessorName: "string_processor",
-				InputData:     "hello world",
+			err := &Error[string]{
+				Err:       errors.New("failed"),
+				Path:      []string{"test", "string_processor"},
+				InputData: "hello world",
+				Timestamp: time.Now(),
 			}
 
 			// Should be able to access typed InputData
@@ -224,10 +244,11 @@ func TestPipelineError(t *testing.T) {
 			}
 
 			user := User{Name: "Alice", Age: 30}
-			err := &PipelineError[User]{
-				Err:           errors.New("failed"),
-				ProcessorName: "user_processor",
-				InputData:     user,
+			err := &Error[User]{
+				Err:       errors.New("failed"),
+				Path:      []string{"test", "user_processor"},
+				InputData: user,
+				Timestamp: time.Now(),
 			}
 
 			// Should be able to access typed fields
@@ -242,19 +263,38 @@ func TestPipelineError(t *testing.T) {
 
 	t.Run("Zero Values", func(t *testing.T) {
 		// Test with minimal/zero values
-		err := &PipelineError[int]{
-			Err: errors.New("error"),
+		err := &Error[int]{
+			Err:       errors.New("error"),
+			Timestamp: time.Now(),
 		}
 
 		msg := err.Error()
-		if !strings.Contains(msg, "processor \"\"") {
-			t.Errorf("should handle empty processor name")
+		if !strings.Contains(msg, "unknown failed after 0s") {
+			t.Errorf("should handle zero duration and empty path, got: %s", msg)
 		}
-		if !strings.Contains(msg, "(stage 0)") {
-			t.Errorf("should handle zero stage index")
+	})
+
+	t.Run("Nil Receiver", func(t *testing.T) {
+		var err *Error[string]
+
+		// Error() should handle nil receiver
+		if err.Error() != "<nil>" {
+			t.Errorf("nil error should return '<nil>', got: %s", err.Error())
 		}
-		if !strings.Contains(msg, "failed after 0s") {
-			t.Errorf("should handle zero duration")
+
+		// Unwrap() should handle nil receiver
+		if err.Unwrap() != nil {
+			t.Error("nil error Unwrap should return nil")
+		}
+
+		// IsTimeout() should handle nil receiver
+		if err.IsTimeout() {
+			t.Error("nil error IsTimeout should return false")
+		}
+
+		// IsCanceled() should handle nil receiver
+		if err.IsCanceled() {
+			t.Error("nil error IsCanceled should return false")
 		}
 	})
 }

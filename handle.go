@@ -1,0 +1,113 @@
+package pipz
+
+import (
+	"context"
+	"sync"
+)
+
+// Handle wraps a processor with error handling.
+// Handle allows you to add error handling logic to any processor
+// without changing its behavior. When the wrapped processor fails, the error
+// is passed to the errorHandler for processing (logging, metrics, alerts),
+// but the original error is still returned.
+//
+// This separation of concerns keeps error handling logic out of business logic
+// while ensuring errors are properly observed. It's especially valuable with
+// Concurrent where individual failures shouldn't stop other processors.
+//
+// Common error handling patterns:
+//   - Logging errors with context
+//   - Incrementing error metrics
+//   - Sending alerts for critical failures
+//   - Recording errors for retry analysis
+//   - Triggering compensating actions
+//
+// The error handler itself is a Chainable[*Error[T]], allowing complex
+// error processing chains with full context about the failure.
+//
+// Example:
+//
+//	handle := pipz.NewHandle(
+//	    "payment-handler",
+//	    riskyProcessor,
+//	    pipz.Effect("log_error", func(ctx context.Context, err *Error[Payment]) error {
+//	        log.Printf("processor failed at %v: %v", err.Path, err.Err)
+//	        metrics.Increment("processor.errors", "path", strings.Join(err.Path, "."))
+//	        return nil  // Error handler errors are ignored
+//	    }),
+//	)
+type Handle[T any] struct {
+	processor    Chainable[T]
+	errorHandler Chainable[*Error[T]]
+	name         Name
+	mu           sync.RWMutex
+}
+
+// NewHandle creates a new Handle connector.
+func NewHandle[T any](name Name, processor Chainable[T], errorHandler Chainable[*Error[T]]) *Handle[T] {
+	return &Handle[T]{
+		name:         name,
+		processor:    processor,
+		errorHandler: errorHandler,
+	}
+}
+
+// Process implements the Chainable interface.
+func (h *Handle[T]) Process(ctx context.Context, input T) (T, *Error[T]) {
+	h.mu.RLock()
+	processor := h.processor
+	errorHandler := h.errorHandler
+	h.mu.RUnlock()
+
+	// Add this handle to the processing path
+
+	result, err := processor.Process(ctx, input)
+	if err != nil {
+		// Prepend this handle's name to the path
+		err.Path = append([]Name{h.name}, err.Path...)
+
+		// Process the error through the error handler
+		// We ignore the error handler's return values and any errors it produces
+		// Error handler receives the full *Error[T] with context
+		// nolint:errcheck
+		_, _ = errorHandler.Process(ctx, err)
+	}
+	return result, err
+}
+
+// SetProcessor updates the main processor.
+func (h *Handle[T]) SetProcessor(processor Chainable[T]) *Handle[T] {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.processor = processor
+	return h
+}
+
+// SetErrorHandler updates the error handler.
+func (h *Handle[T]) SetErrorHandler(handler Chainable[*Error[T]]) *Handle[T] {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.errorHandler = handler
+	return h
+}
+
+// Name returns the name of this connector.
+func (h *Handle[T]) Name() Name {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.name
+}
+
+// GetProcessor returns the current main processor.
+func (h *Handle[T]) GetProcessor() Chainable[T] {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.processor
+}
+
+// GetErrorHandler returns the current error handler.
+func (h *Handle[T]) GetErrorHandler() Chainable[*Error[T]] {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.errorHandler
+}
