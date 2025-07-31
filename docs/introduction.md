@@ -20,7 +20,7 @@ pipz provides:
 - **Composability**: Small, reusable components that combine easily
 - **Error Handling**: Built-in patterns for retries, fallbacks, and recovery
 - **Testability**: Each component is independently testable
-- **Performance**: Zero-allocation design for core operations
+- **Performance**: Optimized design with minimal allocations
 
 ## Core Philosophy
 
@@ -37,17 +37,18 @@ pipz follows these principles:
 ### Processors
 The atomic units that transform data:
 ```go
-type Processor[T any] interface {
-    Process(context.Context, T) (T, error)
+type Chainable[T any] interface {
+    Process(context.Context, T) (T, *Error[T])
+    Name() Name
 }
 ```
 
 ### Connectors
-Functions that combine processors into more complex behaviors:
-- `Sequential`: Run processors in order
-- `Switch`: Route to different processors based on conditions
-- `Concurrent`: Run multiple processors in parallel
-- `Race`: Use the first successful result
+Mutable components that combine processors into more complex behaviors:
+- `NewSequence`: Run processors in order
+- `NewSwitch`: Route to different processors based on conditions
+- `NewConcurrent`: Run multiple processors in parallel
+- `NewRace`: Use the first successful result
 - And many more...
 
 ### Pipelines
@@ -71,10 +72,32 @@ Unlike traditional pipeline libraries, pipz:
 - Requires no code generation or reflection
 - Has zero external dependencies
 - Provides both functional and object-oriented APIs
-- Includes battle-tested patterns (retry, timeout, circuit breaker)
+- Includes battle-tested patterns (retry, timeout, fallback)
+- Returns rich error context showing the exact failure path
+- Supports both declarative and dynamic pipeline construction
+- Treats **errors as data flowing through pipelines** - use the same Switch, Concurrent, Sequence patterns for sophisticated error recovery
+
+## A Unique Approach to Error Handling
+
+Most frameworks treat errors as exceptions or callbacks. pipz treats them as **data that flows through pipelines**. This means you can build sophisticated error recovery flows using the exact same tools you use for regular data processing:
+
+```go
+// Error recovery pipeline - same tools, same patterns!
+errorRecovery := pipz.NewSequence[*pipz.Error[Order]](PipelineErrorRecovery,
+    pipz.Transform(ProcessorCategorize, categorizeError),
+    pipz.NewSwitch(RouterSeverity, routeBySeverity),
+    pipz.NewConcurrent(ConnectorParallelRecovery, notifyCustomer, updateInventory),
+)
+
+// Errors flow through this pipeline automatically
+robustPipeline := pipz.NewHandle(HandleOrderProcessing, mainPipeline, errorRecovery)
+```
+
+This pattern enables type-safe, composable, and testable error handling that scales with your application complexity. See [Error Handling](./concepts/error-handling.md) for the full power of this approach.
 
 ## Next Steps
 
 - [Quick Start](./quick-start.md) - Build your first pipeline in minutes
 - [Installation](./installation.md) - Get pipz installed
+- [Composition Patterns](./patterns/composition.md) - Learn the core pattern for building composable systems
 - [Concepts](./concepts/processors.md) - Deep dive into pipz concepts

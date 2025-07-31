@@ -1,6 +1,6 @@
 # Quick Start Guide
 
-Get up and running with pipz in 5 minutes!
+Build your first pipeline in 5 minutes!
 
 ## Installation
 
@@ -8,23 +8,11 @@ Get up and running with pipz in 5 minutes!
 go get github.com/zoobzio/pipz
 ```
 
+Requires Go 1.21 or later.
+
 ## Your First Pipeline
 
-Let's build a simple data processing pipeline that validates, transforms, and enriches user data.
-
-### Step 1: Define Your Data Type
-
-```go
-type User struct {
-    ID       string
-    Email    string
-    Name     string
-    Age      int
-    Verified bool
-}
-```
-
-### Step 2: Create Processors
+Let's build a simple pipeline that processes user data through validation, normalization, and enrichment steps.
 
 ```go
 package main
@@ -33,10 +21,18 @@ import (
     "context"
     "fmt"
     "strings"
+    
     "github.com/zoobzio/pipz"
 )
 
-// Validate ensures user data is correct
+// Define your data type
+type User struct {
+    Email    string
+    Name     string
+    Verified bool
+}
+
+// Create processing functions
 func validateUser(ctx context.Context, user User) (User, error) {
     if user.Email == "" {
         return user, fmt.Errorf("email is required")
@@ -44,200 +40,97 @@ func validateUser(ctx context.Context, user User) (User, error) {
     if !strings.Contains(user.Email, "@") {
         return user, fmt.Errorf("invalid email format")
     }
-    if user.Age < 0 || user.Age > 150 {
-        return user, fmt.Errorf("invalid age: %d", user.Age)
-    }
     return user, nil
 }
 
-// Normalize cleans up the data
-func normalizeUser(ctx context.Context, user User) (User, error) {
+func normalizeUser(ctx context.Context, user User) User {
     user.Email = strings.ToLower(strings.TrimSpace(user.Email))
     user.Name = strings.TrimSpace(user.Name)
-    return user, nil
+    return user
 }
 
-// Enrich adds computed fields
-func enrichUser(ctx context.Context, user User) (User, error) {
-    // Auto-verify users with company emails
+func enrichUser(ctx context.Context, user User) User {
+    // Mark company emails as verified
     if strings.HasSuffix(user.Email, "@company.com") {
         user.Verified = true
     }
-    return user, nil
+    return user
 }
-```
 
-### Step 3: Build the Pipeline
-
-```go
 func main() {
-    // Create a pipeline using Sequential connector
-    pipeline := pipz.Sequential(
-        pipz.Apply("validate", validateUser),
-        pipz.Apply("normalize", normalizeUser),
-        pipz.Apply("enrich", enrichUser),
+    // Create processors from your functions
+    validate := pipz.Apply("validate", validateUser)
+    normalize := pipz.Transform("normalize", normalizeUser)
+    enrich := pipz.Transform("enrich", enrichUser)
+    
+    // Compose them into a pipeline
+    pipeline := pipz.NewSequence[User]("user-processing",
+        validate,
+        normalize,
+        enrich,
     )
-
-    // Process a user
+    
+    // Process some data
     user := User{
-        ID:    "123",
         Email: "  John.Doe@Company.COM  ",
         Name:  "John Doe",
-        Age:   30,
     }
-
+    
     result, err := pipeline.Process(context.Background(), user)
     if err != nil {
         fmt.Printf("Pipeline failed: %v\n", err)
         return
     }
-
-    fmt.Printf("Processed user: %+v\n", result)
-    // Output: Processed user: {ID:123 Email:john.doe@company.com Name:John Doe Age:30 Verified:true}
+    
+    fmt.Printf("Result: %+v\n", result)
+    // Output: Result: {Email:john.doe@company.com Name:John Doe Verified:true}
 }
 ```
 
-## Adding Error Handling
+## Key Concepts
 
-Let's make our pipeline more robust with retry and fallback:
+### Processors
+Transform your data using adapter functions:
+- `Transform` - Pure transformations that cannot fail
+- `Apply` - Operations that can return errors
+- `Effect` - Side effects without modifying data
+- `Mutate` - Conditional modifications
+- `Enrich` - Optional enhancements
 
+### Sequences
+Compose processors into pipelines:
 ```go
-// Simulate a flaky database save
-func saveToDatabase(ctx context.Context, user User) (User, error) {
-    // Randomly fail 50% of the time (for demo purposes)
-    if time.Now().UnixNano()%2 == 0 {
-        return user, fmt.Errorf("database connection failed")
-    }
-    fmt.Println("User saved to database")
-    return user, nil
-}
-
-// Fallback to file storage
-func saveToFile(ctx context.Context, user User) (User, error) {
-    fmt.Println("User saved to file (fallback)")
-    return user, nil
-}
-
-func main() {
-    // Create a robust pipeline
-    pipeline := pipz.Sequential(
-        pipz.Apply("validate", validateUser),
-        pipz.Apply("normalize", normalizeUser),
-        pipz.Apply("enrich", enrichUser),
-        // Try database 3 times, then fall back to file
-        pipz.Fallback(
-            pipz.Retry(
-                pipz.Apply("save_db", saveToDatabase),
-                3,
-            ),
-            pipz.Apply("save_file", saveToFile),
-        ),
-    )
-
-    user := User{
-        ID:    "123",
-        Email: "john@example.com",
-        Name:  "John",
-        Age:   25,
-    }
-
-    result, err := pipeline.Process(context.Background(), user)
-    if err != nil {
-        fmt.Printf("Pipeline failed: %v\n", err)
-        return
-    }
-
-    fmt.Printf("Successfully processed: %s\n", result.Email)
-}
-```
-
-## Conditional Processing
-
-Use the Switch connector for conditional logic:
-
-```go
-// Define route types for type safety
-type UserCategory string
-
-const (
-    CategoryVIP      UserCategory = "vip"
-    CategoryStandard UserCategory = "standard"
-    CategoryInactive UserCategory = "inactive"
+pipeline := pipz.NewSequence[T]("name",
+    processor1,
+    processor2,
+    processor3,
 )
+```
 
-// Categorize users
-func categorizeUser(ctx context.Context, user User) UserCategory {
-    if !user.Verified {
-        return CategoryInactive
-    }
-    if strings.HasSuffix(user.Email, "@vip.com") {
-        return CategoryVIP
-    }
-    return CategoryStandard
-}
-
-// Create category-specific processors
-func processVIP(ctx context.Context, user User) (User, error) {
-    fmt.Println("VIP processing: priority support enabled")
-    // Add VIP benefits...
-    return user, nil
-}
-
-func processStandard(ctx context.Context, user User) (User, error) {
-    fmt.Println("Standard processing")
-    return user, nil
-}
-
-func processInactive(ctx context.Context, user User) (User, error) {
-    fmt.Println("Inactive user: sending verification email")
-    return user, nil
-}
-
-func main() {
-    // Create a routing pipeline
-    pipeline := pipz.Sequential(
-        pipz.Apply("validate", validateUser),
-        pipz.Apply("normalize", normalizeUser),
-        
-        // Route based on user category
-        pipz.Switch(
-            categorizeUser,
-            map[UserCategory]pipz.Chainable[User]{
-                CategoryVIP:      pipz.Apply("vip", processVIP),
-                CategoryStandard: pipz.Apply("standard", processStandard),
-                CategoryInactive: pipz.Apply("inactive", processInactive),
-            },
-        ),
-    )
-
-    // Process different types of users
-    users := []User{
-        {Email: "ceo@vip.com", Verified: true},
-        {Email: "user@example.com", Verified: true},
-        {Email: "new@example.com", Verified: false},
-    }
-
-    for _, user := range users {
-        _, err := pipeline.Process(context.Background(), user)
-        if err != nil {
-            fmt.Printf("Failed to process %s: %v\n", user.Email, err)
-        }
+### Error Handling
+pipz provides rich error context:
+```go
+result, err := pipeline.Process(ctx, data)
+if err != nil {
+    var pipeErr *pipz.Error[User]
+    if errors.As(err, &pipeErr) {
+        fmt.Printf("Failed at: %v\n", pipeErr.Path)
+        fmt.Printf("Input: %+v\n", pipeErr.InputData)
     }
 }
 ```
 
 ## What's Next?
 
-You've just built your first pipelines with pipz! Here's where to go next:
+Now that you've built your first pipeline:
 
-- [Processors](./concepts/processors.md) - Learn about all processor types
-- [Connectors](./concepts/connectors.md) - Explore advanced composition patterns
-- [Error Handling](./concepts/error-handling.md) - Build resilient pipelines
-- [Examples](./examples/payment-processing.md) - See real-world implementations
+- **[Concepts](./concepts/processors.md)** - Deep dive into processors and connectors
+- **[Building Pipelines](./guides/first-pipeline.md)** - Learn composition patterns
+- **[Error Handling](./concepts/error-handling.md)** - Build resilient pipelines
+- **[Examples](./examples/payment-processing.md)** - See real-world use cases
 
-## Key Takeaways
+## Need Help?
 
-1. **Everything is composable** - Processors combine with connectors
-2. **Type safety throughout** - No runtime type assertions needed
-3. **Errors are explicit** - Handle failures at the right level
-4. **Context flows through** - Cancellation and timeouts work automatically
+- Check the [API Reference](./api/transform.md) for detailed documentation
+- Browse [examples](https://github.com/zoobzio/pipz/tree/main/examples) for more patterns
+- Read the [best practices guide](./guides/best-practices.md)

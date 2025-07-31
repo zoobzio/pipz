@@ -9,6 +9,7 @@ At its core, a processor is anything that implements this simple interface:
 ```go
 type Chainable[T any] interface {
     Process(context.Context, T) (T, error)
+    Name() string
 }
 ```
 
@@ -16,6 +17,8 @@ This means a processor:
 - Takes a context and data of type T
 - Returns transformed data of the same type T
 - Can return an error to stop the pipeline
+
+When used in a pipeline, errors are automatically wrapped with rich context including the path through processors, timing information, and the input data that caused the failure.
 
 ## Processor Adapters
 
@@ -26,8 +29,15 @@ pipz provides several adapters to create processors from functions:
 Pure transformations that cannot fail:
 
 ```go
+// Best practice: use constants for processor names
+const (
+    ProcessorDouble = "double"
+    ProcessorValidate = "validate"
+    ProcessorEnrich = "enrich"
+)
+
 // Transform modifies data without the possibility of error
-double := pipz.Transform("double", func(ctx context.Context, n int) int {
+double := pipz.Transform(ProcessorDouble, func(ctx context.Context, n int) int {
     return n * 2
 })
 
@@ -156,19 +166,6 @@ limiter := &RateLimiter[Order]{
 }
 ```
 
-## ProcessorFunc Adapter
-
-For quick anonymous processors:
-
-```go
-// ProcessorFunc converts a function to a Chainable
-validator := pipz.ProcessorFunc[User](func(ctx context.Context, u User) (User, error) {
-    if u.Age < 18 {
-        return u, fmt.Errorf("user must be 18 or older")
-    }
-    return u, nil
-})
-```
 
 ## Concurrent Processing Considerations
 
@@ -202,16 +199,33 @@ The `Cloner` interface ensures that concurrent processors can't interfere with e
 
 ## Processor Naming
 
-Processor names are used for debugging and monitoring:
+Processor names are used for debugging and monitoring. Use constants for consistency:
 
 ```go
-// Names appear in error messages
-pipz.Apply("validate_credit_card", validateCard)
-// Error: "failed at 'validate_credit_card': invalid card number"
+// Define constants for processor names
+const (
+    ProcessorValidateCard = "validate_credit_card"
+    ProcessorCallAPI     = "external_api_call"
+    ProcessorSaveDB      = "save_to_database"
+)
 
-// Names can help identify bottlenecks
-pipz.Apply("external_api_call", callSlowAPI)
+// Names appear in error messages
+processor := pipz.Apply(ProcessorValidateCard, validateCard)
+// Error: "failed at [payment-flow -> validate_credit_card]: invalid card number"
+
+// Names help identify bottlenecks and trace errors
+pipeline := pipz.NewSequence("payment-flow",
+    pipz.Apply(ProcessorValidateCard, validateCard),
+    pipz.Apply(ProcessorCallAPI, callPaymentAPI),
+    pipz.Apply(ProcessorSaveDB, saveTransaction),
+)
 ```
+
+Using constants ensures:
+- Consistent naming across your codebase
+- Easy refactoring and searching
+- No typos in error messages
+- Clear processor identification in logs
 
 ## Context Usage
 
@@ -232,4 +246,4 @@ func slowProcessor(ctx context.Context, data Data) (Data, error) {
 
 - [Connectors](./connectors.md) - Learn how to compose processors
 - [Error Handling](./error-handling.md) - Build resilient pipelines
-- [Pipelines](./pipelines.md) - Manage sequences of processors
+- [Pipelines](./pipelines.md) - Composing processors into workflows

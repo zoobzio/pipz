@@ -2,14 +2,14 @@
 
 Type-safe, composable data pipelines for Go with zero dependencies.
 
-Build robust data processing pipelines that are easy to test, reason about, and maintain. Perfect for ETL, API middleware, event processing, and any multi-stage data transformation.
+Build robust data processing pipelines that are easy to test, reason about, and maintain.
 
 ```go
-// Build a payment processing pipeline
-pipeline := pipz.Sequential(
+// Build a payment processing pipeline in one line
+pipeline := pipz.NewSequence("payment-flow",
     pipz.Apply("validate", validatePayment),
     pipz.Apply("check_fraud", checkFraud),
-    pipz.Fallback(
+    pipz.NewFallback("payment-gateway",
         pipz.Apply("charge_primary", chargeStripe),
         pipz.Apply("charge_backup", chargePayPal),
     ),
@@ -18,6 +18,13 @@ pipeline := pipz.Sequential(
 
 // Process with full context support
 result, err := pipeline.Process(ctx, payment)
+if err != nil {
+    // Rich error context shows exactly where it failed
+    fmt.Printf("Failed at %s after %v: %v\n", 
+        err.Path,      // ["payment-flow", "payment-gateway", "charge_primary"]
+        err.Duration,  // 230ms
+        err.Err)       // stripe: insufficient funds
+}
 ```
 
 ## Why pipz?
@@ -25,9 +32,12 @@ result, err := pipeline.Process(ctx, payment)
 - **Type-safe**: Full compile-time type checking with Go generics
 - **Composable**: Build complex pipelines from simple, reusable parts  
 - **Zero dependencies**: Just standard library
-- **Battle-tested patterns**: Retry, timeout, fallback, circuit breaker built-in
+- **Battle-tested patterns**: Retry, timeout, fallback, error recovery built-in
 - **Testable**: Every component is independently testable
-- **Fast**: Zero-allocation core operations
+- **Fast**: Minimal allocations, optimized for performance
+- **Rich error context**: Know exactly where failures occur with complete path tracking
+- **Dynamic or static**: Build pipelines declaratively or modify them at runtime
+- **Errors are pipelines too**: Build sophisticated error recovery using the same pipeline tools
 
 ## Installation
 
@@ -55,8 +65,15 @@ enrichOrder := pipz.Transform("enrich", func(ctx context.Context, order Order) O
     return order
 })
 
-// Compose into pipeline
-pipeline := pipz.Sequential(validate, enrichOrder)
+// Compose into pipeline (single line)
+pipeline := pipz.NewSequence("order-processing", validate, enrichOrder)
+
+// Or build dynamically
+pipeline := pipz.NewSequence[Order]("order-processing")
+if config.ValidateOrders {
+    pipeline.Register(validate)
+}
+pipeline.Register(enrichOrder)
 
 // Process data
 result, err := pipeline.Process(ctx, order)
@@ -72,15 +89,24 @@ result, err := pipeline.Process(ctx, order)
 - `Enrich` - Best-effort data enhancement
 
 **Connectors** compose processors:
-- `Sequential` - Run in order
+- `Sequence` - Run processors in order with dynamic modification
 - `Concurrent` - Run in parallel (requires `Cloner` interface)
 - `Switch` - Route based on conditions
 - `Fallback` - Try primary, fall back on error
 - `Race` - First success wins
-- `Retry` / `RetryWithBackoff` - Retry on failure
+- `Retry` / `Backoff` - Retry on failure with optional delays
 - `Timeout` - Enforce time limits
 
-**Pipelines** provide introspection and management of processor sequences.
+**Error Handling**:
+- Rich error context with complete path tracking
+- Shows exactly where failures occurred in the pipeline
+- Includes timing information and input data
+- Distinguishes between timeouts, cancellations, and failures
+
+**Design Philosophy**:
+- Processors are immutable values (simple, predictable)
+- Connectors are mutable pointers (configurable, stateful)
+- Errors carry full context for debugging
 
 ## Documentation
 
@@ -112,10 +138,10 @@ Each example includes comprehensive tests showing usage patterns.
 
 pipz is designed for performance:
 
-- Zero allocations in core operations
-- Minimal interface overhead
-- Efficient error handling
+- Minimal allocations where possible
+- Efficient error propagation
 - No reflection or runtime type assertions
+- Optimized for common paths
 
 Run benchmarks:
 ```bash

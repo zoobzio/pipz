@@ -9,12 +9,13 @@ Every pipz component is generic over the data type it processes:
 ```go
 // The core interface
 type Chainable[T any] interface {
-    Process(context.Context, T) (T, error)
+    Process(context.Context, T) (T, *Error[T])
+    Name() Name
 }
 
 // Processors maintain type T throughout
-func Transform[T any](name string, fn func(context.Context, T) T) Chainable[T]
-func Apply[T any](name string, fn func(context.Context, T) (T, error)) Chainable[T]
+func Transform[T any](name Name, fn func(context.Context, T) T) Chainable[T]
+func Apply[T any](name Name, fn func(context.Context, T) (T, error)) Chainable[T]
 ```
 
 ## Type Consistency
@@ -23,7 +24,8 @@ The pipeline enforces type consistency at compile time:
 
 ```go
 // This compiles - all processors work with User type
-userPipeline := pipz.Sequential(
+userPipeline := pipz.NewSequence[User]("user-pipeline")
+userPipeline.Register(
     pipz.Apply("validate", func(ctx context.Context, u User) (User, error) {
         return u, nil
     }),
@@ -33,7 +35,8 @@ userPipeline := pipz.Sequential(
 )
 
 // This won't compile - type mismatch
-userPipeline := pipz.Sequential(
+userPipeline := pipz.NewSequence[User]("user-pipeline")
+userPipeline.Register(
     pipz.Apply("validate", validateUser),    // Processes User
     pipz.Apply("calculate", calculateOrder),  // Processes Order - ERROR!
 )
@@ -80,29 +83,26 @@ Switch keys must be comparable:
 
 ```go
 // Works - string is comparable
-pipz.Switch(
+router := pipz.NewSwitch("type-router",
     func(ctx context.Context, data Data) string { 
         return data.Type 
     },
-    map[string]pipz.Chainable[Data]{...},
 )
+router.AddRoute("type1", processor1)
+router.AddRoute("type2", processor2)
 
 // Works - custom type based on comparable type
 type RouteKey int
-pipz.Switch(
+priorityRouter := pipz.NewSwitch("priority-router",
     func(ctx context.Context, data Data) RouteKey { 
         return data.Priority 
     },
-    map[RouteKey]pipz.Chainable[Data]{...},
 )
+priorityRouter.AddRoute(RouteKey(1), highPriorityProcessor)
+priorityRouter.AddRoute(RouteKey(2), normalProcessor)
 
 // Won't compile - slices aren't comparable
-pipz.Switch(
-    func(ctx context.Context, data Data) []string { 
-        return data.Tags 
-    },
-    map[[]string]pipz.Chainable[Data]{...}, // ERROR!
-)
+// This would fail at compile time when trying to use []string as map key
 ```
 
 ### Cloner for Concurrent Processing
@@ -126,7 +126,7 @@ func (o Order) Clone() Order {
 }
 
 // Now it can be used with Concurrent
-pipeline := pipz.Concurrent(
+pipeline := pipz.NewConcurrent[Order]("order-processing",
     notifyWarehouse,
     updateInventory,
     sendConfirmation,
@@ -142,7 +142,7 @@ type UnsafeOrder struct {
 }
 
 // This won't compile - UnsafeOrder doesn't implement Cloner
-pipeline := pipz.Concurrent(
+pipeline := pipz.NewConcurrent[UnsafeOrder]("unsafe-processing",
     processor1,
     processor2,
 ) // ERROR: UnsafeOrder does not implement Cloner[UnsafeOrder]
@@ -162,7 +162,7 @@ const (
 )
 
 // Type-safe routing
-router := pipz.Switch(
+router := pipz.NewSwitch("customer-router",
     func(ctx context.Context, c Customer) CustomerSegment {
         if c.TotalSpent > 10000 {
             return SegmentVIP
@@ -172,12 +172,12 @@ router := pipz.Switch(
         }
         return SegmentRegular
     },
-    map[CustomerSegment]pipz.Chainable[Customer]{
-        SegmentVIP:      vipPipeline,
-        SegmentRegular:  regularPipeline,
-        SegmentInactive: reactivationPipeline,
-    },
 )
+
+// Add routes
+router.AddRoute(SegmentVIP, vipPipeline)
+router.AddRoute(SegmentRegular, regularPipeline)
+router.AddRoute(SegmentInactive, reactivationPipeline)
 ```
 
 ## Generic Pipeline Builders
@@ -190,7 +190,8 @@ func ValidationPipeline[T any](
     validator func(context.Context, T) error,
     enricher func(context.Context, T) T,
 ) pipz.Chainable[T] {
-    return pipz.Sequential(
+    seq := pipz.NewSequence[T]("validation")
+    seq.Register(
         pipz.Effect("validate", validator),
         pipz.Transform("enrich", enricher),
         pipz.Effect("audit", func(ctx context.Context, data T) error {
@@ -198,6 +199,7 @@ func ValidationPipeline[T any](
             return nil
         }),
     )
+    return seq
 }
 
 // Use with any type

@@ -5,10 +5,10 @@ Learn how to build high-performance pipelines with pipz.
 ## Performance Principles
 
 pipz is designed for performance:
-- Zero allocations in core operations
+- Minimal allocations in core operations
 - No reflection or runtime type assertions
-- Minimal interface call overhead
-- Efficient error propagation
+- Low interface call overhead
+- Efficient error propagation without excessive wrapping
 
 ## Benchmarking Pipelines
 
@@ -16,7 +16,7 @@ Always measure before optimizing:
 
 ```go
 func BenchmarkPipeline(b *testing.B) {
-    pipeline := pipz.Sequential(
+    pipeline := pipz.NewSequence[Order]("benchmark-pipeline",
         validateOrder,
         calculateTax,
         applyDiscount,
@@ -251,13 +251,13 @@ Simpler pipelines are faster:
 
 ```go
 // Complex: Many small steps
-complex := pipz.Sequential(
+complex := pipz.NewSequence[Order]("complex-pipeline",
     step1, step2, step3, step4, step5,
     step6, step7, step8, step9, step10,
 )
 
 // Simple: Combine related operations
-simple := pipz.Sequential(
+simple := pipz.NewSequence[Order]("simple-pipeline",
     validateAndNormalize,  // Combined steps 1-3
     enrichAndTransform,    // Combined steps 4-7
     saveAndNotify,        // Combined steps 8-10
@@ -400,4 +400,4 @@ BenchmarkWithCaching-8           5000000       237 ns/op       0 B/op       0 al
 
 - [Testing Guide](./testing.md) - Performance testing strategies
 - [Best Practices](./best-practices.md) - Production optimization
-- [Examples](../examples/payment-processing.md) - Real-world performance
+- [Error Recovery](../concepts/error-recovery.md) - Performance impact of error handling

@@ -46,12 +46,41 @@ type UserPreferences struct {
 }
 ```
 
-## Step 2: Create Basic Processors
+## Step 2: Define Your Keys (Constants)
 
-Start with individual processors for each step:
+Define all processor and connector names as constants - these are the "keys" to your system:
 
 ```go
-// Validation
+// All names are constants - this is the key to the system
+const (
+    // Validation processors
+    ProcessorValidate       = "validate"
+    ProcessorCheckDuplicate = "check_duplicate"
+    
+    // Transformation processors  
+    ProcessorEnrich = "enrich"
+    
+    // Persistence processors
+    ProcessorSave = "save"
+    
+    // Post-registration processors
+    ProcessorSendWelcome  = "send_welcome"
+    ProcessorLogAnalytics = "log_analytics"
+    
+    // Connector names
+    PipelineRegistration      = "registration"
+    ConnectorPostRegistration = "post-registration"
+    ConnectorEmailHandle      = "email-with-error-handling"
+    ConnectorSaveRetry        = "save-with-retry"
+)
+```
+
+## Step 3: Define Your Business Logic
+
+Write the core business logic as pure functions:
+
+```go
+// Validation logic
 func validateUser(ctx context.Context, user User) error {
     if user.Email == "" {
         return errors.New("email is required")
@@ -89,7 +118,7 @@ func enrichUser(ctx context.Context, user User) User {
     
     // Set defaults
     if user.Country == "" {
-        user.Country = detectCountry(ctx) // Simplified
+        user.Country = detectCountry(ctx)
     }
     
     if user.Preferences.Language == "" {
@@ -107,27 +136,13 @@ func enrichUser(ctx context.Context, user User) User {
     return user
 }
 
-// Helper functions
-func detectCountry(ctx context.Context) string {
-    // In real app: use GeoIP or similar
-    return "US"
-}
-
-func generateID() string {
-    return fmt.Sprintf("user_%d", time.Now().UnixNano())
-}
-```
-
-## Step 3: Create Side Effect Processors
-
-```go
 // Save to database
 func saveUser(ctx context.Context, user User) error {
     // Simulate database save
     fmt.Printf("Saving user: %s\n", user.Email)
     
     // In real app:
-    // db.Save(ctx, user)
+    // return db.Save(ctx, user)
     
     return nil
 }
@@ -138,7 +153,7 @@ func sendWelcomeEmail(ctx context.Context, user User) error {
     fmt.Printf("Sending welcome email to: %s\n", user.Email)
     
     // In real app:
-    // emailService.Send(ctx, WelcomeEmail{
+    // return emailService.Send(ctx, WelcomeEmail{
     //     To: user.Email,
     //     Name: user.FullName,
     // })
@@ -152,49 +167,130 @@ func logRegistration(ctx context.Context, user User) error {
         user.Username, user.Country)
     return nil
 }
-```
 
-## Step 4: Build the Pipeline
+// Error handlers
+func logEmailError(ctx context.Context, err *pipz.Error[User]) error {
+    fmt.Printf("Failed to send welcome email: %v\n", err.Err)
+    return nil
+}
 
-Now compose everything into a pipeline:
+// Helper functions
+func detectCountry(ctx context.Context) string {
+    // In real app: use GeoIP or similar
+    return "US"
+}
 
-```go
-func createRegistrationPipeline() pipz.Chainable[User] {
-    return pipz.Sequential(
-        // Validation phase
-        pipz.Effect("validate", validateUser),
-        pipz.Effect("check_duplicate", checkDuplicate),
-        
-        // Transformation phase
-        pipz.Transform("enrich", enrichUser),
-        
-        // Persistence phase
-        pipz.Effect("save", saveUser),
-        
-        // Post-registration phase (parallel)
-        pipz.Concurrent(
-            pipz.Effect("send_welcome", sendWelcomeEmail),
-            pipz.Effect("log_analytics", logRegistration),
-        ),
-    )
+func generateID() string {
+    return fmt.Sprintf("user_%d", time.Now().UnixNano())
 }
 ```
 
-Note: Since `Concurrent` requires `Cloner`, let's implement it:
+## Step 4: Define Your Processors
+
+Wrap your business logic with pipz processors:
 
 ```go
+// Processors as reusable variables
+var (
+    // Validation processors
+    ValidateUser    = pipz.Effect(ProcessorValidate, validateUser)
+    CheckDuplicate  = pipz.Effect(ProcessorCheckDuplicate, checkDuplicate)
+    
+    // Transformation processors
+    EnrichUser = pipz.Transform(ProcessorEnrich, enrichUser)
+    
+    // Persistence processors
+    SaveUser = pipz.Effect(ProcessorSave, saveUser)
+    
+    // Post-registration processors
+    SendWelcome  = pipz.Effect(ProcessorSendWelcome, sendWelcomeEmail)
+    LogAnalytics = pipz.Effect(ProcessorLogAnalytics, logRegistration)
+    
+    // Error handling
+    LogEmailError = pipz.Effect("log_email_error", logEmailError)
+)
+
+// Note: Since Concurrent requires Cloner, implement it:
 func (u User) Clone() User {
     // User has no pointer fields, so simple copy works
     return u
 }
 ```
 
-## Step 5: Use the Pipeline
+## Step 5: Define Your Connectors
+
+Compose processors into sequences and connectors:
 
 ```go
-func main() {
-    pipeline := createRegistrationPipeline()
+// Composed connectors
+var (
+    // Basic registration pipeline
+    RegistrationPipeline = pipz.NewSequence[User](PipelineRegistration,
+        // Validation phase
+        ValidateUser,
+        CheckDuplicate,
+        
+        // Transformation phase
+        EnrichUser,
+        
+        // Persistence phase
+        SaveUser,
+        
+        // Post-registration phase (parallel)
+        pipz.NewConcurrent(ConnectorPostRegistration,
+            SendWelcome,
+            LogAnalytics,
+        ),
+    )
     
+    // Robust email sending with error handling
+    EmailWithErrorHandling = pipz.NewHandle(ConnectorEmailHandle,
+        SendWelcome,
+        LogEmailError,
+    )
+    
+    // Save with retry logic
+    SaveWithRetry = pipz.NewBackoff(ConnectorSaveRetry,
+        SaveUser,
+        3,
+        100*time.Millisecond,
+    )
+    
+    // Robust registration pipeline
+    RobustRegistrationPipeline = pipz.NewSequence[User]("robust-registration",
+        // Validation with early exit
+        ValidateUser,
+        CheckDuplicate,
+        
+        // Enrich data
+        EnrichUser,
+        
+        // Save with retry
+        SaveWithRetry,
+        
+        // Non-critical operations shouldn't fail registration
+        pipz.NewConcurrent(ConnectorPostRegistration,
+            EmailWithErrorHandling,
+            LogAnalytics,
+        ),
+    )
+)
+```
+
+## Step 6: Create Functions to Execute Pipelines
+
+```go
+// Simple registration
+func RegisterUser(ctx context.Context, user User) (User, error) {
+    return RegistrationPipeline.Process(ctx, user)
+}
+
+// Robust registration with error handling
+func RegisterUserRobust(ctx context.Context, user User) (User, error) {
+    return RobustRegistrationPipeline.Process(ctx, user)
+}
+
+func main() {
     // Test with valid user
     newUser := User{
         Email:    "john.doe@example.com",
@@ -204,9 +300,14 @@ func main() {
     }
     
     ctx := context.Background()
-    registered, err := pipeline.Process(ctx, newUser)
+    registered, err := RegisterUser(ctx, newUser)
     if err != nil {
-        fmt.Printf("Registration failed: %v\n", err)
+        var pipeErr *pipz.Error[User]
+        if errors.As(err, &pipeErr) {
+            fmt.Printf("Registration failed at %v: %v\n", pipeErr.Path, pipeErr.Err)
+        } else {
+            fmt.Printf("Registration failed: %v\n", err)
+        }
         return
     }
     
@@ -214,47 +315,50 @@ func main() {
 }
 ```
 
-## Step 6: Add Error Handling
+## Step 7: Dynamic Pipeline Modification
 
-Make the pipeline more robust:
+Pipelines can be modified at runtime:
 
 ```go
-func createRobustRegistrationPipeline() pipz.Chainable[User] {
-    return pipz.Sequential(
-        // Validation with early exit
-        pipz.Effect("validate", validateUser),
-        pipz.Effect("check_duplicate", checkDuplicate),
-        
-        // Enrich data
-        pipz.Transform("enrich", enrichUser),
-        
-        // Save with retry
-        pipz.RetryWithBackoff(
-            pipz.Effect("save", saveUser),
-            3,
-            100*time.Millisecond,
-        ),
-        
-        // Non-critical operations shouldn't fail registration
-        pipz.Concurrent(
-            pipz.WithErrorHandler(
-                pipz.Effect("send_welcome", sendWelcomeEmail),
-                pipz.Effect("log_email_error", func(ctx context.Context, err error) error {
-                    fmt.Printf("Failed to send welcome email: %v\n", err)
-                    return nil
-                }),
-            ),
-            pipz.Effect("log_analytics", logRegistration),
-        ),
-    )
+// Add fraud detection for high-risk domains
+func AddFraudDetection() {
+    fraudCheck := pipz.Effect("fraud_check", func(ctx context.Context, user User) error {
+        // Check against fraud database
+        fmt.Printf("Checking user %s for fraud indicators\n", user.Email)
+        return nil
+    })
+    
+    // Insert after validation but before enrichment
+    RegistrationPipeline.After(ProcessorCheckDuplicate, fraudCheck)
+}
+
+// Replace email sender for A/B testing
+func UseNewEmailProvider() {
+    newEmailSender := pipz.Effect(ProcessorSendWelcome, func(ctx context.Context, user User) error {
+        fmt.Printf("[NEW PROVIDER] Sending welcome email to: %s\n", user.Email)
+        return nil
+    })
+    
+    RegistrationPipeline.Replace(ProcessorSendWelcome, newEmailSender)
 }
 ```
 
-## Step 7: Add Conditional Logic
+## Step 8: Add Conditional Logic
 
-Add premium user handling:
+Add premium user handling with the Switch connector:
 
 ```go
+// Additional constants
+const (
+    ProcessorRegularOnboarding  = "regular_onboarding"
+    ProcessorPremiumOnboarding  = "premium_onboarding"
+    ProcessorAssignManager      = "assign_account_manager"
+    RouterUserType              = "user-type-router"
+    PipelinePremiumFlow         = "premium-flow"
+    PipelineConditionalReg      = "conditional-registration"
+)
+
+// Route keys
 type UserType string
 
 const (
@@ -262,6 +366,7 @@ const (
     TypePremium UserType = "premium"
 )
 
+// Business logic
 func detectUserType(ctx context.Context, user User) UserType {
     // Premium domains get premium accounts
     premiumDomains := []string{"company.com", "enterprise.org"}
@@ -275,39 +380,61 @@ func detectUserType(ctx context.Context, user User) UserType {
     return TypeRegular
 }
 
-func createConditionalPipeline() pipz.Chainable[User] {
-    return pipz.Sequential(
+func regularOnboarding(ctx context.Context, u User) error {
+    fmt.Println("Starting regular onboarding flow")
+    return nil
+}
+
+func premiumOnboarding(ctx context.Context, u User) error {
+    fmt.Println("Starting premium onboarding flow")
+    return nil
+}
+
+func assignAccountManager(ctx context.Context, u User) error {
+    fmt.Println("Assigning dedicated account manager")
+    return nil
+}
+
+// Processors
+var (
+    RegularOnboarding  = pipz.Effect(ProcessorRegularOnboarding, regularOnboarding)
+    PremiumOnboarding  = pipz.Effect(ProcessorPremiumOnboarding, premiumOnboarding)
+    AssignManager      = pipz.Effect(ProcessorAssignManager, assignAccountManager)
+)
+
+// Connectors
+var (
+    // Premium user flow
+    PremiumFlow = pipz.NewSequence[User](PipelinePremiumFlow,
+        PremiumOnboarding,
+        AssignManager,
+    )
+    
+    // Router for user types
+    UserTypeRouter = pipz.NewSwitch(RouterUserType, detectUserType).
+        AddRoute(TypeRegular, RegularOnboarding).
+        AddRoute(TypePremium, PremiumFlow)
+    
+    // Conditional registration pipeline
+    ConditionalRegistrationPipeline = pipz.NewSequence[User](PipelineConditionalReg,
         // Common steps
-        pipz.Effect("validate", validateUser),
-        pipz.Effect("check_duplicate", checkDuplicate),
-        pipz.Transform("enrich", enrichUser),
-        pipz.Effect("save", saveUser),
+        ValidateUser,
+        CheckDuplicate,
+        EnrichUser,
+        SaveUser,
         
         // Route based on user type
-        pipz.Switch(
-            detectUserType,
-            map[UserType]pipz.Chainable[User]{
-                TypeRegular: pipz.Effect("regular_onboarding", func(ctx context.Context, u User) error {
-                    fmt.Println("Starting regular onboarding flow")
-                    return nil
-                }),
-                TypePremium: pipz.Sequential(
-                    pipz.Effect("premium_onboarding", func(ctx context.Context, u User) error {
-                        fmt.Println("Starting premium onboarding flow")
-                        return nil
-                    }),
-                    pipz.Effect("assign_account_manager", func(ctx context.Context, u User) error {
-                        fmt.Println("Assigning dedicated account manager")
-                        return nil
-                    }),
-                ),
-            },
-        ),
+        UserTypeRouter,
     )
+)
+
+// Function to execute
+func RegisterUserConditional(ctx context.Context, user User) (User, error) {
+    return ConditionalRegistrationPipeline.Process(ctx, user)
 }
 ```
 
-## Step 8: Test Your Pipeline
+## Step 9: Test Your Pipeline
 
 ```go
 func TestRegistrationPipeline(t *testing.T) {
@@ -362,7 +489,7 @@ func TestRegistrationPipeline(t *testing.T) {
 
 1. **Start Simple**: Begin with basic processors and compose them
 2. **Add Robustness Gradually**: Layer in retry, timeout, and error handling
-3. **Use the Right Connector**: Sequential for steps, Concurrent for parallel work
+3. **Use the Right Connector**: Sequence for steps, Concurrent for parallel work
 4. **Handle Errors Appropriately**: Critical vs non-critical operations
 5. **Test Each Component**: Processors are independently testable
 
