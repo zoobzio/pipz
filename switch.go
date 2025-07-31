@@ -2,7 +2,9 @@ package pipz
 
 import (
 	"context"
+	"errors"
 	"sync"
+	"time"
 )
 
 // Condition determines routing based on input data.
@@ -83,7 +85,7 @@ func NewSwitch[T any, K comparable](name Name, condition Condition[T, K]) *Switc
 
 // Process implements the Chainable interface.
 // If no route matches the condition result, the input is returned unchanged.
-func (s *Switch[T, K]) Process(ctx context.Context, data T) (T, *Error[T]) {
+func (s *Switch[T, K]) Process(ctx context.Context, data T) (T, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -94,10 +96,21 @@ func (s *Switch[T, K]) Process(ctx context.Context, data T) (T, *Error[T]) {
 	}
 	result, err := processor.Process(ctx, data)
 	if err != nil {
-		// Prepend this switch's name to the path
-		err.Path = append([]Name{s.name}, err.Path...)
+		var pipeErr *Error[T]
+		if errors.As(err, &pipeErr) {
+			// Prepend this switch's name to the path
+			pipeErr.Path = append([]Name{s.name}, pipeErr.Path...)
+			return result, pipeErr
+		}
+		// Handle non-pipeline errors by wrapping them
+		return result, &Error[T]{
+			Timestamp: time.Now(),
+			InputData: data,
+			Err:       err,
+			Path:      []Name{s.name},
+		}
 	}
-	return result, err
+	return result, nil
 }
 
 // AddRoute adds or updates a route in the switch.

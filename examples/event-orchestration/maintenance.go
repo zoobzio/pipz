@@ -283,7 +283,7 @@ func InitializeMaintenance() {
 }
 
 // ProcessMaintenanceCheck is the public API for the maintenance domain.
-func ProcessMaintenanceCheck(ctx context.Context, check MaintenanceCheck) (MaintenanceCheck, *pipz.Error[MaintenanceCheck]) {
+func ProcessMaintenanceCheck(ctx context.Context, check MaintenanceCheck) (MaintenanceCheck, error) {
 	// Process through internal pipeline.
 	return maintenancePipeline.Process(ctx, check)
 }

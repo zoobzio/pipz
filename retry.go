@@ -53,13 +53,13 @@ func NewRetry[T any](name Name, processor Chainable[T], maxAttempts int) *Retry[
 }
 
 // Process implements the Chainable interface.
-func (r *Retry[T]) Process(ctx context.Context, data T) (T, *Error[T]) {
+func (r *Retry[T]) Process(ctx context.Context, data T) (T, error) {
 	r.mu.RLock()
 	processor := r.processor
 	maxAttempts := r.maxAttempts
 	r.mu.RUnlock()
 
-	var lastErr *Error[T]
+	var lastErr error
 	var lastResult T
 
 	for i := 0; i < maxAttempts; i++ {
@@ -68,8 +68,6 @@ func (r *Retry[T]) Process(ctx context.Context, data T) (T, *Error[T]) {
 			return result, nil
 		}
 		lastErr = err
-		// Prepend this retry's name to the path
-		lastErr.Path = append([]Name{r.name}, lastErr.Path...)
 		lastResult = result
 
 		// Check if context is canceled between attempts
@@ -81,13 +79,28 @@ func (r *Retry[T]) Process(ctx context.Context, data T) (T, *Error[T]) {
 				Path:      []Name{r.name},
 				Timeout:   errors.Is(ctx.Err(), context.DeadlineExceeded),
 				Canceled:  errors.Is(ctx.Err(), context.Canceled),
+				Timestamp: time.Now(),
 			}
 		}
 	}
 
-	// All attempts failed - the lastErr should already be a wrapped Error[T]
-	// from the processor, so just return it
-	return lastResult, lastErr
+	// All attempts failed - return the last error
+	if lastErr != nil {
+		var pipeErr *Error[T]
+		if errors.As(lastErr, &pipeErr) {
+			// Prepend this retry's name to the path
+			pipeErr.Path = append([]Name{r.name}, pipeErr.Path...)
+			return lastResult, pipeErr
+		}
+		// Handle non-pipeline errors by wrapping them
+		return lastResult, &Error[T]{
+			Timestamp: time.Now(),
+			InputData: data,
+			Err:       lastErr,
+			Path:      []Name{r.name},
+		}
+	}
+	return lastResult, nil
 }
 
 // SetMaxAttempts updates the maximum number of retry attempts.
@@ -165,14 +178,14 @@ func NewBackoff[T any](name Name, processor Chainable[T], maxAttempts int, baseD
 }
 
 // Process implements the Chainable interface.
-func (b *Backoff[T]) Process(ctx context.Context, data T) (T, *Error[T]) {
+func (b *Backoff[T]) Process(ctx context.Context, data T) (T, error) {
 	b.mu.RLock()
 	processor := b.processor
 	maxAttempts := b.maxAttempts
 	baseDelay := b.baseDelay
 	b.mu.RUnlock()
 
-	var lastErr *Error[T]
+	var lastErr error
 	delay := baseDelay
 
 	for i := 0; i < maxAttempts; i++ {
@@ -181,8 +194,6 @@ func (b *Backoff[T]) Process(ctx context.Context, data T) (T, *Error[T]) {
 			return result, nil
 		}
 		lastErr = err
-		// Prepend this backoff's name to the path
-		lastErr.Path = append([]Name{b.name}, lastErr.Path...)
 
 		// Don't sleep after the last attempt
 		if i < maxAttempts-1 {
@@ -191,19 +202,34 @@ func (b *Backoff[T]) Process(ctx context.Context, data T) (T, *Error[T]) {
 				delay *= 2 // Exponential backoff
 			case <-ctx.Done():
 				// Context canceled/timed out - create appropriate error
-				ctxErr := &Error[T]{
+				return data, &Error[T]{
 					Err:       ctx.Err(),
 					InputData: data,
 					Path:      []Name{b.name},
 					Timeout:   errors.Is(ctx.Err(), context.DeadlineExceeded),
 					Canceled:  errors.Is(ctx.Err(), context.Canceled),
+					Timestamp: time.Now(),
 				}
-				return data, ctxErr
 			}
 		}
 	}
-	// All attempts failed - return the last error which should already be wrapped
-	return data, lastErr
+	// All attempts failed - return the last error
+	if lastErr != nil {
+		var pipeErr *Error[T]
+		if errors.As(lastErr, &pipeErr) {
+			// Prepend this backoff's name to the path
+			pipeErr.Path = append([]Name{b.name}, pipeErr.Path...)
+			return data, pipeErr
+		}
+		// Handle non-pipeline errors by wrapping them
+		return data, &Error[T]{
+			Timestamp: time.Now(),
+			InputData: data,
+			Err:       lastErr,
+			Path:      []Name{b.name},
+		}
+	}
+	return data, nil
 }
 
 // SetMaxAttempts updates the maximum number of retry attempts.

@@ -2,6 +2,7 @@ package pipz
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -54,7 +55,7 @@ func NewRace[T Cloner[T]](name Name, processors ...Chainable[T]) *Race[T] {
 }
 
 // Process implements the Chainable interface.
-func (r *Race[T]) Process(ctx context.Context, input T) (T, *Error[T]) {
+func (r *Race[T]) Process(ctx context.Context, input T) (T, error) {
 	r.mu.RLock()
 	processors := make([]Chainable[T], len(r.processors))
 	copy(processors, r.processors)
@@ -74,7 +75,7 @@ func (r *Race[T]) Process(ctx context.Context, input T) (T, *Error[T]) {
 	// Create channels for results and errors
 	type result struct {
 		data T
-		err  *Error[T]
+		err  error
 		idx  int
 	}
 
@@ -97,7 +98,7 @@ func (r *Race[T]) Process(ctx context.Context, input T) (T, *Error[T]) {
 	}
 
 	// Collect results
-	var lastErr *Error[T]
+	var lastErr error
 	for i := 0; i < len(processors); i++ {
 		select {
 		case res := <-resultCh:
@@ -107,18 +108,29 @@ func (r *Race[T]) Process(ctx context.Context, input T) (T, *Error[T]) {
 				return res.data, nil
 			}
 			lastErr = res.err
-			if lastErr != nil {
-				// Prepend this race's name to the path
-				lastErr.Path = append([]Name{r.name}, lastErr.Path...)
-			}
 		case <-ctx.Done():
 			// Context done means we're complete - return current input
 			return input, nil
 		}
 	}
 
-	// All failed - return the last error which should already be wrapped
-	return input, lastErr
+	// All failed - return the last error
+	if lastErr != nil {
+		var pipeErr *Error[T]
+		if errors.As(lastErr, &pipeErr) {
+			// Prepend this race's name to the path
+			pipeErr.Path = append([]Name{r.name}, pipeErr.Path...)
+			return input, pipeErr
+		}
+		// Handle non-pipeline errors by wrapping them
+		return input, &Error[T]{
+			Timestamp: time.Now(),
+			InputData: input,
+			Err:       lastErr,
+			Path:      []Name{r.name},
+		}
+	}
+	return input, nil
 }
 
 // Add appends a processor to the race execution list.

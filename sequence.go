@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"time"
 )
 
 // Sequence modification errors.
@@ -99,7 +100,7 @@ func (c *Sequence[T]) Register(processors ...Chainable[T]) {
 //   - Always use context with timeout for production
 //   - Check ctx.Err() in long-running processors
 //   - Pass context through to external calls
-func (c *Sequence[T]) Process(ctx context.Context, value T) (T, *Error[T]) {
+func (c *Sequence[T]) Process(ctx context.Context, value T) (T, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -121,14 +122,25 @@ func (c *Sequence[T]) Process(ctx context.Context, value T) (T, *Error[T]) {
 				Path:      []Name{c.name},
 				Timeout:   errors.Is(ctx.Err(), context.DeadlineExceeded),
 				Canceled:  errors.Is(ctx.Err(), context.Canceled),
+				Timestamp: time.Now(),
 			}
 		default:
-			var err *Error[T]
+			var err error
 			result, err = proc.Process(ctx, result)
 			if err != nil {
-				// Prepend this sequence's name to the path
-				err.Path = append([]Name{c.name}, err.Path...)
-				return result, err
+				var pipeErr *Error[T]
+				if errors.As(err, &pipeErr) {
+					// Prepend this sequence's name to the path
+					pipeErr.Path = append([]Name{c.name}, pipeErr.Path...)
+					return result, pipeErr
+				}
+				// Handle non-pipeline errors by wrapping them
+				return result, &Error[T]{
+					Timestamp: time.Now(),
+					InputData: value,
+					Err:       err,
+					Path:      []Name{c.name},
+				}
 			}
 		}
 	}

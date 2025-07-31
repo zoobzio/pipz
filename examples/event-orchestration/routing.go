@@ -338,7 +338,7 @@ func InitializeRouting() {
 }
 
 // ProcessRouteAnalysis is the public API for the routing domain.
-func ProcessRouteAnalysis(ctx context.Context, analysis RouteAnalysis) (RouteAnalysis, *pipz.Error[RouteAnalysis]) {
+func ProcessRouteAnalysis(ctx context.Context, analysis RouteAnalysis) (RouteAnalysis, error) {
 	// Process through internal pipeline.
 	return routingPipeline.Process(ctx, analysis)
 }

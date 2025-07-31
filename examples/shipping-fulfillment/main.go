@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -57,8 +58,13 @@ func main() {
 
 		// Display results
 		if err != nil {
-			fmt.Printf("   ❌ Failed: %v\n", err)
-			fmt.Printf("   Path: %s\n", strings.Join(err.Path, " → "))
+			var pipeErr *pipz.Error[Shipment]
+			if errors.As(err, &pipeErr) {
+				fmt.Printf("   ❌ Failed: %v\n", pipeErr.Err)
+				fmt.Printf("   Path: %s\n", strings.Join(pipeErr.Path, " → "))
+			} else {
+				fmt.Printf("   ❌ Failed: %v\n", err)
+			}
 		} else {
 			fmt.Printf("   ✅ Success: %s via %s\n",
 				result.TrackingNumber, result.SelectedRate.ProviderName)
@@ -202,7 +208,7 @@ func createTestShipments() []Shipment {
 }
 
 // updateMetrics updates shipping metrics based on results.
-func updateMetrics(metrics *ShippingMetrics, shipment Shipment, duration time.Duration, err *pipz.Error[Shipment]) {
+func updateMetrics(metrics *ShippingMetrics, shipment Shipment, duration time.Duration, err error) {
 	metrics.TotalShipments++
 
 	if err == nil {

@@ -36,7 +36,7 @@ import (
 func Apply[T any](name Name, fn func(context.Context, T) (T, error)) Processor[T] {
 	return Processor[T]{
 		name: name,
-		fn: func(ctx context.Context, value T) (T, *Error[T]) {
+		fn: func(ctx context.Context, value T) (T, error) {
 			start := time.Now()
 			result, err := fn(ctx, value)
 			if err != nil {

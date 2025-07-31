@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -28,7 +29,12 @@ func TestSprint1MVP(t *testing.T) {
 
 	result, err := ProcessOrder(ctx, order)
 	if err != nil {
-		t.Fatalf("Sprint 1 order failed: %v", err.Err)
+		var pipeErr *pipz.Error[Order]
+		if errors.As(err, &pipeErr) {
+			t.Fatalf("Sprint 1 order failed: %v", pipeErr.Err)
+		} else {
+			t.Fatalf("Sprint 1 order failed: %v", err)
+		}
 	}
 
 	// Should complete successfully.
@@ -61,7 +67,12 @@ func TestSprint2Inventory(t *testing.T) {
 
 		result, err := ProcessOrder(ctx, order)
 		if err != nil {
-			t.Fatalf("Order failed: %v", err.Err)
+			var pipeErr *pipz.Error[Order]
+			if errors.As(err, &pipeErr) {
+				t.Fatalf("Order failed: %v", pipeErr.Err)
+			} else {
+				t.Fatalf("Order failed: %v", err)
+			}
 		}
 
 		if result.Status != StatusPaid {
@@ -82,8 +93,13 @@ func TestSprint2Inventory(t *testing.T) {
 			t.Fatal("Expected out of stock error")
 		}
 
-		if !strings.Contains(err.Err.Error(), "insufficient stock") {
-			t.Errorf("Expected insufficient stock error, got: %v", err.Err)
+		var pipeErr *pipz.Error[Order]
+		if errors.As(err, &pipeErr) {
+			if !strings.Contains(pipeErr.Err.Error(), "insufficient stock") {
+				t.Errorf("Expected insufficient stock error, got: %v", pipeErr.Err)
+			}
+		} else {
+			t.Errorf("Expected pipz error, got: %v", err)
 		}
 	})
 
@@ -218,19 +234,27 @@ func TestSprint4FraudDetection(t *testing.T) {
 			if TestMode && !tt.shouldSucceed {
 				t.Logf("Order result: Status=%s, FraudScore=%.2f, Error=%v", result.Status, result.FraudScore, err)
 				if err != nil {
-					t.Logf("Error context: Status=%s, FraudScore=%.2f", err.InputData.Status, err.InputData.FraudScore)
+					var pipeErr *pipz.Error[Order]
+					if errors.As(err, &pipeErr) {
+						t.Logf("Error context: Status=%s, FraudScore=%.2f", pipeErr.InputData.Status, pipeErr.InputData.FraudScore)
+					}
 				}
 			}
 
 			// For high risk orders that fail, the fraud score is preserved in the error context.
 			if tt.expectedRisk == RiskHigh && err != nil {
-				// Check that the order in the error has the fraud score.
-				if err.InputData.FraudScore == 0 {
-					t.Error("Expected non-zero fraud score in error context")
-				}
-				// High risk orders should be canceled.
-				if err.InputData.Status != StatusCanceled {
-					t.Errorf("High risk order should be canceled, got %s", err.InputData.Status)
+				var pipeErr *pipz.Error[Order]
+				if errors.As(err, &pipeErr) {
+					// Check that the order in the error has the fraud score.
+					if pipeErr.InputData.FraudScore == 0 {
+						t.Error("Expected non-zero fraud score in error context")
+					}
+					// High risk orders should be canceled.
+					if pipeErr.InputData.Status != StatusCanceled {
+						t.Errorf("High risk order should be canceled, got %s", pipeErr.InputData.Status)
+					}
+				} else {
+					t.Error("Expected pipz error for high risk order")
 				}
 			} else if result.FraudScore == 0 && tt.amount > 100 {
 				t.Error("Expected non-zero fraud score")
@@ -257,7 +281,7 @@ func TestSprint5PaymentResilience(t *testing.T) {
 
 		// Try multiple times to account for 30% failure rate.
 		var result Order
-		var err *pipz.Error[Order]
+		var err error
 		for i := 0; i < 5; i++ {
 			result, err = ProcessOrder(ctx, order)
 			if err == nil {
@@ -289,7 +313,10 @@ func TestSprint5PaymentResilience(t *testing.T) {
 		// When payment fails, the corrected status is in the error context.
 		expectedStatus := result.Status
 		if err != nil {
-			expectedStatus = err.InputData.Status
+			var pipeErr *pipz.Error[Order]
+			if errors.As(err, &pipeErr) {
+				expectedStatus = pipeErr.InputData.Status
+			}
 		}
 		if expectedStatus != StatusPending && expectedStatus != StatusCanceled {
 			t.Errorf("Expected pending or canceled status, got %s", expectedStatus)
@@ -300,12 +327,15 @@ func TestSprint5PaymentResilience(t *testing.T) {
 		if TestMode {
 			t.Logf("Processing log: %s", logStr)
 			if err != nil {
-				t.Logf("Error: %v", err.Err)
-				t.Logf("Error context log: %s", strings.Join(err.InputData.ProcessingLog, " "))
+				var pipeErr *pipz.Error[Order]
+				if errors.As(err, &pipeErr) {
+					t.Logf("Error: %v", pipeErr.Err)
+					t.Logf("Error context log: %s", strings.Join(pipeErr.InputData.ProcessingLog, " "))
+				}
 			}
 		}
 		// Check if "saved for retry" is in the error message (since PaymentFailureHandler worked).
-		if !strings.Contains(err.Error(), "saved for retry") {
+		if err != nil && !strings.Contains(err.Error(), "saved for retry") {
 			t.Error("Expected order to be saved for retry")
 		}
 	})

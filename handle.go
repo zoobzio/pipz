@@ -2,7 +2,9 @@ package pipz
 
 import (
 	"context"
+	"errors"
 	"sync"
+	"time"
 )
 
 // Handle wraps a processor with error handling.
@@ -53,7 +55,7 @@ func NewHandle[T any](name Name, processor Chainable[T], errorHandler Chainable[
 }
 
 // Process implements the Chainable interface.
-func (h *Handle[T]) Process(ctx context.Context, input T) (T, *Error[T]) {
+func (h *Handle[T]) Process(ctx context.Context, input T) (T, error) {
 	h.mu.RLock()
 	processor := h.processor
 	errorHandler := h.errorHandler
@@ -63,16 +65,29 @@ func (h *Handle[T]) Process(ctx context.Context, input T) (T, *Error[T]) {
 
 	result, err := processor.Process(ctx, input)
 	if err != nil {
-		// Prepend this handle's name to the path
-		err.Path = append([]Name{h.name}, err.Path...)
-
-		// Process the error through the error handler
-		// We ignore the error handler's return values and any errors it produces
-		// Error handler receives the full *Error[T] with context
+		var pipeErr *Error[T]
+		if errors.As(err, &pipeErr) {
+			// Prepend this handle's name to the path
+			pipeErr.Path = append([]Name{h.name}, pipeErr.Path...)
+			// Process the error through the error handler
+			// We ignore the error handler's return values and any errors it produces
+			// Error handler receives the full *Error[T] with context
+			// nolint:errcheck
+			_, _ = errorHandler.Process(ctx, pipeErr)
+			return result, pipeErr
+		}
+		// Handle non-pipeline errors by wrapping them
+		wrappedErr := &Error[T]{
+			Timestamp: time.Now(),
+			InputData: input,
+			Err:       err,
+			Path:      []Name{h.name},
+		}
 		// nolint:errcheck
-		_, _ = errorHandler.Process(ctx, err)
+		_, _ = errorHandler.Process(ctx, wrappedErr)
+		return result, wrappedErr
 	}
-	return result, err
+	return result, nil
 }
 
 // SetProcessor updates the main processor.

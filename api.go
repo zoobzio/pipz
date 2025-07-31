@@ -307,7 +307,7 @@ import "context"
 //   - Immutable by convention (return modified copies)
 //   - Named components for debugging and monitoring
 type Chainable[T any] interface {
-	Process(context.Context, T) (T, *Error[T])
+	Process(context.Context, T) (T, error)
 	Name() Name
 }
 
@@ -345,7 +345,7 @@ type Name = string
 //   - Use consistent naming conventions across your application
 //   - Names appear in Error[T].Path for debugging (e.g., ["pipeline", "validate_email"])
 type Processor[T any] struct {
-	fn   func(context.Context, T) (T, *Error[T])
+	fn   func(context.Context, T) (T, error)
 	name Name
 }
 
@@ -360,7 +360,7 @@ type Processor[T any] struct {
 //	// Or in connectors
 //	pipeline := pipz.NewSequence("validation").
 //	    Register(validator, transformer).Link()
-func (p Processor[T]) Process(ctx context.Context, data T) (T, *Error[T]) {
+func (p Processor[T]) Process(ctx context.Context, data T) (T, error) {
 	return p.fn(ctx, data)
 }
 

@@ -68,7 +68,7 @@ func NewConcurrent[T Cloner[T]](name Name, processors ...Chainable[T]) *Concurre
 }
 
 // Process implements the Chainable interface.
-func (c *Concurrent[T]) Process(ctx context.Context, input T) (T, *Error[T]) {
+func (c *Concurrent[T]) Process(ctx context.Context, input T) (T, error) {
 	c.mu.RLock()
 	processors := make([]Chainable[T], len(c.processors))
 	copy(processors, c.processors)

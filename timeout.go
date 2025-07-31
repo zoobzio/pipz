@@ -50,7 +50,7 @@ func NewTimeout[T any](name Name, processor Chainable[T], duration time.Duration
 }
 
 // Process implements the Chainable interface.
-func (t *Timeout[T]) Process(ctx context.Context, data T) (T, *Error[T]) {
+func (t *Timeout[T]) Process(ctx context.Context, data T) (T, error) {
 	t.mu.RLock()
 	processor := t.processor
 	duration := t.duration
@@ -63,7 +63,7 @@ func (t *Timeout[T]) Process(ctx context.Context, data T) (T, *Error[T]) {
 
 	done := make(chan struct{})
 	var result T
-	var err *Error[T]
+	var err error
 
 	go func() {
 		result, err = processor.Process(ctx, data)
@@ -73,10 +73,21 @@ func (t *Timeout[T]) Process(ctx context.Context, data T) (T, *Error[T]) {
 	select {
 	case <-done:
 		if err != nil {
-			// Prepend this timeout's name to the path
-			err.Path = append([]Name{t.name}, err.Path...)
+			var pipeErr *Error[T]
+			if errors.As(err, &pipeErr) {
+				// Prepend this timeout's name to the path
+				pipeErr.Path = append([]Name{t.name}, pipeErr.Path...)
+				return result, pipeErr
+			}
+			// Handle non-pipeline errors by wrapping them
+			return result, &Error[T]{
+				Timestamp: time.Now(),
+				InputData: data,
+				Err:       err,
+				Path:      []Name{t.name},
+			}
 		}
-		return result, err
+		return result, nil
 	case <-ctx.Done():
 		// Timeout occurred - return error
 		return data, &Error[T]{
@@ -85,6 +96,7 @@ func (t *Timeout[T]) Process(ctx context.Context, data T) (T, *Error[T]) {
 			Path:      []Name{t.name},
 			Timeout:   errors.Is(ctx.Err(), context.DeadlineExceeded),
 			Canceled:  errors.Is(ctx.Err(), context.Canceled),
+			Timestamp: time.Now(),
 		}
 	}
 }

@@ -75,16 +75,21 @@ func TestFilter_Process_ProcessorError(t *testing.T) {
 		t.Errorf("Expected zero value on error, got %s", result)
 	}
 
-	if len(err.Path) != 2 {
-		t.Errorf("Expected error path length 2, got %d", len(err.Path))
-	}
+	var pipeErr *Error[string]
+	if errors.As(err, &pipeErr) {
+		if len(pipeErr.Path) != 2 {
+			t.Errorf("Expected error path length 2, got %d", len(pipeErr.Path))
+		}
 
-	if err.Path[0] != "test-filter" {
-		t.Errorf("Expected first path element 'test-filter', got %s", err.Path[0])
-	}
+		if pipeErr.Path[0] != "test-filter" {
+			t.Errorf("Expected first path element 'test-filter', got %s", pipeErr.Path[0])
+		}
 
-	if err.Path[1] != "fail" {
-		t.Errorf("Expected second path element 'fail', got %s", err.Path[1])
+		if pipeErr.Path[1] != "fail" {
+			t.Errorf("Expected second path element 'fail', got %s", pipeErr.Path[1])
+		}
+	} else {
+		t.Error("Expected error to be of type *pipz.Error[string]")
 	}
 }
 
@@ -197,8 +202,13 @@ func TestFilter_WithTimeout(t *testing.T) {
 		t.Errorf("Expected zero value on timeout, got %d", result)
 	}
 
-	if !err.Timeout {
-		t.Error("Expected timeout flag to be true")
+	var pipeErr *Error[int]
+	if errors.As(err, &pipeErr) {
+		if !pipeErr.Timeout {
+			t.Error("Expected timeout flag to be true")
+		}
+	} else {
+		t.Error("Expected error to be of type *pipz.Error[int]")
 	}
 }
 
@@ -231,8 +241,13 @@ func TestFilter_WithCancellation(t *testing.T) {
 		t.Errorf("Expected zero value on cancellation, got %d", result)
 	}
 
-	if !err.Canceled {
-		t.Error("Expected canceled flag to be true")
+	var pipeErr *Error[int]
+	if errors.As(err, &pipeErr) {
+		if !pipeErr.Canceled {
+			t.Error("Expected canceled flag to be true")
+		}
+	} else {
+		t.Error("Expected error to be of type *pipz.Error[int]")
 	}
 }
 
@@ -325,8 +340,13 @@ func TestFilter_ConditionalValidationExample(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected validation error for expensive premium order")
 	}
-	if err.Err.Error() != "amount exceeds premium limit" {
-		t.Errorf("Expected specific error message, got %v", err.Err)
+	var pipeErr *Error[Order]
+	if errors.As(err, &pipeErr) {
+		if pipeErr.Err.Error() != "amount exceeds premium limit" {
+			t.Errorf("Expected specific error message, got %v", pipeErr.Err)
+		}
+	} else {
+		t.Error("Expected error to be of type *pipz.Error[Order]")
 	}
 }
 

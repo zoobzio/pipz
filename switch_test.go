@@ -256,9 +256,14 @@ func TestSwitch(t *testing.T) {
 		}
 
 		// Check error path includes switch name
-		expectedPath := []Name{"error-switch", "error-proc"}
-		if !reflect.DeepEqual(err.Path, expectedPath) {
-			t.Errorf("expected error path %v, got %v", expectedPath, err.Path)
+		var pipeErr *Error[int]
+		if errors.As(err, &pipeErr) {
+			expectedPath := []Name{"error-switch", "error-proc"}
+			if !reflect.DeepEqual(pipeErr.Path, expectedPath) {
+				t.Errorf("expected error path %v, got %v", expectedPath, pipeErr.Path)
+			}
+		} else {
+			t.Error("expected error to be of type *pipz.Error[int]")
 		}
 	})
 }

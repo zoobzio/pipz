@@ -197,7 +197,7 @@ func InitializeSafety() {
 }
 
 // ProcessSafetyIncident is the public API for the safety domain.
-func ProcessSafetyIncident(ctx context.Context, incident SafetyIncident) (SafetyIncident, *pipz.Error[SafetyIncident]) {
+func ProcessSafetyIncident(ctx context.Context, incident SafetyIncident) (SafetyIncident, error) {
 	// Add processing timestamp.
 	incident.Timestamp = time.Now()
 

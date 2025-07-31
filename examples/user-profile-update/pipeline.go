@@ -195,9 +195,9 @@ var (
 
 	// LogCacheErrors logs cache failures without blocking.
 	// Added: Sprint 9 - CDN API has 5% error rate.
-	LogCacheErrors = pipz.Effect(ProcessorLogCacheErrors, func(_ context.Context, err *pipz.Error[ProfileUpdate]) error {
+	LogCacheErrors = pipz.Effect(ProcessorLogCacheErrors, func(_ context.Context, pipeErr *pipz.Error[ProfileUpdate]) error {
 		// In real app, this would log to your logging system.
-		fmt.Printf("Cache invalidation errors for user %s: %v\n", err.InputData.UserID, err.Err)
+		fmt.Printf("Cache invalidation errors for user %s: %v\n", pipeErr.InputData.UserID, pipeErr.Err)
 		return nil
 	})
 
@@ -278,14 +278,14 @@ var (
 var (
 	// CleanupImages removes processed images on pipeline failure.
 	// Added: Sprint 15 - Prevent orphaned resources.
-	CleanupImages = pipz.Apply(ProcessorCleanupImages, func(_ context.Context, err *pipz.Error[ProfileUpdate]) (*pipz.Error[ProfileUpdate], error) {
+	CleanupImages = pipz.Apply(ProcessorCleanupImages, func(_ context.Context, pipeErr *pipz.Error[ProfileUpdate]) (*pipz.Error[ProfileUpdate], error) {
 		// Cleanup on failure.
-		if err.InputData.ProcessedImages.Thumbnail != nil {
-			err.InputData.ProcessingLog = append(err.InputData.ProcessingLog, "cleanup: removed processed images")
+		if pipeErr.InputData.ProcessedImages.Thumbnail != nil {
+			pipeErr.InputData.ProcessingLog = append(pipeErr.InputData.ProcessingLog, "cleanup: removed processed images")
 			// In real app, would delete from storage.
-			err.InputData.ProcessedImages = ProcessedImages{}
+			pipeErr.InputData.ProcessedImages = ProcessedImages{}
 		}
-		return err, nil
+		return pipeErr, nil
 	})
 )
 
