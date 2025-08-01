@@ -3,7 +3,6 @@ package pipz
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -46,11 +45,15 @@ func TestHandle(t *testing.T) {
 		})
 
 		handle := NewHandle("test-handle", processor, errorHandler)
-		_, err := handle.Process(context.Background(), 5)
+		result, err := handle.Process(context.Background(), 5)
 
-		// The error is now wrapped in Error struct, check if it contains the expected error
-		if !errors.Is(err, expectedErr) && !strings.Contains(err.Error(), expectedErr.Error()) {
+		// Error should pass through after handler runs
+		if !errors.Is(err, expectedErr) {
 			t.Fatalf("expected original error, got %v", err)
+		}
+		// Result should be the zero value from the failed processor
+		if result != 0 {
+			t.Errorf("expected 0, got %d", result)
 		}
 		// The handler receives the full *Error[int] with context
 		if capturedErr == nil {
@@ -65,23 +68,27 @@ func TestHandle(t *testing.T) {
 		}
 	})
 
-	t.Run("Handler Error Is Ignored", func(t *testing.T) {
+	t.Run("Handler Error Propagates", func(t *testing.T) {
 		processorErr := errors.New("processor failed")
-		handlerErr := errors.New("handler failed")
+		handlerErr := errors.New("critical error - must fail")
 
 		processor := Apply("failing", func(_ context.Context, _ int) (int, error) {
 			return 0, processorErr
 		})
 		errorHandler := Apply("error-handler", func(_ context.Context, err *Error[int]) (*Error[int], error) {
-			return err, handlerErr // Handler itself fails
+			return err, handlerErr // Handler explicitly fails
 		})
 
 		handle := NewHandle("test-handle", processor, errorHandler)
-		_, err := handle.Process(context.Background(), 5)
+		result, err := handle.Process(context.Background(), 5)
 
-		// Should still get original error (wrapped), not handler error
-		if !errors.Is(err, processorErr) && !strings.Contains(err.Error(), processorErr.Error()) {
-			t.Fatalf("expected original error, got %v", err)
+		// Should get original processor error, not handler error
+		if !errors.Is(err, processorErr) {
+			t.Fatalf("expected processor error, got %v", err)
+		}
+		// Result should be the zero value from the failed processor
+		if result != 0 {
+			t.Errorf("expected 0, got %d", result)
 		}
 	})
 
@@ -104,12 +111,18 @@ func TestHandle(t *testing.T) {
 		done := make(chan bool, 10)
 		for i := 0; i < 10; i++ {
 			go func(n int) {
-				_, err := handle.Process(context.Background(), n)
-				// We expect errors for even numbers, no error for odd numbers
+				result, err := handle.Process(context.Background(), n)
+				// Errors should pass through
 				if n%2 == 0 && err == nil {
 					t.Errorf("expected error for even number %d", n)
 				} else if n%2 != 0 && err != nil {
 					t.Errorf("unexpected error for odd number %d: %v", n, err)
+				}
+				// Result should be 0 for errors, n for success
+				if n%2 == 0 && result != 0 {
+					t.Errorf("expected 0 for error case, got %d", result)
+				} else if n%2 != 0 && result != n {
+					t.Errorf("expected %d, got %d", n, result)
 				}
 				done <- true
 			}(i)
@@ -160,6 +173,49 @@ func TestHandle(t *testing.T) {
 		handle := NewHandle("my-handle", processor, errorHandler)
 		if handle.Name() != "my-handle" {
 			t.Errorf("expected 'my-handle', got %q", handle.Name())
+		}
+	})
+
+	t.Run("Error Pass Through", func(t *testing.T) {
+		expectedErr := errors.New("operation failed")
+		processor := Apply("failing", func(_ context.Context, _ int) (int, error) {
+			return 0, expectedErr
+		})
+		errorHandler := Effect("log", func(_ context.Context, _ *Error[int]) error {
+			// Just log
+			return nil
+		})
+
+		handle := NewHandle("observed", processor, errorHandler)
+		result, err := handle.Process(context.Background(), 42)
+
+		if !errors.Is(err, expectedErr) {
+			t.Fatalf("expected original error, got %v", err)
+		}
+		if result != 0 {
+			t.Errorf("expected 0, got %d", result)
+		}
+	})
+
+	t.Run("Handler Failure Ignored", func(t *testing.T) {
+		processorErr := errors.New("processor failed")
+		handlerErr := errors.New("handler failed")
+		processor := Apply("failing", func(_ context.Context, _ int) (int, error) {
+			return 0, processorErr
+		})
+		errorHandler := Apply("failing-handler", func(_ context.Context, err *Error[int]) (*Error[int], error) {
+			return err, handlerErr
+		})
+
+		handle := NewHandle("test", processor, errorHandler)
+		result, err := handle.Process(context.Background(), 42)
+
+		// Should still get processor error, not handler error
+		if !errors.Is(err, processorErr) {
+			t.Fatalf("expected processor error, got %v", err)
+		}
+		if result != 0 {
+			t.Errorf("expected 0, got %d", result)
 		}
 	})
 }

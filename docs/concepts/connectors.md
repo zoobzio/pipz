@@ -73,9 +73,11 @@ router.AddRoute("bank", processBankTransfer)
 
 ### Concurrent
 
-Runs multiple processors in parallel with isolated data:
+Runs multiple processors in parallel with isolated data, waiting for all to complete:
 
 > **⚠️ Important:** Concurrent is designed specifically for **independent I/O operations with latency**. The overhead of cloning data for goroutine isolation means it should NOT be used for fast operations like validation or simple calculations.
+
+**Context Handling:** Concurrent passes the original context to all processors, preserving distributed tracing, request IDs, and other context values. All processors will be cancelled if the parent context is cancelled.
 
 #### When to Use Concurrent
 
@@ -170,6 +172,43 @@ notify := pipz.NewConcurrent("notifications",
 ❌ Operations that complete in < 10ms
 
 The overhead of cloning data and goroutine coordination can exceed the benefit for fast operations.
+
+### Scaffold
+
+Fire-and-forget parallel execution with context isolation:
+
+```go
+// Background operations that must complete
+background := pipz.NewScaffold("async-ops",
+    pipz.Effect("audit", writeAuditLog),         // Continues even if request cancelled
+    pipz.Effect("metrics", updateMetrics),       // Won't be stopped by parent timeout
+    pipz.Effect("cache", warmSecondaryCache),    // Runs independently
+)
+
+// Returns immediately - processors run in background
+result, err := background.Process(ctx, data)
+```
+
+**Key characteristics:**
+- Returns immediately without waiting
+- Uses `context.WithoutCancel()` to prevent cancellation
+- Preserves trace context while removing cancellation
+- No error reporting from background processors
+- Perfect for non-critical background tasks
+- **Requires** input type to implement `Cloner[T]`
+
+**When to use Scaffold:**
+✅ Audit logging that must complete
+✅ Background cache warming
+✅ Non-critical notifications
+✅ Metrics and analytics collection
+✅ Any operation that should outlive the request
+
+**When NOT to use Scaffold:**
+❌ When you need the operation results
+❌ When errors must be handled
+❌ Critical business logic
+❌ Operations that should respect cancellation
 
 ### Race
 

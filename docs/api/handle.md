@@ -1,6 +1,6 @@
 # Handle
 
-Processes errors through their own pipeline, enabling sophisticated error recovery flows.
+Provides error observation and handling capabilities for processors.
 
 ## Function Signature
 
@@ -24,60 +24,55 @@ Returns a `*Handle[T]` that implements `Chainable[T]`.
 
 ## Behavior
 
-- **Error interception** - Catches errors from the main processor
+- **Error observation** - Handler processes errors for side effects (logging, cleanup)
+- **Error pass-through** - Original errors always propagate after handling
 - **Error as data** - Errors flow through the error handler pipeline
-- **Original error returned** - Still returns the original error
+- **Handler errors ignored** - Handler failures don't affect error propagation
 - **Success pass-through** - Successful results bypass error handler
-- **Handler errors ignored** - Error handler failures don't affect outcome
 
 ## Key Insight
 
-Handle treats errors as data that can flow through pipelines. This enables using all pipz features (Switch, Concurrent, Retry, etc.) for error handling.
+Handle provides error observation and cleanup. By wrapping a processor with Handle, you're saying "when this fails, I need to do something about it" - whether that's logging, cleanup, notifications, or compensation. The error always propagates after handling.
 
 ## Example
 
 ```go
-// Simple error logging
-logged := pipz.NewHandle("logged-operation",
-    riskyOperation,
-    pipz.Effect("log-error", func(ctx context.Context, err *pipz.Error[Order]) error {
-        log.Printf("Order %s failed at %v: %v", 
+// Log errors with context
+logged := pipz.NewHandle("order-logging",
+    processOrder,
+    pipz.Effect("log", func(ctx context.Context, err *pipz.Error[Order]) error {
+        log.Printf("Order %s failed at %s: %v", 
             err.InputData.ID, err.Path, err.Err)
+        metrics.Increment("order.failures")
         return nil
     }),
 )
 
-// Complex error recovery
-recovery := pipz.NewHandle("with-recovery",
-    mainPipeline,
-    pipz.NewSequence[*pipz.Error[User]]("error-pipeline",
-        pipz.Effect("log", logError),
-        pipz.Apply("categorize", categorizeError),
-        pipz.NewSwitch("error-router", routeByErrorType).
-            AddRoute("timeout", handleTimeout).
-            AddRoute("validation", handleValidation).
-            AddRoute("system", handleSystemError),
-        pipz.NewConcurrent("notify",
-            pipz.Effect("alert-ops", alertOperations),
-            pipz.Effect("update-metrics", updateErrorMetrics),
-        ),
+// Clean up resources on failure
+withCleanup := pipz.NewHandle("inventory-management",
+    pipz.NewSequence[Order](
+        reserveInventory,
+        chargePayment,
+        confirmOrder,
     ),
+    pipz.Effect("cleanup", func(ctx context.Context, err *pipz.Error[Order]) error {
+        if err.InputData.ReservationID != "" {
+            log.Printf("Releasing inventory for failed order %s", err.InputData.ID)
+            inventory.Release(err.InputData.ReservationID)
+        }
+        return nil
+    }),
 )
 
-// Retry based on error type
-smartRetry := pipz.NewHandle("smart-retry",
-    processor,
-    pipz.Apply("check-retry", func(ctx context.Context, err *pipz.Error[Data]) (*pipz.Error[Data], error) {
-        if err.Timeout || isTransient(err.Err) {
-            // Retry transient errors
-            result, retryErr := processor.Process(ctx, err.InputData)
-            if retryErr == nil {
-                // Success on retry!
-                metrics.Increment("retry.success")
-                return err, nil // Original error still returned
-            }
+// Send notifications on failure
+notifying := pipz.NewHandle("payment-alerts",
+    processPayment,
+    pipz.Effect("notify", func(ctx context.Context, err *pipz.Error[Payment]) error {
+        if err.InputData.Amount > 10000 {
+            // Alert on large payment failures
+            alerting.SendHighValuePaymentFailure(err.InputData, err.Err)
         }
-        return err, nil
+        return nil
     }),
 )
 ```
@@ -85,19 +80,20 @@ smartRetry := pipz.NewHandle("smart-retry",
 ## When to Use
 
 Use `Handle` when:
-- You need sophisticated error handling
-- Errors require different handling based on type
-- You want to log/monitor all errors
-- Error recovery is complex
-- You need error-driven workflows
+- You need to perform cleanup on failure (release resources)
+- Errors require logging with additional context
+- You want to send notifications or alerts on failure
+- You need to implement compensation logic
+- You want to collect metrics about failures
+- Different errors require different side effects
 
 ## When NOT to Use
 
 Don't use `Handle` when:
+- You just need to suppress errors (use `Fallback` with identity function)
 - Simple retry is sufficient (use `Retry`)
-- You just need a fallback (use `Fallback`)
-- Errors should stop processing immediately
-- No error handling is needed
+- You want to transform errors into values (use `Fallback`)
+- No cleanup or side effects are needed on failure
 
 ## Error Handler Access
 
@@ -118,53 +114,71 @@ type Error[T any] struct {
 ## Common Patterns
 
 ```go
-// Error monitoring and alerting
-monitoring := pipz.NewHandle("monitored",
-    businessLogic,
-    pipz.NewSequence[*pipz.Error[Order]]("monitor",
-        pipz.Effect("metrics", func(ctx context.Context, err *pipz.Error[Order]) error {
-            metrics.Increment("errors",
-                "path", strings.Join(err.Path, "."),
-                "timeout", fmt.Sprint(err.Timeout),
-            )
-            return nil
-        }),
-        pipz.Mutate("alert-critical",
-            func(ctx context.Context, err *pipz.Error[Order]) bool {
-                return err.InputData.Priority == "critical"
-            },
-            func(ctx context.Context, err *pipz.Error[Order]) *pipz.Error[Order] {
-                alerting.SendPage("Critical order failed", err)
-                return err
-            },
-        ),
+// Resource cleanup pattern
+inventoryCleanup := pipz.NewHandle("order-with-cleanup",
+    pipz.NewSequence[Order](
+        validateOrder,
+        reserveInventory,
+        chargePayment,
+        shipOrder,
     ),
-)
-
-// Error recovery with fallback data
-gracefulDegradation := pipz.NewHandle("degraded",
-    pipz.Apply("fetch-live", fetchLiveData),
-    pipz.Apply("use-cache", func(ctx context.Context, err *pipz.Error[Request]) (*pipz.Error[Request], error) {
-        // Try to serve from cache on error
-        cached, cacheErr := cache.Get(ctx, err.InputData.Key)
-        if cacheErr == nil {
-            log.Printf("Serving stale data due to error: %v", err.Err)
-            metrics.Increment("cache.fallback")
-            // Note: We can't change the pipeline result from here
-            // This is just for side effects
+    pipz.Effect("release-inventory", func(ctx context.Context, err *pipz.Error[Order]) error {
+        if reservation := err.InputData.ReservationID; reservation != "" {
+            log.Printf("Releasing inventory reservation %s after failure", reservation)
+            if releaseErr := inventory.Release(reservation); releaseErr != nil {
+                log.Printf("Failed to release inventory: %v", releaseErr)
+            }
         }
-        return err, nil
+        return nil
     }),
 )
 
-// Circuit breaker pattern
-circuitBreaker := pipz.NewHandle("circuit",
-    service,
-    pipz.Effect("track-failure", func(ctx context.Context, err *pipz.Error[Request]) error {
-        breaker.RecordFailure()
-        if breaker.ShouldOpen() {
-            log.Printf("Circuit breaker opened after error: %v", err.Err)
+// Monitoring and alerting
+monitoredPayment := pipz.NewHandle("payment-monitoring",
+    processPayment,
+    pipz.Effect("monitor", func(ctx context.Context, err *pipz.Error[Payment]) error {
+        metrics.RecordPaymentFailure(err.InputData.Method, err.Err)
+        
+        if err.InputData.Amount > alertThreshold {
+            alerting.NotifyHighValueFailure(err.InputData, err.Err)
         }
+        
+        if err.Timeout {
+            log.Printf("Payment timeout after %v", err.Duration)
+            metrics.RecordTimeout("payment", err.Duration)
+        }
+        
+        return nil
+    }),
+)
+
+// Compensation pattern
+compensatingTransaction := pipz.NewHandle("transfer-with-compensation",
+    pipz.NewSequence[Transfer](
+        debitSource,
+        creditDestination,
+        recordTransaction,
+    ),
+    pipz.Effect("compensate", func(ctx context.Context, err *pipz.Error[Transfer]) error {
+        // Determine how far we got
+        failedAt := err.Path[len(err.Path)-1]
+        
+        switch failedAt {
+        case "recordTransaction":
+            // Both debit and credit succeeded, just logging failed
+            log.Printf("Transaction completed but not recorded: %v", err.InputData)
+            // Try to record in backup system
+            backupLog.Record(err.InputData)
+            
+        case "creditDestination":
+            // Debit succeeded but credit failed - must reverse
+            log.Printf("Reversing debit due to credit failure")
+            if reverseErr := reverseDebit(err.InputData); reverseErr != nil {
+                // Critical - manual intervention needed
+                alerting.CriticalAlert("Failed to reverse debit", err.InputData, reverseErr)
+            }
+        }
+        
         return nil
     }),
 )
@@ -214,37 +228,59 @@ batchErrors := pipz.NewHandle("batch",
 ## Best Practices
 
 ```go
-// Keep error handlers focused
-// GOOD: Specific error handling
-goodHandle := pipz.NewHandle("specific",
-    processor,
-    pipz.Effect("log-timeout", func(ctx context.Context, err *pipz.Error[Data]) error {
-        if err.Timeout {
-            timeoutLogger.Error("Operation timed out", err)
+// Clear separation of concerns
+// GOOD: Handle for cleanup, Fallback for recovery
+goodPattern := pipz.NewFallback("with-recovery",
+    pipz.NewHandle("with-cleanup",
+        riskyOperation,
+        pipz.Effect("cleanup", func(ctx context.Context, err *pipz.Error[Data]) error {
+            // Clean up resources
+            cleanup(err.InputData)
+            return nil
+        }),
+    ),
+    fallbackOperation,  // This provides the recovery
+)
+
+// Resource management
+// GOOD: Always clean up acquired resources
+fileProcessor := pipz.NewHandle("file-processing",
+    pipz.Apply("process", func(ctx context.Context, path string) (Result, error) {
+        file, err := os.Open(path)
+        if err != nil {
+            return Result{}, err
         }
+        defer file.Close()
+        // ... processing ...
+    }),
+    pipz.Effect("cleanup-temp", func(ctx context.Context, err *pipz.Error[string]) error {
+        // Clean up any temporary files created
+        tempPath := filepath.Join(os.TempDir(), filepath.Base(err.InputData))
+        os.Remove(tempPath)
         return nil
     }),
 )
 
-// BAD: Trying to modify pipeline flow from error handler
-badHandle := pipz.NewHandle("bad",
-    processor,
-    pipz.Apply("modify", func(ctx context.Context, err *pipz.Error[Data]) (*pipz.Error[Data], error) {
-        // This CANNOT change the main pipeline's result!
-        // Handle is for side effects only
-        return err, nil
+// Comprehensive monitoring
+// GOOD: Collect all relevant metrics
+monitoredService := pipz.NewHandle("monitored",
+    externalService,
+    pipz.Effect("metrics", func(ctx context.Context, err *pipz.Error[Request]) error {
+        labels := map[string]string{
+            "service": "external",
+            "method":  err.InputData.Method,
+            "error":   errorType(err.Err),
+        }
+        
+        metrics.RecordError(labels)
+        metrics.RecordLatency(err.Duration, labels)
+        
+        if err.Timeout {
+            metrics.RecordTimeout(labels)
+        }
+        
+        return nil
     }),
-)
-
-// Use Handle for observability
-observable := pipz.NewHandle("observable",
-    complexPipeline,
-    pipz.NewSequence[*pipz.Error[Event]]("observe",
-        pipz.Effect("trace", addToDistributedTrace),
-        pipz.Effect("log", structuredLogging),
-        pipz.Effect("metric", recordErrorMetrics),
-        pipz.Effect("alert", checkAlertingRules),
-    ),
 )
 ```
 

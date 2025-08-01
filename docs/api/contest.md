@@ -33,6 +33,7 @@ contest := pipz.NewContest("find-best-rate", condition,
 3. **Early Termination**: Winner cancels remaining processors
 4. **No Winner Handling**: Returns error if no results meet condition
 5. **Clone Safety**: Each processor gets an isolated copy via `Clone()`
+6. **Context Preservation**: Uses `context.WithCancel(ctx)` to preserve trace context while enabling cancellation when winner is found
 
 ## Example: Rate Shopping
 

@@ -5,29 +5,36 @@ import (
 	"sync"
 )
 
-// Concurrent runs all processors in parallel, each with an isolated copy of the input.
-// Concurrent enables parallel execution of independent operations that don't need
-// to coordinate or share results. Each processor receives a deep copy of the input,
+// Concurrent runs all processors in parallel with the original context preserved.
+// Unlike fire-and-forget operations, this connector passes the original context
+// directly to each processor, preserving distributed tracing information, spans,
+// and other context values. Each processor receives a deep copy of the input,
 // ensuring complete isolation. The original input is always returned unchanged.
 //
 // The input type T must implement the Cloner[T] interface to provide efficient,
 // type-safe copying without reflection. This ensures predictable performance and
 // allows types to control their own copying semantics.
 //
-// This pattern is powerful for "fire and forget" operations where you need multiple
-// side effects to happen simultaneously:
-//   - Sending notifications to multiple channels
-//   - Updating multiple external systems
-//   - Parallel logging to different destinations
-//   - Triggering independent workflows
-//   - Warming multiple caches
+// Use Concurrent when you need:
+//   - Distributed tracing to work across concurrent operations
+//   - All processors to respect the original context's cancellation
+//   - To wait for all processors to complete before continuing
+//   - Multiple side effects to happen simultaneously
+//
+// Common use cases:
+//   - Sending traced notifications to multiple channels
+//   - Updating multiple external systems with trace context
+//   - Parallel logging with trace IDs preserved
+//   - Triggering workflows that need distributed tracing
+//   - Operations that must all complete or be canceled together
 //
 // Important characteristics:
 //   - Input type must implement Cloner[T] interface
 //   - All processors run regardless of individual failures
 //   - Original input always returned (processors can't modify it)
-//   - Context cancellation stops all processors
-//   - No result aggregation (use custom logic if needed)
+//   - Context cancellation immediately affects all processors
+//   - Preserves trace context and spans for distributed tracing
+//   - Waits for all processors to complete
 //
 // Example:
 //
@@ -81,10 +88,7 @@ func (c *Concurrent[T]) Process(ctx context.Context, input T) (T, error) {
 	var wg sync.WaitGroup
 	wg.Add(len(processors))
 
-	// Create a cancellable context for all goroutines
-	concurrentCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
+	// Process all with the original context to preserve tracing
 	for _, processor := range processors {
 		go func(p Chainable[T]) {
 			defer wg.Done()
@@ -92,8 +96,8 @@ func (c *Concurrent[T]) Process(ctx context.Context, input T) (T, error) {
 			// Create an isolated copy using the Clone method
 			inputCopy := input.Clone()
 
-			// Process with the copy, ignoring any returns
-			if _, err := p.Process(concurrentCtx, inputCopy); err != nil {
+			// Process with the original context - preserves trace data
+			if _, err := p.Process(ctx, inputCopy); err != nil {
 				// Log or handle error if needed in the future
 				_ = err
 			}
@@ -111,7 +115,7 @@ func (c *Concurrent[T]) Process(ctx context.Context, input T) (T, error) {
 	case <-done:
 		return input, nil
 	case <-ctx.Done():
-		// Context done means we're complete - return current input
+		// Context canceled - return without error as processors run independently
 		return input, nil
 	}
 }

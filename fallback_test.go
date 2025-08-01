@@ -161,6 +161,8 @@ func TestFallback(t *testing.T) {
 	t.Run("New API Methods", func(t *testing.T) {
 		first := Transform("first", func(_ context.Context, n int) int { return n * 2 })
 		second := Transform("second", func(_ context.Context, n int) int { return n * 3 })
+		third := Transform("third", func(_ context.Context, n int) int { return n * 4 })
+		fourth := Transform("fourth", func(_ context.Context, n int) int { return n * 5 })
 
 		fb := NewFallback("test", first, second)
 
@@ -176,10 +178,36 @@ func TestFallback(t *testing.T) {
 		}
 
 		// Test AddFallback
-		third := Transform("third", func(_ context.Context, n int) int { return n * 4 })
 		fb.AddFallback(third)
 		if fb.Len() != 3 {
 			t.Errorf("expected length 3 after AddFallback, got %d", fb.Len())
 		}
+
+		// Test SetProcessors
+		fb.SetProcessors(first, second, third, fourth)
+		if fb.Len() != 4 {
+			t.Errorf("expected length 4 after SetProcessors, got %d", fb.Len())
+		}
+
+		// Test InsertAt
+		fifth := Transform("fifth", func(_ context.Context, n int) int { return n * 6 })
+		fb.InsertAt(2, fifth) // Insert at position 2
+		if fb.Len() != 5 {
+			t.Errorf("expected length 5 after InsertAt, got %d", fb.Len())
+		}
+
+		// Test RemoveAt
+		fb.RemoveAt(2) // Remove the one we just inserted
+		if fb.Len() != 4 {
+			t.Errorf("expected length 4 after RemoveAt, got %d", fb.Len())
+		}
+
+		// Test RemoveAt with invalid index - should panic
+		defer func() {
+			if r := recover(); r == nil {
+				t.Errorf("expected panic for negative index")
+			}
+		}()
+		fb.RemoveAt(-1)
 	})
 }

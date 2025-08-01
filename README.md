@@ -90,12 +90,16 @@ result, err := pipeline.Process(ctx, order)
 
 **Connectors** compose processors:
 - `Sequence` - Run processors in order with dynamic modification
-- `Concurrent` - Run in parallel (requires `Cloner` interface)
+- `Concurrent` - Run in parallel, wait for completion (requires `Cloner` interface)
+- `Scaffold` - Fire-and-forget parallel execution (requires `Cloner` interface)
 - `Switch` - Route based on conditions
 - `Fallback` - Try primary, fall back on error
 - `Race` - First success wins
+- `Contest` - First result meeting condition wins
 - `Retry` / `Backoff` - Retry on failure with optional delays
 - `Timeout` - Enforce time limits
+- `Handle` - Process errors through their own pipeline
+- `Filter` - Conditionally execute processor
 
 **Error Handling**:
 - Rich error context with complete path tracking
