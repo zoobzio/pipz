@@ -31,8 +31,10 @@ Returns a `*Concurrent[T]` that implements `Chainable[T]`.
 - **Parallel execution** - All processors run simultaneously
 - **Data isolation** - Each processor receives a clone of the input
 - **Non-failing** - Individual failures don't stop other processors
-- **Wait for all** - Waits for all processors or context cancellation
+- **Wait for all** - Waits for all processors to complete
 - **Returns original** - Always returns the original input data
+- **Context preservation** - Passes original context to all processors, preserving distributed tracing and context values
+- **Cancellation support** - Parent context cancellation affects all child processors
 
 ## Example
 

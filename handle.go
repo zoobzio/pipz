@@ -7,35 +7,42 @@ import (
 	"time"
 )
 
-// Handle wraps a processor with error handling.
-// Handle allows you to add error handling logic to any processor
-// without changing its behavior. When the wrapped processor fails, the error
-// is passed to the errorHandler for processing (logging, metrics, alerts),
-// but the original error is still returned.
+// Handle provides error observation and handling for processors.
+// When the wrapped processor fails, Handle passes the error to an error handler
+// for processing (e.g., logging, cleanup, notifications), then passes the
+// original error through.
 //
-// This separation of concerns keeps error handling logic out of business logic
-// while ensuring errors are properly observed. It's especially valuable with
-// Concurrent where individual failures shouldn't stop other processors.
+// Common patterns:
+//   - Log errors with additional context
+//   - Clean up resources on failure (e.g., release inventory)
+//   - Send notifications or alerts
+//   - Collect metrics about failures
+//   - Implement compensation logic
 //
-// Common error handling patterns:
-//   - Logging errors with context
-//   - Incrementing error metrics
-//   - Sending alerts for critical failures
-//   - Recording errors for retry analysis
-//   - Triggering compensating actions
-//
-// The error handler itself is a Chainable[*Error[T]], allowing complex
-// error processing chains with full context about the failure.
+// The error handler receives a Chainable[*Error[T]] with full error context,
+// including the input data, error details, and processing path.
 //
 // Example:
 //
-//	handle := pipz.NewHandle(
-//	    "payment-handler",
-//	    riskyProcessor,
-//	    pipz.Effect("log_error", func(ctx context.Context, err *Error[Payment]) error {
-//	        log.Printf("processor failed at %v: %v", err.Path, err.Err)
-//	        metrics.Increment("processor.errors", "path", strings.Join(err.Path, "."))
-//	        return nil  // Error handler errors are ignored
+//	// Log errors with context
+//	logged := pipz.NewHandle(
+//	    "with-logging",
+//	    processOrder,
+//	    pipz.Effect("log", func(ctx context.Context, err *Error[Order]) error {
+//	        log.Printf("order %s failed: %v", err.InputData.ID, err.Err)
+//	        return nil
+//	    }),
+//	)
+//
+//	// Clean up resources on failure
+//	withCleanup := pipz.NewHandle(
+//	    "inventory-cleanup",
+//	    reserveAndCharge,
+//	    pipz.Effect("release", func(ctx context.Context, err *Error[Order]) error {
+//	        if err.InputData.ReservationID != "" {
+//	            inventory.Release(err.InputData.ReservationID)
+//	        }
+//	        return nil
 //	    }),
 //	)
 type Handle[T any] struct {
@@ -61,8 +68,6 @@ func (h *Handle[T]) Process(ctx context.Context, input T) (T, error) {
 	errorHandler := h.errorHandler
 	h.mu.RUnlock()
 
-	// Add this handle to the processing path
-
 	result, err := processor.Process(ctx, input)
 	if err != nil {
 		var pipeErr *Error[T]
@@ -70,22 +75,20 @@ func (h *Handle[T]) Process(ctx context.Context, input T) (T, error) {
 			// Prepend this handle's name to the path
 			pipeErr.Path = append([]Name{h.name}, pipeErr.Path...)
 			// Process the error through the error handler
-			// We ignore the error handler's return values and any errors it produces
-			// Error handler receives the full *Error[T] with context
-			// nolint:errcheck
-			_, _ = errorHandler.Process(ctx, pipeErr)
-			return result, pipeErr
+			_, _ = errorHandler.Process(ctx, pipeErr) //nolint:errcheck // Handler errors are intentionally ignored
+			// Always pass through the original error
+			return result, err
 		}
 		// Handle non-pipeline errors by wrapping them
 		wrappedErr := &Error[T]{
 			Timestamp: time.Now(),
 			InputData: input,
 			Err:       err,
-			Path:      []Name{h.name},
+			Path:      []Name{h.name, processor.Name()},
 		}
-		// nolint:errcheck
-		_, _ = errorHandler.Process(ctx, wrappedErr)
-		return result, wrappedErr
+		_, _ = errorHandler.Process(ctx, wrappedErr) //nolint:errcheck // Handler errors are intentionally ignored
+		// Always pass through the original error
+		return result, err
 	}
 	return result, nil
 }

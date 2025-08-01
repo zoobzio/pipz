@@ -36,12 +36,15 @@ Welcome to the pipz documentation! This guide covers everything you need to know
 #### Connectors
 - [Sequence](./api/sequence.md) - Sequential execution with runtime modification
 - [Concurrent](./api/concurrent.md) - Parallel execution of processors
+- [Scaffold](./api/scaffold.md) - Fire-and-forget parallel execution
 - [Race](./api/race.md) - First successful result wins
+- [Contest](./api/contest.md) - First result meeting condition wins
 - [Fallback](./api/fallback.md) - Try alternatives on error
 - [Retry](./api/retry.md) - Retry with attempts and backoff
 - [Handle](./api/handle.md) - Error observation and recovery
 - [Switch](./api/switch.md) - Conditional routing
 - [Timeout](./api/timeout.md) - Enforce time constraints
+- [Filter](./api/filter.md) - Conditional processor execution
 
 ## Quick Links
 

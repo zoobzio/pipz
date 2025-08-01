@@ -33,6 +33,7 @@ Returns a `*Race[T]` that implements `Chainable[T]`.
 - **Cancellation** - Cancels remaining processors when one succeeds
 - **All fail = error** - Only fails if all processors fail
 - **Returns clone** - Winner's result is returned
+- **Context preservation** - Uses `context.WithCancel(ctx)` to preserve trace context while enabling cancellation of losing processors
 
 ## Example
 

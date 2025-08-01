@@ -12,6 +12,10 @@ import (
 // with conditional selection, allowing you to define what makes a "winner" beyond
 // just being first to complete.
 //
+// Context handling: Contest uses context.WithCancel(ctx) to create a derived context
+// that preserves all parent context values (including trace IDs) while allowing
+// cancellation of other processors when a winner meeting the condition is found.
+//
 // The input type T must implement the Cloner[T] interface to provide efficient,
 // type-safe copying without reflection. This ensures predictable performance and
 // allows types to control their own copying semantics.
@@ -98,6 +102,8 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (T, error) {
 	}
 
 	resultCh := make(chan result, len(processors))
+	// Create a cancellable context to stop other processors when one wins
+	// This derives from the original context, preserving trace data
 	contestCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -107,6 +113,7 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (T, error) {
 			// Create an isolated copy using the Clone method
 			inputCopy := input.Clone()
 
+			// Use contest context which preserves parent values but adds cancellation
 			data, err := p.Process(contestCtx, inputCopy)
 			select {
 			case resultCh <- result{data: data, err: err, idx: idx}:
