@@ -5,6 +5,34 @@ Type-safe, composable data pipelines for Go with zero dependencies.
 Build robust data processing pipelines that are easy to test, reason about, and maintain.
 
 ```go
+// Define your processing functions
+validatePayment := func(_ context.Context, p Payment) (Payment, error) {
+    if p.Amount <= 0 { return p, errors.New("invalid amount") }
+    return p, nil
+}
+
+checkFraud := func(_ context.Context, p Payment) (Payment, error) {
+    // Fraud detection logic here
+    return p, nil
+}
+
+chargeStripe := func(_ context.Context, p Payment) (Payment, error) {
+    // Stripe API call here
+    p.TransactionID = "stripe_" + generateID()
+    return p, nil
+}
+
+chargePayPal := func(_ context.Context, p Payment) (Payment, error) {
+    // PayPal API call here  
+    p.TransactionID = "paypal_" + generateID()
+    return p, nil
+}
+
+emailReceipt := func(_ context.Context, p Payment) error {
+    // Send email receipt
+    return sendEmail(p.Email, "Receipt", p.TransactionID)
+}
+
 // Build a payment processing pipeline in one line
 pipeline := pipz.NewSequence("payment-flow",
     pipz.Apply("validate", validatePayment),
@@ -20,10 +48,13 @@ pipeline := pipz.NewSequence("payment-flow",
 result, err := pipeline.Process(ctx, payment)
 if err != nil {
     // Rich error context shows exactly where it failed
-    fmt.Printf("Failed at %s after %v: %v\n", 
-        err.Path,      // ["payment-flow", "payment-gateway", "charge_primary"]
-        err.Duration,  // 230ms
-        err.Err)       // stripe: insufficient funds
+    var pipeErr *pipz.Error[Payment]
+    if errors.As(err, &pipeErr) {
+        fmt.Printf("Failed at %s after %v: %v\n", 
+            strings.Join(pipeErr.Path, "->"), // "payment-flow->payment-gateway->charge_primary"
+            pipeErr.Duration,                 // 230ms
+            pipeErr.Err)                     // stripe: insufficient funds
+    }
 }
 ```
 
@@ -50,33 +81,50 @@ Requirements: Go 1.21+ (for generics)
 ## Quick Example
 
 ```go
-import "github.com/zoobzio/pipz"
+package main
 
-// Define processors
-validate := pipz.Apply("validate", func(ctx context.Context, order Order) (Order, error) {
-    if order.Total <= 0 {
-        return order, errors.New("invalid order total")
-    }
-    return order, nil
-})
+import (
+    "context"
+    "errors"
+    "time"
+    "github.com/zoobzio/pipz"
+)
 
-enrichOrder := pipz.Transform("enrich", func(ctx context.Context, order Order) Order {
-    order.ProcessedAt = time.Now()
-    return order
-})
-
-// Compose into pipeline (single line)
-pipeline := pipz.NewSequence("order-processing", validate, enrichOrder)
-
-// Or build dynamically
-pipeline := pipz.NewSequence[Order]("order-processing")
-if config.ValidateOrders {
-    pipeline.Register(validate)
+type Order struct {
+    ID          string
+    Total       float64
+    ProcessedAt time.Time
 }
-pipeline.Register(enrichOrder)
 
-// Process data
-result, err := pipeline.Process(ctx, order)
+func main() {
+    ctx := context.Background()
+    
+    // Define processors
+    validate := pipz.Apply("validate", func(ctx context.Context, order Order) (Order, error) {
+        if order.Total <= 0 {
+            return order, errors.New("invalid order total")
+        }
+        return order, nil
+    })
+
+    enrichOrder := pipz.Transform("enrich", func(ctx context.Context, order Order) Order {
+        order.ProcessedAt = time.Now()
+        return order
+    })
+
+    // Compose into pipeline (single line)
+    pipeline := pipz.NewSequence("order-processing", validate, enrichOrder)
+
+    // Process data
+    order := Order{ID: "ORDER-123", Total: 99.99}
+    result, err := pipeline.Process(ctx, order)
+    if err != nil {
+        // Handle error with full context
+        panic(err)
+    }
+    // result.ProcessedAt is now set
+    _ = result
+}
 ```
 
 ## Core Concepts
@@ -119,24 +167,20 @@ result, err := pipeline.Process(ctx, order)
 - [Introduction](./docs/introduction.md) - Why pipz and core philosophy
 - [Quick Start Guide](./docs/quick-start.md) - Build your first pipeline
 - [Concepts](./docs/concepts/processors.md) - Deep dive into processors and connectors
-- [Examples Walkthrough](./docs/examples/payment-processing.md) - Learn from real implementations
-- [API Reference](./docs/api/processors.md) - Complete API documentation
+- [Examples](./examples/) - Real-world implementations and patterns
+- [API Reference](./docs/api/) - Complete API documentation
 
 ## Examples
 
 The [`examples/`](./examples/) directory contains complete, runnable examples:
 
-- **[Payment Processing](./examples/payment/)** - Multi-provider payments with smart failover
-- **[ETL Pipeline](./examples/etl/)** - Extract, transform, load with error recovery
-- **[Event Processing](./examples/events/)** - Event routing and deduplication
-- **[AI/LLM Integration](./examples/ai/)** - AI service integration with caching
-- **[Middleware](./examples/middleware/)** - HTTP middleware patterns
-- **[Content Moderation](./examples/moderation/)** - Multi-stage content filtering
-- **[Webhook Router](./examples/webhook/)** - Provider-agnostic webhook handling
-- **[Validation](./examples/validation/)** - Complex business rule validation
-- **[Security](./examples/security/)** - Authentication and authorization pipelines
+- **[Order Processing](./examples/order-processing/)** - E-commerce order processing from MVP to enterprise scale
+- **[User Profile Update](./examples/user-profile-update/)** - Complex multi-step operations with external services
+- **[Customer Support](./examples/customer-support/)** - Intelligent ticket routing and prioritization
+- **[Event Orchestration](./examples/event-orchestration/)** - Event routing with compliance and safety measures
+- **[Shipping Fulfillment](./examples/shipping-fulfillment/)** - Multi-provider shipping with smart carrier selection
 
-Each example includes comprehensive tests showing usage patterns.
+Each example includes comprehensive tests, detailed documentation, and demonstrates real-world patterns.
 
 ## Performance
 
