@@ -26,25 +26,36 @@ pipz provides:
 
 pipz follows these principles:
 
-1. **Everything is a Processor**: All components implement the same simple interface
-2. **Composition over Configuration**: Build complex behavior by combining simple pieces
-3. **Type Safety First**: No `interface{}`, no runtime type assertions
-4. **Errors are Values**: Explicit error handling at every step
-5. **Context Awareness**: Full support for cancellation and timeouts
+1. **Interface-First Design**: Everything implements `Chainable[T]` - a single, simple interface
+2. **Your Code, Your Way**: Implement the interface directly or use our convenience wrappers
+3. **Composition over Configuration**: Build complex behavior by combining simple pieces
+4. **Type Safety First**: No `interface{}`, no runtime type assertions
+5. **Errors are Values**: Explicit error handling at every step
+6. **Context Awareness**: Full support for cancellation and timeouts
 
 ## Key Concepts
 
-### Processors
-The atomic units that transform data:
+### The Chainable Interface
+The foundation of pipz - everything implements this simple interface:
 ```go
 type Chainable[T any] interface {
-    Process(context.Context, T) (T, *Error[T])
-    Name() Name
+    Process(context.Context, T) (T, error)
+    Name() string
 }
 ```
 
+Any type implementing this interface can be used in a pipeline. This gives you complete flexibility:
+- Implement it directly for custom processors
+- Use the provided wrapper functions for common patterns
+- Mix both approaches in the same pipeline
+
+### Processors
+The atomic units that transform data. You can create them by:
+1. **Direct Implementation**: Implement `Chainable[T]` for full control
+2. **Wrapper Functions**: Use `Transform`, `Apply`, `Effect`, etc. for convenience
+
 ### Connectors
-Mutable components that combine processors into more complex behaviors:
+Mutable components that combine any `Chainable[T]` implementations into more complex behaviors:
 - `NewSequence`: Run processors in order
 - `NewSwitch`: Route to different processors based on conditions
 - `NewConcurrent`: Run multiple processors in parallel

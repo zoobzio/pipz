@@ -2,6 +2,8 @@
 
 Creates a processor that conditionally modifies data based on a predicate.
 
+> **Note**: Mutate is a convenience wrapper. You can always implement `Chainable[T]` directly for more control or stateful processors.
+
 ## Function Signature
 
 ```go

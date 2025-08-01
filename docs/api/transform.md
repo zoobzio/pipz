@@ -2,6 +2,8 @@
 
 Creates a processor from a pure transformation function that cannot fail.
 
+> **Note**: Transform is a convenience wrapper. You can always implement `Chainable[T]` directly for more control or stateful processors.
+
 ## Function Signature
 
 ```go
