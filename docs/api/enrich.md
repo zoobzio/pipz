@@ -2,6 +2,8 @@
 
 Creates a processor that attempts to enhance data but doesn't fail the pipeline on error.
 
+> **Note**: Enrich is a convenience wrapper. You can always implement `Chainable[T]` directly for more control or stateful processors.
+
 ## Function Signature
 
 ```go

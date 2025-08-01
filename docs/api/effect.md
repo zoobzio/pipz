@@ -2,6 +2,8 @@
 
 Creates a processor that performs side effects without modifying the input data.
 
+> **Note**: Effect is a convenience wrapper. You can always implement `Chainable[T]` directly for more control or stateful processors.
+
 ## Function Signature
 
 ```go

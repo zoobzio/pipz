@@ -2,9 +2,9 @@
 
 Processors are the fundamental building blocks of pipz. Every data transformation, validation, or side effect is implemented as a processor.
 
-## The Processor Interface
+## The Power of the Chainable Interface
 
-At its core, a processor is anything that implements this simple interface:
+At its core, pipz is built on a single interface:
 
 ```go
 type Chainable[T any] interface {
@@ -13,16 +13,64 @@ type Chainable[T any] interface {
 }
 ```
 
-This means a processor:
-- Takes a context and data of type T
-- Returns transformed data of the same type T
-- Can return an error to stop the pipeline
+**This is the key to pipz's flexibility**: Any type that implements this interface can be used in a pipeline. This means you have complete freedom in how you structure your processors:
 
-When used in a pipeline, errors are automatically wrapped with rich context including the path through processors, timing information, and the input data that caused the failure.
+### Direct Implementation
 
-## Processor Adapters
+You can implement `Chainable[T]` directly for custom processors:
 
-pipz provides several adapters to create processors from functions:
+```go
+// Custom rate limiter
+type RateLimiter[T any] struct {
+    name    string
+    limiter *rate.Limiter
+}
+
+func (r *RateLimiter[T]) Process(ctx context.Context, data T) (T, error) {
+    if err := r.limiter.Wait(ctx); err != nil {
+        return data, fmt.Errorf("rate limit: %w", err)
+    }
+    return data, nil
+}
+
+func (r *RateLimiter[T]) Name() string { return r.name }
+
+// Custom circuit breaker
+type CircuitBreaker[T any] struct {
+    name    string
+    breaker *gobreaker.CircuitBreaker
+}
+
+func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (T, error) {
+    result, err := cb.breaker.Execute(func() (interface{}, error) {
+        // Your processing logic here
+        return data, nil
+    })
+    if err != nil {
+        return data, err
+    }
+    return result.(T), nil
+}
+
+func (cb *CircuitBreaker[T]) Name() string { return cb.name }
+```
+
+### Using in Pipelines
+
+Custom implementations work seamlessly with built-in processors:
+
+```go
+pipeline := pipz.NewSequence("api-pipeline",
+    pipz.Apply("validate", validateFunc),           // Built-in wrapper
+    &RateLimiter[Request]{...},                    // Custom implementation
+    &CircuitBreaker[Request]{...},                 // Custom implementation
+    pipz.Transform("format", formatFunc),          // Built-in wrapper
+)
+```
+
+## Processor Wrappers (Optional Conveniences)
+
+While you can always implement `Chainable[T]` directly, pipz provides wrapper functions for common patterns. These wrappers handle error wrapping and provide a consistent API:
 
 ### Transform
 
@@ -142,29 +190,21 @@ Use Enrich when:
 - External services might be unavailable
 - You don't want to stop processing on failure
 
-## Creating Custom Processors
+## When to Use Each Approach
 
-You can implement the Chainable interface directly for complex processors:
+### Use Direct Implementation When:
+- You need stateful processors (rate limiters, circuit breakers, caches)
+- You're wrapping existing libraries or services
+- You need fine-grained control over error handling
+- You want to encapsulate complex logic with its own methods
 
-```go
-type RateLimiter[T any] struct {
-    name    string
-    limiter *rate.Limiter
-}
+### Use Wrapper Functions When:
+- You have simple, stateless transformations
+- You want the convenience of automatic error wrapping
+- You're prototyping or building quick pipelines
+- Your logic fits naturally into a single function
 
-func (r *RateLimiter[T]) Process(ctx context.Context, data T) (T, error) {
-    if err := r.limiter.Wait(ctx); err != nil {
-        return data, fmt.Errorf("rate limit: %w", err)
-    }
-    return data, nil
-}
-
-// Usage
-limiter := &RateLimiter[Order]{
-    name:    "order_limiter",
-    limiter: rate.NewLimiter(rate.Every(time.Second), 100),
-}
-```
+Both approaches are first-class citizens in pipz - choose based on your needs, not convention.
 
 
 ## Concurrent Processing Considerations

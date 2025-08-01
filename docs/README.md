@@ -18,6 +18,7 @@ Welcome to the pipz documentation! This guide covers everything you need to know
 
 ### Guides
 - [Building Your First Pipeline](./guides/first-pipeline.md)
+- [Common Patterns](./guides/patterns.md) - Rate limiters, circuit breakers, and more
 - [Error Recovery Patterns](./guides/error-recovery.md)
 - [Performance Optimization](./guides/performance.md)
 - [Testing Pipelines](./guides/testing.md)
