@@ -4,12 +4,37 @@ This directory contains real-world examples demonstrating how pipz solves common
 
 ## Examples
 
-1. **[User Profile Update](./user-profile-update/)**
+1. **[Order Processing](./order-processing/)**
+   - Production e-commerce order processing system
+   - Evolution from MVP to enterprise scale
+   - Payment processing with fraud detection
+   - Inventory management and notifications
+   - Compensation patterns and error recovery
+
+2. **[User Profile Update](./user-profile-update/)**
    - Handle complex multi-step operations with external services
    - Image processing with fallbacks
    - Content moderation with graceful degradation
    - Distributed cache invalidation
    - Transactional-like behavior with compensation
+
+3. **[Customer Support](./customer-support/)**
+   - Intelligent ticket routing and prioritization
+   - AI-powered classification and sentiment analysis
+   - Escalation handling and SLA management
+   - Multi-channel support integration
+
+4. **[Event Orchestration](./event-orchestration/)**
+   - Complex event routing and processing
+   - Compliance and safety measures
+   - Maintenance window handling
+   - Parallel event distribution
+
+5. **[Shipping Fulfillment](./shipping-fulfillment/)**
+   - Multi-provider shipping integration
+   - Smart carrier selection based on criteria
+   - Rate shopping and optimization
+   - Tracking and status updates
 
 ## Philosophy
 
@@ -31,7 +56,13 @@ Each example includes:
 - Benchmarks comparing with traditional approaches
 
 ```bash
-cd user-profile-update
+# Run any example
+cd order-processing
 go test -v
 go run .
+
+# Most examples support different scenarios or modes
+cd order-processing
+go run . -sprint=1  # Show MVP version
+go run . -sprint=11 # Show full production version
 ```
