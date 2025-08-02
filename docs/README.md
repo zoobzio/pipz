@@ -46,6 +46,8 @@ Welcome to the pipz documentation! This guide covers everything you need to know
 - [Switch](./api/switch.md) - Conditional routing
 - [Timeout](./api/timeout.md) - Enforce time constraints
 - [Filter](./api/filter.md) - Conditional processor execution
+- [RateLimiter](./api/ratelimiter.md) - Token bucket rate limiting
+- [CircuitBreaker](./api/circuitbreaker.md) - Circuit breaker pattern
 
 ## Quick Links
 

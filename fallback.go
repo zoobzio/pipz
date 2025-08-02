@@ -30,10 +30,10 @@ import (
 //	    paypalProcessor,       // Fall back to PayPal on error
 //	    squareProcessor,       // Finally try Square
 //	)
-type Fallback[T any] struct { //nolint:govet // field alignment acceptable
-	mu         sync.RWMutex
-	processors []Chainable[T]
+type Fallback[T any] struct {
 	name       Name
+	processors []Chainable[T]
+	mu         sync.RWMutex
 }
 
 // NewFallback creates a new Fallback connector that tries processors in order.

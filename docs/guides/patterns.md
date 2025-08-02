@@ -4,111 +4,69 @@ This guide demonstrates powerful patterns you can build with pipz by leveraging 
 
 ## Infrastructure Patterns
 
-### Rate Limiter
+### Rate Limiter (Built-in Connector)
 
-Control the rate of processing to protect downstream services:
+Control the rate of processing to protect downstream services. pipz provides a built-in RateLimiter connector:
 
 ```go
-import "golang.org/x/time/rate"
+// 100 requests per second with burst of 10
+rateLimiter := pipz.NewRateLimiter("api-rate-limit", 100, 10)
 
-type RateLimiter[T any] struct {
-    name    string
-    limiter *rate.Limiter
-}
+// Configure mode: "wait" (default) or "drop"
+rateLimiter.SetMode("drop") // Return error immediately if rate exceeded
 
-func (r *RateLimiter[T]) Process(ctx context.Context, data T) (T, error) {
-    if err := r.limiter.Wait(ctx); err != nil {
-        return data, fmt.Errorf("rate limit exceeded: %w", err)
-    }
-    return data, nil
-}
-
-func (r *RateLimiter[T]) Name() string { return r.name }
-
-// Usage: 100 requests per second with burst of 10
-rateLimiter := &RateLimiter[Order]{
-    name:    "api-rate-limit",
-    limiter: rate.NewLimiter(rate.Every(time.Second/100), 10),
-}
-
+// Use in a pipeline
 pipeline := pipz.NewSequence("throttled-api",
     rateLimiter,
     pipz.Apply("call-api", callExternalAPI),
 )
+
+// Runtime configuration
+rateLimiter.SetRate(200)    // Update to 200/sec
+rateLimiter.SetBurst(20)    // Update burst capacity
 ```
 
-### Circuit Breaker
+The RateLimiter uses a token bucket algorithm and provides:
+- Two modes: "wait" (blocks until allowed) or "drop" (fails immediately)
+- Runtime reconfiguration of rate and burst
+- Context-aware cancellation during waits
+- Thread-safe operation
 
-Prevent cascading failures by stopping requests to failing services:
+### Circuit Breaker (Built-in Connector)
+
+Prevent cascading failures by stopping requests to failing services. pipz provides a built-in CircuitBreaker connector:
 
 ```go
-type CircuitBreaker[T any] struct {
-    name          string
-    failureThreshold int
-    resetTimeout     time.Duration
-    
-    mu           sync.Mutex
-    failures     int
-    lastFailTime time.Time
-    state        string // "closed", "open", "half-open"
-}
+// Open circuit after 5 failures, try recovery after 30 seconds
+breaker := pipz.NewCircuitBreaker("api-breaker", apiProcessor, 5, 30*time.Second)
 
-func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (T, error) {
-    cb.mu.Lock()
-    
-    // Check if we should reset
-    if cb.state == "open" && time.Since(cb.lastFailTime) > cb.resetTimeout {
-        cb.state = "half-open"
-        cb.failures = 0
-    }
-    
-    if cb.state == "open" {
-        cb.mu.Unlock()
-        return data, fmt.Errorf("circuit breaker is open")
-    }
-    
-    cb.mu.Unlock()
-    
-    // Try the operation
-    result, err := cb.executeOperation(ctx, data)
-    
-    cb.mu.Lock()
-    defer cb.mu.Unlock()
-    
-    if err != nil {
-        cb.failures++
-        cb.lastFailTime = time.Now()
-        
-        if cb.failures >= cb.failureThreshold {
-            cb.state = "open"
-        }
-        return data, err
-    }
-    
-    // Success - reset on half-open
-    if cb.state == "half-open" {
-        cb.state = "closed"
-        cb.failures = 0
-    }
-    
-    return result, nil
-}
+// Configure thresholds
+breaker.SetFailureThreshold(10)     // Failures to open
+breaker.SetSuccessThreshold(3)      // Successes to close from half-open
+breaker.SetResetTimeout(time.Minute) // Recovery timeout
 
-func (cb *CircuitBreaker[T]) Name() string { return cb.name }
+// Check state
+state := breaker.GetState() // "closed", "open", or "half-open"
+
+// Manual reset if needed
+breaker.Reset()
 
 // Combine with retry for resilient API calls
 resilientAPI := pipz.NewSequence("resilient-api",
-    &CircuitBreaker[Request]{
-        name:             "api-breaker",
-        failureThreshold: 5,
-        resetTimeout:     30 * time.Second,
-    },
+    breaker,
     pipz.NewRetry("retry-api", 
         pipz.Apply("call-api", callAPI),
         3,
     ),
 )
 ```
+
+The CircuitBreaker implements the standard circuit breaker pattern with:
+- Three states: closed (normal), open (blocking), half-open (testing)
+- Automatic recovery attempts after timeout
+- Configurable failure and success thresholds
+- Thread-safe state management
+- Manual reset capability
 
 ### Bulkhead Pattern
 
@@ -347,13 +305,10 @@ premiumFeatures := pipz.NewFilter("premium-only",
 Build a complete API gateway with pipz:
 
 ```go
-// API Gateway pipeline
+// API Gateway pipeline using built-in connectors
 apiGateway := pipz.NewSequence("api-gateway",
     // Rate limiting per client
-    &RateLimiter[Request]{
-        name:    "client-rate-limit",
-        limiter: getClientLimiter(request.ClientID),
-    },
+    pipz.NewRateLimiter("client-rate-limit", 100, 20), // 100/sec, burst 20
     
     // Authentication
     pipz.Apply("authenticate", authenticateRequest),
@@ -365,23 +320,20 @@ apiGateway := pipz.NewSequence("api-gateway",
     pipz.Apply("validate", validateRequest),
     
     // Circuit breaker for backend
-    &CircuitBreaker[Request]{
-        name:             "backend-breaker",
-        failureThreshold: 10,
-        resetTimeout:     time.Minute,
-    },
-    
-    // Route to backend with timeout
-    pipz.NewTimeout("backend-call",
+    pipz.NewCircuitBreaker("backend-breaker",
         pipz.NewSwitch("route", routeToBackend).
             AddRoute("users", userService).
             AddRoute("orders", orderService).
             AddRoute("products", productService),
-        30*time.Second,
+        10,              // Open after 10 failures
+        time.Minute,     // Try recovery after 1 minute
     ),
     
-    // Response transformation
-    pipz.Transform("format-response", formatResponse),
+    // Timeout wrapper
+    pipz.NewTimeout("deadline", 
+        pipz.Transform("format-response", formatResponse),
+        30*time.Second,
+    ),
 )
 
 // With error handling

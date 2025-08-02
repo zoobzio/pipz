@@ -50,11 +50,11 @@ import (
 //
 // The Filter connector is thread-safe and can be safely used in concurrent scenarios.
 // The condition function and processor can be updated at runtime for dynamic behavior.
-type Filter[T any] struct { //nolint:govet // field alignment acceptable
-	mu        sync.RWMutex
-	condition func(context.Context, T) bool
+type Filter[T any] struct {
 	processor Chainable[T]
+	condition func(context.Context, T) bool
 	name      Name
+	mu        sync.RWMutex
 }
 
 // NewFilter creates a new Filter connector with the given condition and processor.

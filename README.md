@@ -168,6 +168,8 @@ func main() {
 - `Timeout` - Enforce time limits
 - `Handle` - Process errors through their own pipeline
 - `Filter` - Conditionally execute processor
+- `RateLimiter` - Token bucket rate limiting for resource protection
+- `CircuitBreaker` - Prevent cascading failures with circuit breaker pattern
 
 **Error Handling**:
 - Rich error context with complete path tracking
