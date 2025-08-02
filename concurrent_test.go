@@ -11,8 +11,8 @@ import (
 
 // TestData implements Cloner for testing.
 type TestData struct {
+	Counter *int32
 	Value   int
-	Counter *int32 // Shared counter for testing
 }
 
 func (t TestData) Clone() TestData {

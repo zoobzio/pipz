@@ -78,6 +78,20 @@ Minimal overhead when no error handling is needed.
 
 Timeout overhead is primarily from context and timer management.
 
+#### RateLimiter
+- **No Rate Limiting**: 1,050 ns/op, 11 B/op, 0 allocations
+- **With Rate Limiting (Wait Mode)**: 99,179 ns/op, 25 B/op, 0 allocations
+- **Drop Mode (Rate Exceeded)**: 475 ns/op, 151 B/op, 3 allocations
+
+Rate limiting overhead is primarily from token bucket algorithm when waiting for tokens. Drop mode fails fast with minimal overhead.
+
+#### CircuitBreaker
+- **Closed State (Normal)**: 76 ns/op, 0 B/op, 0 allocations
+- **Open State (Blocking)**: 408 ns/op, 152 B/op, 4 allocations
+- **State Transitions**: ~612μs (includes actual delays for state management)
+
+Circuit breaker has minimal overhead in closed state, with fast failure in open state.
+
 ## Performance Characteristics
 
 ### Strengths
@@ -101,6 +115,9 @@ For typical use cases:
 - **Concurrent processing (3 operations)**: ~3.6 μs total
 - **Error handling with fallback**: ~590 ns on error path
 - **Conditional routing**: ~190 ns per decision
+- **Rate limiting (within limits)**: ~1.05 μs overhead
+- **Circuit breaker (healthy service)**: ~76 ns overhead
+- **Resilient pipeline (rate limit + circuit break + retry)**: ~1.2 μs when healthy
 
 ### Memory Efficiency
 
@@ -117,6 +134,9 @@ The library demonstrates excellent memory efficiency:
 3. **For parallelism**: Concurrent/Race are efficient for I/O-bound operations
 4. **For routing**: Switch is highly efficient even with many routes
 5. **For resilience**: Retry/Backoff/Fallback add predictable, acceptable overhead
+6. **For rate limiting**: RateLimiter adds ~1μs overhead with excellent burst handling
+7. **For circuit breaking**: CircuitBreaker adds only ~76ns overhead in healthy state
+8. **For combined protection**: Layering resilience patterns (rate limit + circuit break + retry) adds ~1.2μs total overhead
 
 ## Conclusion
 

@@ -589,8 +589,8 @@ func TestSequenceModification(t *testing.T) {
 		Sequence.Register(makeTransform(p0, "_0"))
 
 		tests := []struct {
-			name    string
 			fn      func() error
+			name    string
 			wantErr bool
 		}{}
 

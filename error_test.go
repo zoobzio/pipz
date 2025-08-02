@@ -125,8 +125,8 @@ func TestError(t *testing.T) {
 
 	t.Run("IsTimeout", func(t *testing.T) {
 		tests := []struct {
-			name     string
 			err      error
+			name     string
 			timeout  bool
 			expected bool
 		}{
@@ -174,8 +174,8 @@ func TestError(t *testing.T) {
 
 	t.Run("IsCanceled", func(t *testing.T) {
 		tests := []struct {
-			name     string
 			err      error
+			name     string
 			canceled bool
 			expected bool
 		}{

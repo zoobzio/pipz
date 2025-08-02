@@ -609,35 +609,185 @@ func handleError(ctx context.Context, failure FailedOrder) (FailedOrder, error) 
 }
 ```
 
-### Strategy: Circuit Breaker per Dependency
+### Strategy: Rate Limiting and Circuit Breaking
+
+#### Rate Limiting Best Practices
+
+Use `RateLimiter` to protect downstream services and respect API limits:
 
 ```go
-var (
-    stripeBreaker = NewCircuitBreaker("stripe", 5, 30*time.Second)
-    dbBreaker     = NewCircuitBreaker("database", 10, 1*time.Minute)
-    cacheBreaker  = NewCircuitBreaker("cache", 20, 10*time.Second)
+// Pattern: Layer rate limits (global -> service -> endpoint)
+globalLimiter := pipz.NewRateLimiter("global-limit", 10000, 1000)
+serviceLimiter := pipz.NewRateLimiter("stripe-limit", 100, 20)  // Stripe's actual limits
+endpointLimiter := pipz.NewRateLimiter("charges-limit", 50, 10)
+
+pipeline := pipz.NewSequence("payment-pipeline",
+    globalLimiter,      // Global system limit
+    serviceLimiter,     // Per-service limit
+    endpointLimiter,    // Per-endpoint limit
+    pipz.Apply("charge", makePayment),
 )
 
-pipeline := pipz.NewSequence("circuit-breaker-pipeline",
-    // Wrap external calls with circuit breakers
-    pipz.Apply("load_from_cache", func(ctx context.Context, id string) (Order, error) {
-        return cacheBreaker.Do(ctx, func() (Order, error) {
-            return cache.Get(ctx, id)
-        })
-    }),
+// Pattern: Dynamic rate adjustment based on conditions
+func adjustRateLimit(limiter *pipz.RateLimiter[Request], config Config) {
+    if config.OffPeakHours {
+        limiter.SetRate(1000)  // Higher rate during off-peak
+    } else {
+        limiter.SetRate(100)   // Lower rate during peak
+    }
     
-    pipz.Apply("charge_payment", func(ctx context.Context, order Order) (Order, error) {
-        return stripeBreaker.Do(ctx, func() (Order, error) {
-            return stripe.Charge(ctx, order)
-        })
-    }),
-    
-    pipz.Apply("save_order", func(ctx context.Context, order Order) (Order, error) {
-        return dbBreaker.Do(ctx, func() (Order, error) {
-            return db.Save(ctx, order)
-        })
-    }),
+    if config.PremiumTier {
+        limiter.SetMode("wait")  // Wait for premium users
+    } else {
+        limiter.SetMode("drop")  // Fail fast for basic users
+    }
+}
+
+// Pattern: Per-user rate limiting with Switch
+userLimiter := pipz.NewSwitch("user-rate-limit",
+    func(ctx context.Context, req Request) string {
+        return getUserTier(req.UserID)
+    },
+).
+AddRoute("premium", pipz.NewRateLimiter("premium-rate", 1000, 100)).
+AddRoute("standard", pipz.NewRateLimiter("standard-rate", 100, 10)).
+AddRoute("free", pipz.NewRateLimiter("free-rate", 10, 1))
+```
+
+#### Circuit Breaker Best Practices
+
+Use `CircuitBreaker` to prevent cascade failures and give services time to recover:
+
+```go
+// Pattern: Circuit breaker per external dependency
+stripeBreaker := pipz.NewCircuitBreaker("stripe-breaker",
+    pipz.Apply("stripe-charge", chargeStripe),
+    5,                    // Open after 5 failures
+    30*time.Second,       // Try recovery after 30s
 )
+
+dbBreaker := pipz.NewCircuitBreaker("db-breaker",
+    pipz.Apply("db-save", saveToDatabase),
+    10,                   // More tolerant for internal services
+    time.Minute,          // Longer recovery time
+)
+
+// Pattern: Combine with rate limiting for comprehensive protection
+resilientAPI := pipz.NewSequence("resilient-api",
+    pipz.NewRateLimiter("api-rate", 100, 20),  // Rate limit first
+    pipz.NewCircuitBreaker("api-breaker",      // Then circuit break
+        pipz.NewRetry("api-retry",             // With retry inside
+            pipz.Apply("api-call", callExternalAPI),
+            3,
+        ),
+        5, 30*time.Second,
+    ),
+)
+
+// Pattern: Graduated thresholds based on service type
+func createCircuitBreaker(service string, serviceType ServiceType) *pipz.CircuitBreaker[Request] {
+    switch serviceType {
+    case ServiceTypeExternal:
+        // External services: fail fast, longer recovery
+        return pipz.NewCircuitBreaker(service+"-breaker", processor, 3, 2*time.Minute)
+    case ServiceTypeInternal:
+        // Internal services: more tolerant, shorter recovery
+        return pipz.NewCircuitBreaker(service+"-breaker", processor, 10, 30*time.Second)
+    case ServiceTypeCritical:
+        // Critical services: very tolerant, quick recovery attempts
+        return pipz.NewCircuitBreaker(service+"-breaker", processor, 20, 10*time.Second)
+    default:
+        return pipz.NewCircuitBreaker(service+"-breaker", processor, 5, time.Minute)
+    }
+}
+
+// Pattern: Monitor and adjust circuit breakers
+func monitorCircuits(breakers map[string]*pipz.CircuitBreaker[Request]) {
+    ticker := time.NewTicker(30 * time.Second)
+    defer ticker.Stop()
+    
+    for range ticker.C {
+        for name, breaker := range breakers {
+            state := breaker.GetState()
+            metrics.Gauge("circuit.state", stateToValue(state), "service", name)
+            
+            switch state {
+            case "open":
+                log.Warn("Circuit breaker open", "service", name)
+                // Consider alerting operations team
+            case "half-open":
+                log.Info("Circuit breaker testing recovery", "service", name)
+            }
+        }
+    }
+}
+```
+
+#### Combined Resilience Patterns
+
+```go
+// Pattern: Complete resilience stack
+func createResilientProcessor(name string, processor pipz.Chainable[Request]) pipz.Chainable[Request] {
+    return pipz.NewSequence(name+"-resilient",
+        // 1. Rate limiting (protect downstream)
+        pipz.NewRateLimiter(name+"-rate", 100, 20),
+        
+        // 2. Timeout (bound operation time)
+        pipz.NewTimeout(name+"-timeout",
+            
+            // 3. Circuit breaker (prevent cascade failures)
+            pipz.NewCircuitBreaker(name+"-breaker",
+                
+                // 4. Retry (handle transient failures)
+                pipz.NewRetry(name+"-retry", processor, 3),
+                
+                5, 30*time.Second,
+            ),
+            10*time.Second,
+        ),
+    )
+}
+
+// Pattern: Service mesh style protection
+serviceCall := pipz.NewFallback("service-mesh",
+    // Primary service with full protection
+    createResilientProcessor("primary", primaryService),
+    
+    // Fallback service with lighter protection
+    pipz.NewCircuitBreaker("fallback-breaker",
+        pipz.NewTimeout("fallback-timeout", fallbackService, 5*time.Second),
+        3, 10*time.Second,
+    ),
+)
+```
+
+#### Configuration Best Practices
+
+```go
+// Pattern: Configuration-driven circuit breaker settings
+type CircuitConfig struct {
+    FailureThreshold int           `yaml:"failure_threshold"`
+    SuccessThreshold int           `yaml:"success_threshold"`
+    ResetTimeout     time.Duration `yaml:"reset_timeout"`
+}
+
+type RateConfig struct {
+    Rate float64 `yaml:"rate"`
+    Burst int    `yaml:"burst"`
+    Mode string  `yaml:"mode"`
+}
+
+func configureConnectors(breaker *pipz.CircuitBreaker[Request], limiter *pipz.RateLimiter[Request], cfg Config) {
+    // Circuit breaker configuration
+    breaker.SetFailureThreshold(cfg.Circuit.FailureThreshold).
+            SetSuccessThreshold(cfg.Circuit.SuccessThreshold).
+            SetResetTimeout(cfg.Circuit.ResetTimeout)
+    
+    // Rate limiter configuration
+    limiter.SetRate(cfg.Rate.Rate).
+            SetBurst(cfg.Rate.Burst).
+            SetMode(cfg.Rate.Mode)
+}
 ```
 
 
@@ -653,9 +803,12 @@ pipeline := pipz.NewSequence("circuit-breaker-pipeline",
 ### Resilience
 - [ ] Timeouts on all external calls
 - [ ] Retry logic for transient failures
-- [ ] Circuit breakers for dependencies
+- [ ] Circuit breakers for external dependencies
+- [ ] Rate limiting to protect downstream services
+- [ ] Graduated failure thresholds based on service type
 - [ ] Graceful degradation for features
 - [ ] Bulkhead isolation between components
+- [ ] Combined resilience patterns (rate limit + circuit break + retry)
 
 ### Observability
 - [ ] Metrics on all processors

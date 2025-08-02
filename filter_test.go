@@ -254,8 +254,8 @@ func TestFilter_WithCancellation(t *testing.T) {
 func TestFilter_FeatureFlagExample(t *testing.T) {
 	type User struct {
 		ID          string
-		BetaEnabled bool
 		Data        string
+		BetaEnabled bool
 	}
 
 	betaProcessor := Transform("beta-feature", func(_ context.Context, user User) User {

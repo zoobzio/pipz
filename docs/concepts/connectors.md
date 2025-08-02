@@ -357,6 +357,93 @@ observed := pipz.NewHandle("monitored-operation",
 - Original error is still returned to caller
 - Perfect for sophisticated error recovery patterns
 
+### RateLimiter
+
+Controls processing rate to protect downstream services:
+
+```go
+// 100 requests per second with burst of 10
+limiter := pipz.NewRateLimiter("api-limiter", 100, 10)
+
+// Use in pipeline
+api := pipz.NewSequence("throttled-api",
+    limiter,
+    pipz.Apply("call-api", callExternalAPI),
+)
+
+// Runtime configuration
+limiter.SetMode("drop")    // Fail fast instead of waiting
+limiter.SetRate(200)       // Increase rate during off-peak
+limiter.SetBurst(20)       // Allow larger bursts
+```
+
+**Key characteristics:**
+- Token bucket algorithm using `golang.org/x/time/rate`
+- Two modes: "wait" (blocks until token available) and "drop" (fails immediately)
+- Thread-safe runtime configuration
+- Sustained rate control with burst handling
+- Context-aware cancellation during waits
+
+**When to use RateLimiter:**
+✅ Protecting external APIs with rate limits
+✅ Preventing overwhelming of downstream services  
+✅ Database connection throttling
+✅ Meeting SLA requirements
+✅ Fair resource sharing
+
+**When NOT to use RateLimiter:**
+❌ No external rate limits exist
+❌ All operations are equally cheap
+❌ Different error handling needed (use CircuitBreaker instead)
+
+### CircuitBreaker
+
+Prevents cascading failures by stopping requests to failing services:
+
+```go
+// Open after 5 failures, try recovery after 30 seconds
+breaker := pipz.NewCircuitBreaker("api-breaker", 
+    apiProcessor,
+    5,                    // failure threshold
+    30*time.Second,       // reset timeout
+)
+
+// Use with other resilience patterns
+resilient := pipz.NewSequence("resilient-api",
+    breaker,
+    pipz.NewRetry("retry", apiCall, 3),
+)
+
+// Runtime configuration
+breaker.SetFailureThreshold(10)           // More tolerant
+breaker.SetSuccessThreshold(3)            // Need 3 successes to close
+breaker.SetResetTimeout(time.Minute)      // Longer recovery time
+```
+
+**Key characteristics:**
+- Three-state pattern: closed (normal), open (blocking), half-open (testing)
+- Automatic state transitions based on failure/success counts
+- Thread-safe with efficient locking
+- Manual reset capability
+- Full error path preservation
+
+**Circuit States:**
+- **Closed** - Normal operation, failures are counted
+- **Open** - All requests fail immediately without calling processor
+- **Half-Open** - Limited requests allowed to test recovery
+
+**When to use CircuitBreaker:**
+✅ Calling external services that may fail
+✅ Preventing cascade failures in distributed systems
+✅ Giving failing services time to recover
+✅ Fast failure for better user experience
+✅ Reducing load on struggling services
+
+**When NOT to use CircuitBreaker:**
+❌ Internal services that should always work
+❌ Permanent failures (validation errors)
+❌ Services with no failure patterns
+
 ## Composition Patterns
 
 ### Nested Composition

@@ -129,6 +129,15 @@
 //	    betaProcessor,
 //	)
 //
+// Resource Protection:
+//
+//	// Rate limiting
+//	rateLimiter := pipz.NewRateLimiter("api-limit", 100, 10) // 100/sec, burst 10
+//	rateLimiter.SetMode("drop") // Or "wait" (default)
+//
+//	// Circuit breaker
+//	breaker := pipz.NewCircuitBreaker("service-breaker", processor, 5, 30*time.Second)
+//
 // # Quick Start
 //
 // Simple example - transform strings through a pipeline:
@@ -201,6 +210,8 @@
 //   - Retry/Backoff: For handling transient failures
 //   - Timeout: For operations that might hang
 //   - Handle: For error monitoring without changing flow
+//   - RateLimiter: For protecting rate-limited resources
+//   - CircuitBreaker: For preventing cascade failures
 //
 // # Error Handling
 //
