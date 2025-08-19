@@ -51,15 +51,14 @@ jobs:
         # Convert to Cobertura format for better PR integration
         gocover-cobertura < coverage-core.out > coverage-core.xml
     
-    - name: Test examples separately
+    - name: Test examples (verification only)
       run: |
-        echo "=== Testing examples ==="
+        echo "=== Testing examples (no coverage tracking) ==="
         for dir in examples/*/; do
           if [ -f "$dir/go.mod" ]; then
             example_name=$(basename "$dir")
             echo "Testing $example_name"
-            (cd "$dir" && \
-             go test -v -race -coverprofile="../../coverage-$example_name.out" -covermode=atomic ./... || true)
+            (cd "$dir" && go test -v -race ./... || true)
           fi
         done
     
@@ -83,8 +82,8 @@ jobs:
       uses: codecov/codecov-action@v4
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
-        files: ./coverage-core.out,./coverage-all.out
-        flags: unit,integration
+        files: ./coverage-core.out
+        flags: unit
         name: pipz-coverage
         fail_ci_if_error: false
         verbose: true
@@ -185,10 +184,9 @@ jobs:
       with:
         name: coverage-reports
         path: |
-          coverage-*.out
-          coverage-*.html
-          coverage-*.xml
-          coverage-*.txt
+          coverage-core.*
+          coverage-all.*
+          coverage-summary.txt
         retention-days: 30
     
     - name: Coverage summary
