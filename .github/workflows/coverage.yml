@@ -63,30 +63,21 @@ jobs:
           fi
         done
     
-    - name: Combine all coverage files
+    - name: Generate final coverage reports
       run: |
-        echo "mode: atomic" > coverage-all.out
+        # Use only core coverage for final reports since examples are separate modules
+        cp coverage-core.out coverage-all.out
         
-        # Add core coverage
-        tail -n +2 coverage-core.out >> coverage-all.out
-        
-        # Add example coverage
-        for file in coverage-*.out; do
-          if [ -f "$file" ] && [ "$file" != "coverage-core.out" ] && [ "$file" != "coverage-all.out" ]; then
-            tail -n +2 "$file" >> coverage-all.out 2>/dev/null || true
-          fi
-        done
-        
-        # Generate final report
-        go tool cover -func=coverage-all.out > coverage-all-summary.txt
-        echo "=== Total Coverage ==="
+        # Generate final report (core only)
+        go tool cover -func=coverage-core.out > coverage-all-summary.txt
+        echo "=== Core Library Coverage ==="
         tail -1 coverage-all-summary.txt
         
-        # Generate combined HTML
-        go tool cover -html=coverage-all.out -o coverage-all.html
+        # Generate HTML report
+        go tool cover -html=coverage-core.out -o coverage-all.html
         
         # Convert to XML
-        gocover-cobertura < coverage-all.out > coverage-all.xml
+        gocover-cobertura < coverage-core.out > coverage-all.xml
     
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
