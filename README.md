@@ -270,41 +270,6 @@ The [`examples/`](./examples/) directory contains complete, runnable examples:
 
 Each example includes comprehensive tests, detailed documentation, and demonstrates real-world patterns.
 
-## Built with pipz
-
-A growing ecosystem of tools that leverage pipz's flexibility:
-
-### **[flume](https://github.com/zoobzio/flume)** - Dynamic Pipeline Factory
-Build pipelines from YAML/JSON configuration files with hot-reloading.
-
-**What it does:** Stores processors, predicates, and conditions in a registry. Builds pipelines dynamically from schemas that describe the pipeline structure.
-
-**How pipz enables it:** Flume stores `pipz.Chainable[T]` implementations and uses pipz's connectors (`NewSequence`, `NewSwitch`, etc.) to construct pipelines based on schemas. Any `Chainable[T]` can be registered and composed.
-
-### **[zlog](https://github.com/zoobzio/zlog)** - Signal-Based Structured Logging
-Route events by meaning, not severity levels - send different signals to different destinations.
-
-**What it does:** Routes events to different sinks based on signals. Each sink can process events independently with its own error handling and capabilities.
-
-**How pipz enables it:** Sinks wrap `pipz.Chainable[Event[Fields]]`, allowing them to be enhanced with pipz patterns (retry, timeout, circuit breaker). The routing system uses `pipz.Switch` for signal-based dispatch and `pipz.Scaffold` for parallel sink processing.
-
-### **[sctx](https://github.com/zoobzio/sctx)** - Zero-Trust Security Framework
-Transform mTLS certificates into cryptographic security tokens with permissions.
-
-**What it does:** Processes certificates through a configurable pipeline to generate security contexts with permissions, expiry times, and metadata.
-
-**How pipz enables it:** Certificate processing uses pipz processors (`GrantPermissions`, `SetExpiry`) composed into pipelines. Uses flume for schema-driven pipeline configuration, allowing dynamic security policies.
-
-### **[sentinel](https://github.com/zoobzio/sentinel)** - Struct Metadata Extraction
-Extract and cache metadata from struct tags with pluggable processing.
-
-**What it does:** Reflects on structs to extract metadata from tags (json, validate, custom tags) and caches the results. Provides a plugin point for custom extraction logic.
-
-**How pipz enables it:** Uses `pipz.Sequence[*ExtractionContext]` as the extraction pipeline, allowing users to add their own processors to enrich or validate metadata during extraction.
-
----
-
-*These packages demonstrate pipz's versatility - from configuration management to logging infrastructure to security systems to reflection tooling.*
 
 ## Performance
 
