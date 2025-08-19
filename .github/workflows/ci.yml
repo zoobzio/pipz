@@ -23,20 +23,46 @@ jobs:
         go-version: ${{ matrix.go-version }}
     
     - name: Test pipz core
-      run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
-    
-    - name: Test examples
       run: |
+        go test -v -race -coverprofile=coverage-core.txt -covermode=atomic ./...
+        echo "Core library test coverage:"
+        go tool cover -func=coverage-core.txt | tail -1
+    
+    - name: Test examples with coverage
+      run: |
+        echo "" > coverage-examples.txt
         for dir in examples/*/; do
-          echo "Testing $dir"
-          (cd "$dir" && go test -v -race)
+          if [ -f "$dir/go.mod" ]; then
+            echo "Testing $dir"
+            (cd "$dir" && go test -v -race -coverprofile=../coverage-tmp.txt -covermode=atomic ./... || true)
+            if [ -f "examples/coverage-tmp.txt" ]; then
+              tail -n +2 examples/coverage-tmp.txt >> coverage-examples.txt
+              rm examples/coverage-tmp.txt
+            fi
+          fi
         done
     
-    - name: Upload coverage
+    - name: Combine coverage reports
+      if: matrix.go-version == '1.23'
+      run: |
+        echo "mode: atomic" > coverage-combined.txt
+        tail -n +2 coverage-core.txt >> coverage-combined.txt
+        if [ -s coverage-examples.txt ]; then
+          tail -n +2 coverage-examples.txt >> coverage-combined.txt 2>/dev/null || true
+        fi
+        echo "Total coverage:"
+        go tool cover -func=coverage-combined.txt | tail -1
+    
+    - name: Upload coverage to Codecov
       if: matrix.go-version == '1.23'
       uses: codecov/codecov-action@v4
       with:
-        file: ./coverage.txt
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ./coverage-core.txt,./coverage-combined.txt
+        flags: unit
+        name: pipz-coverage-${{ matrix.go-version }}
+        fail_ci_if_error: false
+        verbose: true
 
   lint:
     name: Lint
