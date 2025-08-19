@@ -38,7 +38,7 @@ jobs:
         # Core library coverage
         echo "=== Testing core library ==="
         go test -v -race -coverprofile=coverage-core.out -covermode=atomic \
-          -coverpkg=github.com/zoobzio/pipz ./...
+          -coverpkg=github.com/zoobzio/pipz $(go list ./... | grep -v '/examples/')
         
         # Generate coverage report
         go tool cover -func=coverage-core.out > coverage-summary.txt
