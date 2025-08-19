@@ -1,5 +1,13 @@
 # pipz
 
+[![CI Status](https://github.com/zoobzio/pipz/workflows/CI/badge.svg)](https://github.com/zoobzio/pipz/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/zoobzio/pipz/graph/badge.svg?branch=main)](https://codecov.io/gh/zoobzio/pipz)
+[![Go Report Card](https://goreportcard.com/badge/github.com/zoobzio/pipz)](https://goreportcard.com/report/github.com/zoobzio/pipz)
+[![CodeQL](https://github.com/zoobzio/pipz/workflows/CodeQL/badge.svg)](https://github.com/zoobzio/pipz/security/code-scanning)
+[![Go Reference](https://pkg.go.dev/badge/github.com/zoobzio/pipz.svg)](https://pkg.go.dev/github.com/zoobzio/pipz)
+[![License](https://img.shields.io/github/license/zoobzio/pipz)](LICENSE)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/zoobzio/pipz)](go.mod)
+
 Type-safe, composable data pipelines for Go with zero dependencies.
 
 Build robust data processing pipelines that are easy to test, reason about, and maintain.
