@@ -7,6 +7,8 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/zoobzio/pipz.svg)](https://pkg.go.dev/github.com/zoobzio/pipz)
 [![License](https://img.shields.io/github/license/zoobzio/pipz)](LICENSE)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/zoobzio/pipz)](go.mod)
+[![Release](https://img.shields.io/github/v/release/zoobzio/pipz)](https://github.com/zoobzio/pipz/releases)
+[![Contributors](https://img.shields.io/github/contributors/zoobzio/pipz)](https://github.com/zoobzio/pipz/graphs/contributors)
 
 Type-safe, composable data pipelines for Go with zero dependencies.
 
