@@ -218,4 +218,51 @@ func TestHandle(t *testing.T) {
 			t.Errorf("expected 0, got %d", result)
 		}
 	})
+
+	t.Run("Non-Pipeline Error Wrapping", func(t *testing.T) {
+		// This test covers lines 82-91 in handle.go where non-Error types are wrapped
+		plainErr := errors.New("plain error not wrapped in Error type")
+		var capturedErr *Error[int]
+		
+		processor := Apply("plain-error", func(_ context.Context, _ int) (int, error) {
+			return 0, plainErr // Return error with zero value, not 42
+		})
+		
+		errorHandler := Effect("capture-handler", func(_ context.Context, err *Error[int]) error {
+			capturedErr = err
+			return nil
+		})
+		
+		handle := NewHandle("test-handle", processor, errorHandler)
+		result, err := handle.Process(context.Background(), 5)
+		
+		// Original error should pass through
+		if !errors.Is(err, plainErr) {
+			t.Fatalf("expected plain error to pass through, got %v", err)
+		}
+		if result != 0 {
+			t.Errorf("expected result 0 on error, got %d", result)
+		}
+		
+		// Handler should have been called with wrapped error
+		if capturedErr == nil {
+			t.Fatal("error handler not called")
+		}
+		if capturedErr.InputData != 5 {
+			t.Errorf("expected input data 5, got %d", capturedErr.InputData)
+		}
+		if !errors.Is(capturedErr.Err, plainErr) {
+			t.Error("wrapped error should contain plain error")
+		}
+		// Path should include both handle name and processor name
+		if len(capturedErr.Path) != 2 {
+			t.Errorf("expected path length 2, got %d", len(capturedErr.Path))
+		}
+		if capturedErr.Path[0] != "test-handle" {
+			t.Errorf("expected first path element 'test-handle', got %s", capturedErr.Path[0])
+		}
+		if capturedErr.Path[1] != "plain-error" {
+			t.Errorf("expected second path element 'plain-error', got %s", capturedErr.Path[1])
+		}
+	})
 }

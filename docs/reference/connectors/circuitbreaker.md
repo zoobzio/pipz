@@ -29,6 +29,59 @@ The circuit breaker implements the standard three-state pattern:
 - **Open (Blocking)** - All requests fail immediately without calling the processor
 - **Half-Open (Testing)** - Limited requests are allowed to test service recovery
 
+### State Machine Diagram
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                  Circuit Breaker State Machine                   │
+└──────────────────────────────────────────────────────────────────┘
+
+        ┌─────────────────────────────────────┐
+        │            CLOSED                    │
+        │         (Normal Operation)           │
+        │                                      │
+        │  • Requests pass through             │
+        │  • Count consecutive failures        │
+        │  • Reset count on success            │
+        └──────────────┬───────────────────────┘
+                       │
+            failures >= threshold
+                       │
+                       ▼
+        ┌─────────────────────────────────────┐
+        │              OPEN                    │
+        │          (Failing Fast)              │
+        │                                      │
+        │  • All requests fail immediately     │
+        │  • No calls to protected service     │
+        │  • Wait for reset timeout            │
+        └──────────────┬───────────────────────┘
+                       │
+              after resetTimeout
+                       │
+                       ▼
+        ┌─────────────────────────────────────┐
+        │           HALF-OPEN                  │◄──┐
+        │      (Testing Recovery)              │   │
+        │                                      │   │
+        │  • Limited requests allowed          │   │ any failure
+        │  • Count successes                   │   │
+        │  • Testing service health            │───┘
+        └──────────────┬───────────────────────┘
+                       │
+         successes >= successThreshold
+                       │
+                       ▼
+                  [CLOSED]
+
+State Transition Rules:
+═══════════════════════
+CLOSED → OPEN:      After failureThreshold consecutive failures
+OPEN → HALF-OPEN:   After resetTimeout duration expires
+HALF-OPEN → CLOSED: After successThreshold consecutive successes
+HALF-OPEN → OPEN:   On any failure during half-open state
+```
+
 ### State Transitions
 - **Closed → Open** - After `failureThreshold` consecutive failures
 - **Open → Half-Open** - After `resetTimeout` duration

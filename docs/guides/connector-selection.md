@@ -26,6 +26,31 @@ What do you need?
     └─ Bound execution time? → Timeout
 ```
 
+## Connector Comparison Matrix
+
+```
+┌────────────────┬──────────┬────────────┬──────────┬─────────────────────┐
+│   Connector    │ Parallel │ All Run?   │ Returns  │ Primary Use Case    │
+├────────────────┼──────────┼────────────┼──────────┼─────────────────────┤
+│ Sequence       │    No    │ Until fail │ Last     │ Step-by-step flow   │
+│ Concurrent     │   Yes    │    Yes     │ Original │ Side effects        │
+│ Race           │   Yes    │ First wins │ First    │ Fastest response    │
+│ Contest        │   Yes    │ Until pass │ Matching │ Quality threshold   │
+│ Switch         │    No    │ One branch │ Selected │ Conditional routing │
+│ Fallback       │    No    │ On failure │ Primary  │ Error recovery      │
+│ Retry          │    No    │ Until pass │ Success  │ Transient failures  │
+│ CircuitBreaker │    No    │ If closed  │ Result   │ Cascade prevention  │
+│ RateLimiter    │    No    │ If allowed │ Result   │ Throughput control  │
+│ Timeout        │    No    │ Time bound │ Result   │ Execution limits    │
+└────────────────┴──────────┴────────────┴──────────┴─────────────────────┘
+
+Legend:
+• Parallel: Whether processors run concurrently
+• All Run?: Whether all processors execute or stop early
+• Returns: What data is returned to caller
+• Primary Use Case: Main scenario for using this connector
+```
+
 ## Problem-Solution Guide
 
 ### You need to: Process data through multiple steps in order

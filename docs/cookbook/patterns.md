@@ -2,6 +2,165 @@
 
 This guide demonstrates powerful patterns you can build with pipz by leveraging the `Chainable[T]` interface and composing processors.
 
+## Complex Pipeline Architecture
+
+Here's how a production-ready pipeline architecture looks when combining multiple patterns:
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│              Production Order Processing Pipeline                 │
+└──────────────────────────────────────────────────────────────────┘
+
+                ┌─────────────────┐
+                │   User Request  │
+                └────────┬────────┘
+                         │
+                         ▼
+                ┌─────────────────┐
+                │  Rate Limiter   │──→ [Drop if exceeded]
+                │  100 req/sec    │
+                └────────┬────────┘
+                         │
+                         ▼
+                ┌─────────────────┐
+                │    Validate     │──→ [Fail fast on bad input]
+                │  • Required     │
+                │  • Business     │
+                └────────┬────────┘
+                         │
+                         ▼
+              ┌──────────┴──────────┐
+              │   Switch Router     │
+              │  (by order type)    │
+              └─┬────────────────┬──┘
+                │                │
+        [premium user]     [regular user]
+                │                │
+         ┌──────▼──────┐  ┌──────▼──────┐
+         │  Fast Path  │  │ Normal Path │
+         │ • Priority  │  │ • Standard  │
+         │ • Express   │  │ • Queue     │
+         └──────┬──────┘  └──────┬──────┘
+                │                │
+                └────────┬───────┘
+                         │
+                         ▼
+         ┌───────────────────────────────┐
+         │     Circuit Breaker           │
+         │   (Payment Processing)        │
+         │  • Closed: Process normally   │
+         │  • Open: Fail fast            │
+         │  • Half-Open: Test recovery   │
+         └───────────────┬───────────────┘
+                         │
+                         ▼
+         ┌───────────────────────────────┐
+         │    Retry with Backoff         │
+         │  • Attempt 1: 100ms delay     │
+         │  • Attempt 2: 200ms delay     │
+         │  • Attempt 3: 400ms delay     │
+         └───────────────┬───────────────┘
+                         │
+                         ▼
+         ┌───────────────────────────────┐
+         │      Timeout Wrapper          │
+         │     (30 second limit)         │
+         └───────────────┬───────────────┘
+                         │
+                    [Success]
+                         │
+                         ▼
+         ┌───────────────────────────────┐
+         │    Concurrent Notifications   │
+         ├───────────────────────────────┤
+         │ ┌─────────┐ ┌─────────┐      │
+         │ │  Email  │ │   SMS   │      │
+         │ └─────────┘ └─────────┘      │
+         │ ┌─────────┐ ┌─────────┐      │
+         │ │Analytics│ │   CRM   │      │
+         │ └─────────┘ └─────────┘      │
+         └───────────────────────────────┘
+                         │
+                    All complete
+                         │
+                         ▼
+                ┌─────────────────┐
+                │     Response     │
+                └─────────────────┘
+
+Error Flow:
+═══════════
+Any Stage [✗] ──→ Error Handler ──→ Categorize ──→ Recovery Strategy
+                         │                              │
+                         ▼                              ▼
+                  [Log & Metrics]            [Retry / Fallback / Alert]
+```
+
+### Implementation of Complex Pipeline
+
+```go
+// Build the complete pipeline shown in the diagram
+func BuildOrderPipeline() pipz.Chainable[Order] {
+    // Rate limiting layer
+    rateLimiter := pipz.NewRateLimiter("rate-limit", 100, 10)
+    
+    // Validation layer
+    validation := pipz.NewSequence("validation",
+        pipz.Apply("validate-required", validateRequired),
+        pipz.Apply("validate-business", validateBusinessRules),
+    )
+    
+    // Routing layer - different paths for different users
+    routing := pipz.NewSwitch("order-router",
+        func(ctx context.Context, order Order) string {
+            if order.Customer.IsPremium {
+                return "premium"
+            }
+            return "regular"
+        },
+    ).
+    AddRoute("premium", pipz.NewSequence("fast-path",
+        pipz.Apply("priority-queue", addToPriorityQueue),
+        pipz.Apply("express-processing", expressProcess),
+    )).
+    AddRoute("regular", pipz.NewSequence("normal-path", 
+        pipz.Apply("standard-queue", addToStandardQueue),
+        pipz.Apply("standard-processing", standardProcess),
+    ))
+    
+    // Payment processing with full resilience
+    payment := pipz.NewCircuitBreaker("payment-breaker",
+        pipz.NewBackoff("payment-retry",
+            pipz.NewTimeout("payment-timeout",
+                pipz.Apply("charge-payment", chargePayment),
+                30*time.Second,
+            ),
+            3,
+            100*time.Millisecond,
+        ),
+        5,
+        time.Minute,
+    )
+    
+    // Concurrent notifications
+    notifications := pipz.NewConcurrent("notifications",
+        pipz.Effect("send-email", sendEmailNotification),
+        pipz.Effect("send-sms", sendSMSNotification),
+        pipz.Effect("update-analytics", updateAnalytics),
+        pipz.Effect("update-crm", updateCRM),
+    )
+    
+    // Compose everything
+    return pipz.NewSequence("order-pipeline",
+        rateLimiter,
+        validation,
+        routing,
+        payment,
+        notifications,
+    )
+}
+```
+
 ## Infrastructure Patterns
 
 ### Rate Limiter (Built-in Connector)

@@ -567,6 +567,65 @@ func createPipeline(features FeatureFlags) pipz.Chainable[Order] {
 
 ## Error Handling Strategies
 
+### Error Propagation Pattern
+
+Understanding how errors flow through your pipelines is critical for proper handling:
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                    Error Propagation in Pipelines                │
+└──────────────────────────────────────────────────────────────────┘
+
+Sequential Pipeline:
+═══════════════════
+Pipeline A
+    ├─→ Processor 1 [✓] Success
+    │       ↓
+    ├─→ Processor 2 [✗] Failure ──→ Error[T]{Stage: "proc2", Cause: err}
+    │       ↓                            ↓
+    │    Pipeline Stops                  ▼
+    │                              Returns to caller
+    └─→ Processor 3 [⋯] Never runs
+
+Nested Pipeline:
+════════════════
+Main Pipeline
+    ├─→ Validate [✓]
+    │       ↓
+    ├─→ Sub-Pipeline ──┐
+    │   ├─→ Step A [✓] │
+    │   ├─→ Step B [✗]─┼──→ Error wrapped with sub-pipeline context
+    │   └─→ Step C [⋯] │         ↓
+    │                  │         ▼
+    │                  └──→ Error[T]{Stage: "sub-pipeline.step-b"}
+    │                            ↓
+    └─→ Save [⋯] Never runs      ▼
+                           Main Pipeline Stops
+
+Concurrent Pipeline:
+════════════════════
+Concurrent Connector
+    ├─→ Service A [✓] Completes
+    ├─→ Service B [✗] Fails ──→ Error logged but doesn't stop others
+    ├─→ Service C [✓] Completes
+    └─→ Returns original input (errors don't propagate up)
+
+With Error Handler:
+════════════════════
+Pipeline with Recovery
+    ├─→ Process [✗] ──→ Error[T]
+    │       ↓               ↓
+    │   Fallback ←──────────┘
+    │       ↓
+    └─→ Continue [✓] Pipeline continues with fallback result
+```
+
+Key Insights:
+- **Sequential stops on first error** - Subsequent processors never run
+- **Errors carry context** - Stage name, cause, and data state at failure
+- **Concurrent doesn't propagate errors** - Failures are isolated
+- **Fallback enables recovery** - Convert errors back to success path
+
 ### Strategy: Categorize and Route
 
 ```go

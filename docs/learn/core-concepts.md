@@ -4,6 +4,31 @@
 
 Think of pipz as a conveyor belt for your data. Each processor is a station that transforms, validates, or enriches data as it passes through. Connectors determine how data flows between stations - sequentially, in parallel, or conditionally.
 
+### Pipeline Lifecycle & Data Flow
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                     Complete Pipeline Lifecycle                  │
+└──────────────────────────────────────────────────────────────────┘
+
+┌──────────┐      ┌──────────┐      ┌──────────┐      ┌──────────┐
+│  Input   │─────→│ Validate │─────→│Transform │─────→│  Output  │
+│   Data   │      │  Stage   │      │  Stage   │      │   Data   │
+└──────────┘      └──────────┘      └──────────┘      └──────────┘
+      │                 │                 │                 │
+      ▼                 ▼                 ▼                 ▼
+┌──────────┐      ┌──────────┐      ┌──────────┐      ┌──────────┐
+│ Context  │      │  Error   │      │  Error   │      │  Result  │
+│  State   │      │ Handling │      │ Handling │      │  State   │
+└──────────┘      └──────────┘      └──────────┘      └──────────┘
+
+Legend:
+─────→  Data flow
+  ▼     Context/Error propagation
+  [✓]   Success state
+  [✗]   Failure state
+```
+
 ### Data Flow Patterns
 
 ```

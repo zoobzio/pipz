@@ -40,6 +40,49 @@ Returns a `*Backoff[T]` that implements `Chainable[T]`.
 - **Error preservation**: Maintains complete error context from failures
 - **Thread-safe**: Safe for concurrent use
 
+### Retry Backoff Visualization
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                    Exponential Backoff Pattern                   │
+└──────────────────────────────────────────────────────────────────┘
+
+Base Delay: 100ms, Max Attempts: 5
+
+Attempt 1 ──[✗]──→ Wait 100ms ──┐
+                                 ▼
+Attempt 2 ──[✗]──→ Wait 200ms ──┐
+                                 ▼
+Attempt 3 ──[✗]──→ Wait 400ms ──┐
+                                 ▼
+Attempt 4 ──[✗]──→ Wait 800ms ──┐
+                                 ▼
+Attempt 5 ──[✗]──→ Final Failure (no delay)
+                         │
+                         ▼
+                   Return Error
+
+Total Time: 100ms + 200ms + 400ms + 800ms = 1.5 seconds
+
+Timeline View:
+═════════════
+Time:    0ms   100ms  300ms      700ms           1500ms
+         │      │      │          │               │
+Attempt: [1]──►[2]───►[3]───────►[4]────────────►[5]
+         ↑      ↑      ↑          ↑               ↑
+         Try   Retry  Retry     Retry          Final
+
+Success Case (succeeds on attempt 3):
+══════════════════════════════════════
+Attempt 1 ──[✗]──→ Wait 100ms ──┐
+                                 ▼
+Attempt 2 ──[✗]──→ Wait 200ms ──┐
+                                 ▼
+Attempt 3 ──[✓]──→ Success! Return result
+
+Total Time: 100ms + 200ms = 300ms (plus processing time)
+```
+
 ### Delay Progression
 
 Given a base delay of 1 second:

@@ -399,6 +399,135 @@ func TestCircuitBreaker(t *testing.T) {
 			t.Errorf("expected circuit breaker or permanent failure error, got: %v", err)
 		}
 	})
+
+	t.Run("Name Method", func(t *testing.T) {
+		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+			return n, nil
+		})
+		
+		breaker := NewCircuitBreaker("test-circuit-breaker", processor, 3, time.Second)
+		
+		// Test Name() method
+		name := breaker.Name()
+		if name != "test-circuit-breaker" {
+			t.Errorf("expected name 'test-circuit-breaker', got '%s'", name)
+		}
+		
+		// Test name is preserved during concurrent access
+		var wg sync.WaitGroup
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := 0; j < 100; j++ {
+					n := breaker.Name()
+					if n != "test-circuit-breaker" {
+						t.Errorf("expected name 'test-circuit-breaker', got '%s'", n)
+					}
+				}
+			}()
+		}
+		wg.Wait()
+	})
+
+	t.Run("Constructor Edge Cases", func(t *testing.T) {
+		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+			return n, nil
+		})
+		
+		// Test with zero failure threshold - should default to 1
+		breaker := NewCircuitBreaker("test-breaker", processor, 0, time.Second)
+		if threshold := breaker.GetFailureThreshold(); threshold != 1 {
+			t.Errorf("expected failure threshold to default to 1, got %d", threshold)
+		}
+		
+		// Test with negative failure threshold - should default to 1
+		breaker2 := NewCircuitBreaker("test-breaker", processor, -5, time.Second)
+		if threshold := breaker2.GetFailureThreshold(); threshold != 1 {
+			t.Errorf("expected failure threshold to default to 1, got %d", threshold)
+		}
+		
+		// Test SetFailureThreshold with invalid values
+		breaker.SetFailureThreshold(0)
+		if threshold := breaker.GetFailureThreshold(); threshold != 1 {
+			t.Errorf("expected failure threshold to default to 1 after setting to 0, got %d", threshold)
+		}
+		
+		breaker.SetFailureThreshold(-10)
+		if threshold := breaker.GetFailureThreshold(); threshold != 1 {
+			t.Errorf("expected failure threshold to default to 1 after setting to negative, got %d", threshold)
+		}
+		
+		// Test SetSuccessThreshold with invalid values
+		breaker.SetSuccessThreshold(0)
+		if threshold := breaker.GetSuccessThreshold(); threshold != 1 {
+			t.Errorf("expected success threshold to default to 1 after setting to 0, got %d", threshold)
+		}
+		
+		breaker.SetSuccessThreshold(-5)
+		if threshold := breaker.GetSuccessThreshold(); threshold != 1 {
+			t.Errorf("expected success threshold to default to 1 after setting to negative, got %d", threshold)
+		}
+	})
+
+	t.Run("Generation Race Condition", func(t *testing.T) {
+		// This test ensures that if the generation changes while a request is being processed,
+		// the result of that request doesn't affect the new generation's state
+		var processingDelay atomic.Bool
+		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+			if processingDelay.Load() {
+				time.Sleep(100 * time.Millisecond)
+			}
+			if n < 0 {
+				return 0, errors.New("negative input")
+			}
+			return n, nil
+		})
+		
+		breaker := NewCircuitBreaker("test-breaker", processor, 2, 50*time.Millisecond)
+		
+		// Open the circuit
+		for i := 0; i < 2; i++ {
+			_, err := breaker.Process(context.Background(), -1)
+			if err == nil {
+				t.Error("expected error")
+			}
+		}
+		
+		if state := breaker.GetState(); state != "open" {
+			t.Fatalf("expected open state, got %s", state)
+		}
+		
+		// Wait for half-open
+		time.Sleep(60 * time.Millisecond)
+		
+		// Start a slow request in half-open state
+		processingDelay.Store(true)
+		var wg sync.WaitGroup
+		wg.Add(1)
+		var slowErr error
+		go func() {
+			defer wg.Done()
+			_, slowErr = breaker.Process(context.Background(), 1)
+		}()
+		
+		// While the slow request is processing, reset the circuit (changes generation)
+		time.Sleep(10 * time.Millisecond)
+		breaker.Reset()
+		
+		// The slow request should complete but not affect the new generation's state
+		wg.Wait()
+		
+		// Circuit should still be closed after reset, regardless of slow request outcome
+		if state := breaker.GetState(); state != "closed" {
+			t.Errorf("expected closed state after reset, got %s", state)
+		}
+		
+		// Verify the slow request completed successfully
+		if slowErr != nil {
+			t.Errorf("unexpected error from slow request: %v", slowErr)
+		}
+	})
 }
 
 func BenchmarkCircuitBreaker(b *testing.B) {

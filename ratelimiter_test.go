@@ -3,11 +3,13 @@ package pipz
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 func TestRateLimiter(t *testing.T) {
@@ -276,6 +278,66 @@ func TestRateLimiter(t *testing.T) {
 		// Should take at least 200ms for rate limiting
 		if elapsed < 190*time.Millisecond {
 			t.Errorf("processing too fast, elapsed: %v", elapsed)
+		}
+	})
+
+	t.Run("Name Method", func(t *testing.T) {
+		limiter := NewRateLimiter[int]("test-rate-limiter", 10, 2)
+		
+		// Test Name() method
+		name := limiter.Name()
+		if name != "test-rate-limiter" {
+			t.Errorf("expected name 'test-rate-limiter', got '%s'", name)
+		}
+		
+		// Test name is preserved during concurrent access
+		var wg sync.WaitGroup
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := 0; j < 100; j++ {
+					n := limiter.Name()
+					if n != "test-rate-limiter" {
+						t.Errorf("expected name 'test-rate-limiter', got '%s'", n)
+					}
+				}
+			}()
+		}
+		wg.Wait()
+	})
+
+	t.Run("Invalid Mode in Process", func(t *testing.T) {
+		// This test forces the default case in Process method by 
+		// directly manipulating the mode field to cover lines 102-109
+		limiter := NewRateLimiter[int]("test-limiter", 10, 2)
+		
+		// Use reflection to set an invalid mode directly, bypassing SetMode validation
+		limiterValue := reflect.ValueOf(limiter).Elem()
+		modeField := limiterValue.FieldByName("mode")
+		
+		// Make field settable using unsafe
+		modeField = reflect.NewAt(modeField.Type(), unsafe.Pointer(modeField.UnsafeAddr())).Elem()
+		modeField.SetString("invalid-mode-for-testing")
+		
+		// Process should hit the default case and return an error
+		_, err := limiter.Process(context.Background(), 42)
+		if err == nil {
+			t.Fatal("expected error for invalid mode")
+		}
+		
+		var pipeErr *Error[int]
+		if !errors.As(err, &pipeErr) {
+			t.Fatal("expected Error type")
+		}
+		if !strings.Contains(pipeErr.Err.Error(), "invalid rate limiter mode") {
+			t.Errorf("expected 'invalid rate limiter mode' error, got: %v", pipeErr.Err)
+		}
+		if pipeErr.InputData != 42 {
+			t.Errorf("expected input data 42, got %d", pipeErr.InputData)
+		}
+		if len(pipeErr.Path) == 0 || pipeErr.Path[0] != "test-limiter" {
+			t.Error("expected limiter name in error path")
 		}
 	})
 }
