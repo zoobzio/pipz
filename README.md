@@ -103,6 +103,50 @@ go get github.com/zoobzio/pipz
 
 Requirements: Go 1.21+ (for generics)
 
+## Release Process
+
+### Automated Releases
+
+This project uses automated release versioning. To create a release:
+
+1. Go to Actions → Release → Run workflow
+2. Leave "Version override" empty for automatic version inference
+3. Click "Run workflow"
+
+The system will:
+- Automatically determine the next version from conventional commits
+- Create a git tag
+- Generate release notes via GoReleaser
+- Publish the release to GitHub
+
+### Manual Release (Legacy)
+
+You can still create releases manually:
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+### Known Limitations
+
+- **Protected branches**: The automated release cannot bypass branch protection rules. This is by design for security.
+- **Concurrent releases**: Rapid successive releases may fail. Simply retry after a moment.
+- **Conventional commits required**: Version inference requires conventional commit format (`feat:`, `fix:`, etc.)
+
+### Commit Conventions
+- `feat:` new features (minor version: 1.2.0 → 1.3.0)
+- `fix:` bug fixes (patch version: 1.2.0 → 1.2.1)  
+- `feat!:` breaking changes (major version: 1.2.0 → 2.0.0)
+- `docs:`, `test:`, `chore:` no version change
+
+Example: `feat(pipeline): add timeout support for processors`
+
+### Version Preview on Pull Requests
+Every PR automatically shows the next version that will be created:
+- Check PR comments for "Version Preview" 
+- Updates automatically as you add commits
+- Helps verify your commits have the intended effect
+
 ## Quick Example
 
 ```go

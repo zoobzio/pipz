@@ -3,7 +3,23 @@ name: Release
 on:
   push:
     tags:
-      - 'v*.*.*'  # Trigger on version tags like v1.0.0, v2.1.3, etc.
+      - 'v*.*.*'  # Keep existing trigger
+  workflow_dispatch:
+    inputs:
+      version_override:
+        description: 'Version override (leave empty for auto)'
+        required: false
+        type: string
+        default: ''
+      dry_run:
+        description: 'Dry run mode'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false  # Never cancel releases
 
 permissions:
   contents: write  # Required for creating releases
@@ -11,9 +27,98 @@ permissions:
   id-token: write  # Required for signing
 
 jobs:
+  # Version determination for manual triggers
+  determine-version:
+    name: Determine Version
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      should_create_tag: ${{ steps.decision.outputs.create }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Install svu
+        run: |
+          export GOPATH=$HOME/go
+          go install github.com/caarlos0/svu@v1.12.0
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+      
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version_override }}" ]; then
+            VERSION="${{ github.event.inputs.version_override }}"
+            echo "Using override: $VERSION"
+          else
+            VERSION=$(svu next)
+            echo "Auto-inferred: $VERSION"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+      
+      - name: Check tag existence
+        id: check
+        run: |
+          if gh api repos/${{ github.repository }}/git/refs/tags/${{ steps.version.outputs.version }} >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+      
+      - name: Decision point
+        id: decision
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "🔍 DRY RUN - No tag will be created"
+            echo "create=false" >> $GITHUB_OUTPUT
+          elif [ "${{ steps.check.outputs.exists }}" = "true" ]; then
+            echo "❌ Tag already exists"
+            echo "create=false" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "✅ Will create tag"
+            echo "create=true" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create tag via API
+        if: steps.decision.outputs.create == 'true'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          
+          # Create lightweight tag using GitHub API
+          gh api repos/${{ github.repository }}/git/refs \
+            --method POST \
+            --field ref="refs/tags/$VERSION" \
+            --field sha="${{ github.sha }}" \
+            || (echo "Failed to create tag" && exit 1)
+          
+          echo "✅ Created tag: $VERSION"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      
+      - name: Summary
+        run: |
+          echo "## 📋 Release Automation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Dry Run:** ${{ github.event.inputs.dry_run }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag Created:** ${{ steps.decision.outputs.create }}" >> $GITHUB_STEP_SUMMARY
+
   # Validate the module before release
   validate:
     name: Validate Module
+    # Conditional: run for tag pushes OR after determine-version succeeds
+    if: |
+      always() && (
+        github.event_name == 'push' || 
+        (github.event_name == 'workflow_dispatch' && needs.determine-version.outputs.should_create_tag == 'true')
+      )
+    needs: 
+      - determine-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
