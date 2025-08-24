@@ -20,6 +20,25 @@ const (
 // controlled bursts while maintaining a steady average rate. This is essential
 // for protecting external APIs, databases, and other rate-sensitive resources.
 //
+// CRITICAL: RateLimiter is a STATEFUL connector that maintains an internal token bucket.
+// You MUST create it as a package-level variable (singleton) to share state across requests.
+// Creating a new RateLimiter for each request defeats the purpose entirely!
+//
+// ❌ WRONG - Creating per request (useless):
+//
+//	func handleRequest(req Request) Response {
+//	    limiter := pipz.NewRateLimiter("api", 100, 10)  // NEW limiter each time!
+//	    return limiter.Process(ctx, req)                // Always allows through
+//	}
+//
+// ✅ RIGHT - Package-level singleton:
+//
+//	var apiLimiter = pipz.NewRateLimiter("api", 100, 10)  // Shared instance
+//
+//	func handleRequest(req Request) Response {
+//	    return apiLimiter.Process(ctx, req)  // Actually rate limits
+//	}
+//
 // The limiter operates in two modes:
 //   - "wait": Blocks until a token is available (default)
 //   - "drop": Returns an error immediately if no tokens available
@@ -31,20 +50,37 @@ const (
 //   - Implementing fair resource sharing
 //   - Meeting SLA requirements
 //
+// Best Practices:
+//   - Use const names for all processors/connectors (see best-practices.md)
+//   - Declare RateLimiters as package-level vars
+//   - Configure limits based on actual downstream capacity
+//   - Layer multiple limiters for complex scenarios (global → service → endpoint)
+//
 // Example:
 //
-//	// 100 requests per second with burst of 10
-//	limiter := pipz.NewRateLimiter(
-//	    "api-limiter",
-//	    100,  // 100 requests per second
-//	    10,   // burst of 10
+//	// Define names as constants
+//	const (
+//	    ConnectorAPILimiter    = "api-limiter"
+//	    ConnectorGlobalLimiter = "global-limiter"
 //	)
 //
-//	// Use in a pipeline
-//	pipeline := pipz.NewSequence("api-pipeline",
-//	    limiter,
-//	    pipz.Apply("call-api", callExternalAPI),
+//	// Create limiters as package-level singletons
+//	var (
+//	    // Global rate limit for entire system
+//	    globalLimiter = pipz.NewRateLimiter(ConnectorGlobalLimiter, 10000, 1000)
+//
+//	    // Service-specific limit (e.g., Stripe API)
+//	    apiLimiter = pipz.NewRateLimiter(ConnectorAPILimiter, 100, 10)
 //	)
+//
+//	// Use in pipeline
+//	func createPaymentPipeline() pipz.Chainable[Payment] {
+//	    return pipz.NewSequence("payment-pipeline",
+//	        globalLimiter,                           // System-wide limit
+//	        apiLimiter,                              // Service-specific limit
+//	        pipz.Apply("charge", processPayment),   // Actual operation
+//	    )
+//	}
 type RateLimiter[T any] struct {
 	name    Name
 	limiter *rate.Limiter

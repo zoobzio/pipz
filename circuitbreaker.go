@@ -20,6 +20,25 @@ const (
 //   - Open: Requests fail immediately without calling the wrapped processor
 //   - Half-Open: Testing state, limited requests to check if service recovered
 //
+// CRITICAL: CircuitBreaker is a STATEFUL connector that tracks failure counts across requests.
+// You MUST create it as a package-level variable (singleton) to maintain state.
+// Creating a new CircuitBreaker for each request means it will NEVER open!
+//
+// ❌ WRONG - Creating per request (never opens):
+//
+//	func handleRequest(req Request) Response {
+//	    breaker := pipz.NewCircuitBreaker("api", proc, 5, 30*time.Second)  // NEW breaker!
+//	    return breaker.Process(ctx, req)  // Always closed, failure count always 0
+//	}
+//
+// ✅ RIGHT - Package-level singleton:
+//
+//	var apiBreaker = pipz.NewCircuitBreaker("api", apiProcessor, 5, 30*time.Second)
+//
+//	func handleRequest(req Request) Response {
+//	    return apiBreaker.Process(ctx, req)  // Tracks failures across requests
+//	}
+//
 // The circuit opens after consecutive failures reach the threshold. After a
 // timeout period, it transitions to half-open to test recovery. Successful
 // requests in half-open state close the circuit, while failures reopen it.
@@ -31,19 +50,49 @@ const (
 //   - Reducing unnecessary load on struggling services
 //   - Improving overall system resilience
 //
+// Best Practices:
+//   - Use const names for all processors/connectors (see best-practices.md)
+//   - Declare CircuitBreakers as package-level vars
+//   - Set thresholds based on service characteristics
+//   - Combine with RateLimiter for comprehensive protection
+//   - Monitor circuit state for operational awareness
+//
 // Example:
 //
-//	breaker := pipz.NewCircuitBreaker(
-//	    "api-breaker",
-//	    5,                    // Open after 5 consecutive failures
-//	    30 * time.Second,     // Try recovery after 30 seconds
+//	// Define names as constants
+//	const (
+//	    ConnectorAPIBreaker      = "api-breaker"
+//	    ConnectorDatabaseBreaker = "db-breaker"
+//	    ProcessorAPICall         = "api-call"
 //	)
 //
-//	// Use in a pipeline with retry
-//	resilient := pipz.NewSequence("resilient-api",
-//	    breaker,
-//	    pipz.NewRetry("retry", apiCall, 3),
+//	// Create breakers as package-level singletons
+//	var (
+//	    // External API - fail fast, longer recovery
+//	    apiBreaker = pipz.NewCircuitBreaker(
+//	        ConnectorAPIBreaker,
+//	        pipz.Apply(ProcessorAPICall, callExternalAPI),
+//	        5,                    // Open after 5 failures
+//	        30 * time.Second,     // Try recovery after 30s
+//	    )
+//
+//	    // Internal database - more tolerant
+//	    dbBreaker = pipz.NewCircuitBreaker(
+//	        ConnectorDatabaseBreaker,
+//	        pipz.Apply("db-query", queryDatabase),
+//	        10,                   // Open after 10 failures
+//	        10 * time.Second,     // Try recovery after 10s
+//	    )
 //	)
+//
+//	// Combine with rate limiting for full protection
+//	func createResilientPipeline() pipz.Chainable[Request] {
+//	    return pipz.NewSequence("resilient-pipeline",
+//	        rateLimiter,    // Protect downstream from overload
+//	        apiBreaker,     // Fail fast if service is down
+//	        pipz.NewRetry("retry", processor, 3),  // Retry transient failures
+//	    )
+//	}
 type CircuitBreaker[T any] struct {
 	lastFailTime     time.Time
 	processor        Chainable[T]

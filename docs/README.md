@@ -27,6 +27,7 @@ Welcome to pipz - a type-safe, composable pipeline library for Go.
 - **[Testing](./guides/testing.md)** - pipz-specific testing patterns
 - **[Performance](./guides/performance.md)** - Optimization and benchmarking
 - **[Best Practices](./guides/best-practices.md)** - Production-ready patterns
+- **[Clone Implementation](./guides/cloning.md)** - Implement Clone() correctly for concurrent processing
 
 ## Reference
 
