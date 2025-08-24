@@ -640,7 +640,7 @@ func EnableFraudDetection() {
 			if strings.Contains(pipeErr.Error(), "payment") {
 				pipeErr.InputData.Status = StatusPending
 				pipeErr.InputData.ProcessingLog = append(pipeErr.InputData.ProcessingLog, "saved for retry")
-				
+
 				// Save the order with pending status.
 				if saveErr := OrderDB.Save(ctx, pipeErr.InputData); saveErr != nil {
 					// If save fails, keep original error but log the save failure.

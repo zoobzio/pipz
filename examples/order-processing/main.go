@@ -284,9 +284,9 @@ func runSprint(ctx context.Context, sprintNum int) {
 		if err != nil {
 			var pipeErr *pipz.Error[Order]
 			if errors.As(err, &pipeErr) {
-				fmt.Printf("❌ Failed: %v\n", pipeErr.Err)        //nolint:errcheck // demo code.
+				fmt.Printf("❌ Failed: %v\n", pipeErr.Err) //nolint:errcheck // demo code.
 			} else {
-				fmt.Printf("❌ Failed: %v\n", err)        //nolint:errcheck // demo code.
+				fmt.Printf("❌ Failed: %v\n", err) //nolint:errcheck // demo code.
 			}
 			fmt.Printf("   Status: %s\n", result.Status) //nolint:errcheck // demo code.
 			if sprintNum >= 4 && result.FraudScore > 0 {

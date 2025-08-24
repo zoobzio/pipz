@@ -117,8 +117,7 @@ jobs:
         github.event_name == 'push' || 
         (github.event_name == 'workflow_dispatch' && needs.determine-version.outputs.should_create_tag == 'true')
       )
-    needs: 
-      - determine-version
+    needs: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["determine-version"]') || fromJSON('[]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
