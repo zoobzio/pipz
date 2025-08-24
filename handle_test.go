@@ -223,19 +223,16 @@ func TestHandle(t *testing.T) {
 		// This test covers lines 82-91 in handle.go where non-Error types are wrapped
 		plainErr := errors.New("plain error not wrapped in Error type")
 		var capturedErr *Error[int]
-		
 		processor := Apply("plain-error", func(_ context.Context, _ int) (int, error) {
 			return 0, plainErr // Return error with zero value, not 42
 		})
-		
 		errorHandler := Effect("capture-handler", func(_ context.Context, err *Error[int]) error {
 			capturedErr = err
 			return nil
 		})
-		
 		handle := NewHandle("test-handle", processor, errorHandler)
 		result, err := handle.Process(context.Background(), 5)
-		
+
 		// Original error should pass through
 		if !errors.Is(err, plainErr) {
 			t.Fatalf("expected plain error to pass through, got %v", err)
@@ -243,7 +240,7 @@ func TestHandle(t *testing.T) {
 		if result != 0 {
 			t.Errorf("expected result 0 on error, got %d", result)
 		}
-		
+
 		// Handler should have been called with wrapped error
 		if capturedErr == nil {
 			t.Fatal("error handler not called")

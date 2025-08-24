@@ -315,30 +315,28 @@ func TestBackoff(t *testing.T) {
 	t.Run("Context Cancellation Between Retry Attempts", func(t *testing.T) {
 		// This test covers lines 74-84 in retry.go where context is checked between attempts
 		attemptCount := atomic.Int32{}
-		processor := Apply("flaky", func(ctx context.Context, n int) (int, error) {
+		processor := Apply("flaky", func(_ context.Context, _ int) (int, error) {
 			attemptCount.Add(1)
 			// All attempts fail to trigger retry loop
 			return 0, errors.New("attempt failed")
 		})
-		
+
 		retry := NewRetry("test-retry", processor, 5)
-		
 		// Create context that we'll cancel during retry
 		ctx, cancel := context.WithCancel(context.Background())
-		
 		// Start retry in goroutine
 		done := make(chan struct{})
 		var err error
-		
+
 		go func() {
 			_, err = retry.Process(ctx, 10)
 			close(done)
 		}()
-		
+
 		// Wait for first attempt, then cancel to trigger context check in retry loop
 		time.Sleep(5 * time.Millisecond)
 		cancel()
-		
+
 		// Wait for retry to complete
 		select {
 		case <-done:
@@ -346,12 +344,12 @@ func TestBackoff(t *testing.T) {
 		case <-time.After(100 * time.Millisecond):
 			t.Fatal("retry did not complete in time")
 		}
-		
+
 		// Should have context cancellation error
 		if err == nil {
 			t.Fatal("expected error")
 		}
-		
+
 		var pipeErr *Error[int]
 		if errors.As(err, &pipeErr) {
 			// Should be canceled error from context check between attempts
@@ -362,8 +360,8 @@ func TestBackoff(t *testing.T) {
 				t.Errorf("expected retry name in error path, got %v", pipeErr.Path)
 			}
 		}
-		
-		// Should have attempted at least once before context was cancelled
+
+		// Should have attempted at least once before context was canceled
 		attempts := attemptCount.Load()
 		if attempts < 1 {
 			t.Errorf("expected at least 1 attempt, got %d", attempts)
@@ -377,34 +375,34 @@ func TestBackoff(t *testing.T) {
 			attempts.Add(1)
 			return 0, errors.New("always fails")
 		})
-		
+
 		// Create backoff retry with base delay that will cause timeout
 		backoff := NewBackoff("test-backoff", processor, 5, 20*time.Millisecond)
-		
+
 		// Use context with short timeout
 		ctx, cancel := context.WithTimeout(context.Background(), 35*time.Millisecond)
 		defer cancel()
-		
+
 		start := time.Now()
 		_, err := backoff.Process(ctx, 5)
 		elapsed := time.Since(start)
-		
+
 		if err == nil {
 			t.Fatal("expected error")
 		}
-		
+
 		// Should have attempted 2 times before timeout
 		// First: immediate, Second: after 20ms, Third would be after 40ms but times out at 35ms
 		attemptCount := attempts.Load()
 		if attemptCount != 2 {
 			t.Errorf("expected 2 attempts before timeout, got %d", attemptCount)
 		}
-		
+
 		// Should have taken approximately 35ms
 		if elapsed < 30*time.Millisecond || elapsed > 50*time.Millisecond {
 			t.Errorf("expected ~35ms elapsed, got %v", elapsed)
 		}
-		
+
 		// Check error type - could be timeout or last error depending on exact timing
 		var pipeErr *Error[int]
 		if errors.As(err, &pipeErr) {
