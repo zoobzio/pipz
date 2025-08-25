@@ -108,16 +108,51 @@ jobs:
           echo "**Dry Run:** ${{ github.event.inputs.dry_run }}" >> $GITHUB_STEP_SUMMARY
           echo "**Tag Created:** ${{ steps.decision.outputs.create }}" >> $GITHUB_STEP_SUMMARY
 
-  # Validate the module before release
-  validate:
-    name: Validate Module
-    # Conditional: run for tag pushes OR after determine-version succeeds
-    if: |
-      always() && (
-        github.event_name == 'push' || 
-        (github.event_name == 'workflow_dispatch' && needs.determine-version.outputs.should_create_tag == 'true')
-      )
-    needs: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["determine-version"]') || fromJSON('[]') }}
+  # Validate the module for tag pushes
+  validate-tag:
+    name: Validate Module (Tag)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Required for changelog generation
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      
+      - name: Validate go.mod
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum || (echo "go.mod/go.sum need updating" && exit 1)
+      
+      - name: Run tests
+        run: |
+          go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+      
+      - name: Run linting
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64.8
+          args: --config=.golangci.yml --timeout=5m
+      
+      - name: Test examples
+        run: |
+          for dir in examples/*/; do
+            if [ -f "$dir/go.mod" ]; then
+              echo "Testing $dir"
+              (cd "$dir" && go test -v -race ./...)
+            fi
+          done
+
+  # Validate the module for manual dispatch
+  validate-manual:
+    name: Validate Module (Manual)
+    if: github.event_name == 'workflow_dispatch' && needs.determine-version.outputs.should_create_tag == 'true'
+    needs: 
+      - determine-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -156,7 +191,13 @@ jobs:
   # Create the release using GoReleaser
   release:
     name: Create Release
-    needs: validate
+    # Run after either validation job completes successfully
+    needs: 
+      - validate-tag
+      - validate-manual
+    if: |
+      (github.event_name == 'push' && needs.validate-tag.result == 'success') ||
+      (github.event_name == 'workflow_dispatch' && needs.validate-manual.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
