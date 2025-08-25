@@ -4,4 +4,18 @@ go 1.23.0
 
 toolchain go1.24.5
 
+retract (
+	v1.0.1 // Not part of the package
+	v1.0.0 // Not part of the package
+	v0.6.0 // Not part of the package
+	v0.5.1 // Not part of the package
+	v0.5.0 // Not part of the package
+	v0.4.0 // Not part of the package
+	v0.3.0 // Not part of the package
+	v0.2.1 // Not part of the package
+	v0.2.0 // Not part of the package
+	v0.1.0 // Not part of the package
+	v0.0.1 // Not part of the package
+)
+
 require golang.org/x/time v0.12.0
