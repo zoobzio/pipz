@@ -49,6 +49,7 @@ Welcome to pipz - a type-safe, composable pipeline library for Go.
 ### Connectors
 - [Sequence](./reference/connectors/sequence.md) - Sequential processing
 - [Concurrent](./reference/connectors/concurrent.md) - Parallel execution
+- [WorkerPool](./reference/connectors/workerpool.md) - Bounded parallel execution
 - [Race](./reference/connectors/race.md) - First success wins
 - [Contest](./reference/connectors/contest.md) - First matching result
 - [Switch](./reference/connectors/switch.md) - Conditional routing

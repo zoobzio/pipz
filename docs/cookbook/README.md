@@ -52,6 +52,18 @@ Create robust Extract-Transform-Load pipelines for data processing at scale. Han
 
 ---
 
+### [Bounded Parallelism](./bounded-parallelism.md)
+Control resource usage with WorkerPool for predictable parallel processing. Handle rate-limited APIs and resource-constrained environments efficiently.
+
+**You'll learn:**
+- WorkerPool configuration strategies
+- API rate limit management
+- Database connection pooling
+- Memory-constrained processing
+- Dynamic worker adjustment
+
+---
+
 ### [Common Patterns](./patterns.md)
 Additional patterns and techniques for advanced pipz usage, including custom connectors and specialized processing strategies.
 
@@ -83,12 +95,20 @@ resilient := pipz.NewRateLimiter("rate",
 ### Parallel Processing
 
 ```go
-// Fire-and-forget multiple operations
-parallel := pipz.NewConcurrent[T]("parallel",
+// Unbounded parallel operations
+concurrent := pipz.NewConcurrent[T]("parallel",
     sendEmail,
     updateDatabase,
     publishEvent,
     recordMetrics,
+)
+
+// Bounded parallel operations (e.g., rate-limited API)
+pool := pipz.NewWorkerPool[T]("limited", 5,
+    callAPI1,
+    callAPI2,
+    callAPI3,
+    // ... many more, but only 5 run concurrently
 )
 ```
 

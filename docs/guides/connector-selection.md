@@ -11,6 +11,8 @@ What do you need?
 │
 ├─ Parallel processing?
 │   ├─ Need all results? → Concurrent
+│   ├─ Bounded parallelism? → WorkerPool
+│   ├─ Fire and forget? → Scaffold
 │   ├─ Need fastest? → Race
 │   └─ Need best match? → Contest
 │
@@ -34,6 +36,8 @@ What do you need?
 ├────────────────┼──────────┼────────────┼──────────┼─────────────────────┤
 │ Sequence       │    No    │ Until fail │ Last     │ Step-by-step flow   │
 │ Concurrent     │   Yes    │    Yes     │ Original │ Side effects        │
+│ WorkerPool     │   Yes*   │    Yes     │ Original │ Bounded parallelism │
+│ Scaffold       │   Yes    │    Yes     │ Original │ Fire-and-forget     │
 │ Race           │   Yes    │ First wins │ First    │ Fastest response    │
 │ Contest        │   Yes    │ Until pass │ Matching │ Quality threshold   │
 │ Switch         │    No    │ One branch │ Selected │ Conditional routing │
@@ -45,7 +49,7 @@ What do you need?
 └────────────────┴──────────┴────────────┴──────────┴─────────────────────┘
 
 Legend:
-• Parallel: Whether processors run concurrently
+• Parallel: Whether processors run concurrently (*WorkerPool limits concurrency)
 • All Run?: Whether all processors execute or stop early
 • Returns: What data is returned to caller
 • Primary Use Case: Main scenario for using this connector
@@ -90,6 +94,31 @@ concurrent := pipz.NewConcurrent[T]("parallel", proc1, proc2, proc3)
 **Don't use when:**
 - Order matters
 - Operations depend on each other
+
+---
+
+### You need to: Run parallel operations with limited resources
+
+**Solution:** `WorkerPool`
+
+```go
+pool := pipz.NewWorkerPool[T]("limited", 3, proc1, proc2, proc3, proc4, proc5)
+```
+
+**When to use:**
+- Resource-constrained environments
+- Rate-limited external services
+- Controlled database connections
+- Preventing memory exhaustion
+- Managing CPU-intensive operations
+
+**Requirements:**
+- Type T must implement `Cloner[T]`
+
+**Don't use when:**
+- Need unbounded parallelism (use `Concurrent`)
+- Operations must complete in order (use `Sequence`)
+- Fire-and-forget semantics needed (use `Scaffold`)
 
 ---
 
@@ -269,6 +298,8 @@ timeout := pipz.NewTimeout[T]("bounded", processor, 5*time.Second)
 |-----------|-----------|-----------|--------------|-----------|
 | Sequence | No | Yes | No | No |
 | Concurrent | Yes | Yes | Yes | No |
+| WorkerPool | Limited | Yes | Yes | No |
+| Scaffold | Yes | No** | Yes | No |
 | Race | Yes | Yes | Yes | No |
 | Contest | Yes | Yes | Yes | No |
 | Switch | No | Yes | No | No |
@@ -279,6 +310,7 @@ timeout := pipz.NewTimeout[T]("bounded", processor, 5*time.Second)
 | Timeout | No | Yes | No | No |
 
 *Fallback always returns a value (uses fallback on error)
+**Scaffold errors are not reported back
 
 ## Common Combinations
 
@@ -307,4 +339,18 @@ fetch := pipz.NewFallback("fetch",
 router := pipz.NewSwitch[T]("router", routeFunc).
     AddRoute("batch", pipz.NewConcurrent[T]("batch", processors...)).
     AddRoute("sequential", pipz.NewSequence[T]("seq", processors...))
+```
+
+### Resource-Constrained Processing
+```go
+// Limit concurrent API calls to avoid rate limits
+apiCalls := pipz.NewWorkerPool[T]("api-limited", 5,
+    pipz.Apply("service-a", callServiceA),
+    pipz.Apply("service-b", callServiceB),
+    pipz.Apply("service-c", callServiceC),
+    pipz.Apply("service-d", callServiceD),
+    pipz.Apply("service-e", callServiceE),
+    pipz.Apply("service-f", callServiceF),
+    // Only 5 will run concurrently
+)
 ```

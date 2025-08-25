@@ -168,6 +168,7 @@ func main() {
 **Connectors** compose any Chainable[T] implementations:
 - `Sequence` - Run processors in order with dynamic modification
 - `Concurrent` - Run in parallel, wait for completion (requires `Cloner` interface)
+- `WorkerPool` - Bounded parallelism with fixed worker count (requires `Cloner` interface)
 - `Scaffold` - Fire-and-forget parallel execution (requires `Cloner` interface)
 - `Switch` - Route based on conditions
 - `Fallback` - Try primary, fall back on error

@@ -18,11 +18,15 @@ Need parallel? ──No──→ Need conditions? ──No──→ Sequence
       │                       │
       │                      Yes → Switch
       │
-     Yes → Need all results? ──No──→ Fastest? → Race
-                │                        │
-                │                       Best? → Contest
-                │
-               Yes → Concurrent
+     Yes → Bounded? ──Yes──→ WorkerPool
+            │
+           No → Need all results? ──No──→ Fastest? → Race
+                      │                        │
+                      │                       Best? → Contest
+                      │
+                     Yes → Fire & forget? ──Yes──→ Scaffold
+                                 │
+                                No → Concurrent
 ```
 
 ## Common Patterns (Copy & Paste)
@@ -69,9 +73,14 @@ safe := pipz.NewFallback("safe", riskyOp, safeDefault)
 
 ### Parallel Processing
 ```go
-// Type must implement Cloner[T]
+// Unbounded - Type must implement Cloner[T]
 parallel := pipz.NewConcurrent[T]("notify",
     sendEmail, sendSMS, logEvent,
+)
+
+// Bounded - limit to N concurrent operations
+pool := pipz.NewWorkerPool[T]("limited", 5,
+    apiCall1, apiCall2, apiCall3, // ... many more
 )
 ```
 
