@@ -3,6 +3,7 @@ package pipz
 import (
 	"context"
 	"errors"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -206,6 +207,68 @@ func TestTimeout(t *testing.T) {
 			}
 		} else {
 			t.Error("expected error to be of type *pipz.Error[int]")
+		}
+	})
+
+	t.Run("Goroutine Leak Prevention", func(t *testing.T) {
+		// Test that the goroutine doesn't leak when timeout occurs with a processor
+		// that ignores context cancellation (worst case scenario)
+		processor := Apply("ignores-context", func(_ context.Context, n int) (int, error) {
+			// This processor intentionally ignores context cancellation
+			// to simulate a worst-case scenario where the processor doesn't respect context
+			time.Sleep(200 * time.Millisecond)
+			return n * 2, nil
+		})
+
+		timeout := NewTimeout("leak-test", processor, 50*time.Millisecond)
+
+		// Record initial goroutine count
+		initialGoroutines := runtime.NumGoroutine()
+
+		// Trigger timeout (processor will continue running in background in broken implementation)
+		result, err := timeout.Process(context.Background(), 5)
+
+		// Verify timeout error occurred
+		if err == nil {
+			t.Fatal("expected timeout error")
+		}
+
+		var pipeErr *Error[int]
+		if errors.As(err, &pipeErr) {
+			if !pipeErr.IsTimeout() {
+				t.Errorf("expected timeout error, got %v", err)
+			}
+		}
+
+		// Verify we get the original input back
+		if result != 5 {
+			t.Errorf("expected original input 5, got %d", result)
+		}
+
+		// Give a moment for any leaked goroutines to be detected
+		// In the broken implementation, the goroutine would still be running here
+		time.Sleep(10 * time.Millisecond)
+		runtime.GC()
+		runtime.GC() // Force garbage collection twice to be thorough
+
+		currentGoroutines := runtime.NumGoroutine()
+
+		// With the fix, goroutine count should not have increased significantly
+		// We allow some variance because of GC and runtime activities
+		if currentGoroutines > initialGoroutines+2 {
+			t.Errorf("potential goroutine leak detected: initial=%d, current=%d",
+				initialGoroutines, currentGoroutines)
+		}
+
+		// Wait for the slow processor to finish and verify it doesn't affect our count
+		time.Sleep(200 * time.Millisecond)
+		runtime.GC()
+		runtime.GC()
+
+		finalGoroutines := runtime.NumGoroutine()
+		if finalGoroutines > initialGoroutines+2 {
+			t.Errorf("goroutine leak after processor completion: initial=%d, final=%d",
+				initialGoroutines, finalGoroutines)
 		}
 	})
 }

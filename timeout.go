@@ -61,33 +61,41 @@ func (t *Timeout[T]) Process(ctx context.Context, data T) (T, error) {
 	ctx, cancel := context.WithTimeout(ctx, duration)
 	defer cancel()
 
-	done := make(chan struct{})
-	var result T
-	var err error
+	// Channel to receive the result from the goroutine
+	type processResult struct {
+		result T
+		err    error
+	}
+	resultCh := make(chan processResult, 1)
 
 	go func() {
-		result, err = processor.Process(ctx, data)
-		close(done)
+		result, err := processor.Process(ctx, data)
+		// Use non-blocking send to avoid goroutine leak if main function has already returned
+		select {
+		case resultCh <- processResult{result: result, err: err}:
+		case <-ctx.Done():
+			// Context was canceled, don't block trying to send result
+		}
 	}()
 
 	select {
-	case <-done:
-		if err != nil {
+	case res := <-resultCh:
+		if res.err != nil {
 			var pipeErr *Error[T]
-			if errors.As(err, &pipeErr) {
+			if errors.As(res.err, &pipeErr) {
 				// Prepend this timeout's name to the path
 				pipeErr.Path = append([]Name{t.name}, pipeErr.Path...)
-				return result, pipeErr
+				return res.result, pipeErr
 			}
 			// Handle non-pipeline errors by wrapping them
-			return result, &Error[T]{
+			return res.result, &Error[T]{
 				Timestamp: time.Now(),
 				InputData: data,
-				Err:       err,
+				Err:       res.err,
 				Path:      []Name{t.name},
 			}
 		}
-		return result, nil
+		return res.result, nil
 	case <-ctx.Done():
 		// Timeout occurred - return error
 		return data, &Error[T]{
