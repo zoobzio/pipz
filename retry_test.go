@@ -145,6 +145,105 @@ func TestRetry(t *testing.T) {
 			t.Errorf("expected maxAttempts to be clamped to 1, got %d", retry.GetMaxAttempts())
 		}
 	})
+
+	t.Run("Context Cancellation Between Attempts", func(t *testing.T) {
+		// This test covers lines 74-84 in retry.go where context is checked between attempts
+		calls := 0
+		var cancelFunc context.CancelFunc
+
+		processor := Apply("test", func(_ context.Context, _ int) (int, error) {
+			calls++
+			if calls == 1 {
+				// Cancel context after first attempt fails
+				cancelFunc()
+			}
+			return 0, errors.New("processor error")
+		})
+
+		retry := NewRetry("test-retry", processor, 5) // Allow multiple retries
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancelFunc = cancel // Store cancel function for use in processor
+
+		_, err := retry.Process(ctx, 5)
+
+		// Should get a cancellation error, not the processor error
+		if err == nil {
+			t.Fatal("expected error from context cancellation")
+		}
+
+		var pipzErr *Error[int]
+		if errors.As(err, &pipzErr) {
+			if !pipzErr.IsCanceled() {
+				t.Errorf("expected canceled error, got %v", err)
+			}
+			// Should show the retry name in the path
+			if len(pipzErr.Path) == 0 || pipzErr.Path[0] != "test-retry" {
+				t.Errorf("expected retry name in error path, got %v", pipzErr.Path)
+			}
+		} else {
+			t.Errorf("expected pipz.Error, got %T", err)
+		}
+
+		// Should have been called only once before cancellation was detected
+		if calls != 1 {
+			t.Errorf("expected 1 call before cancellation, got %d", calls)
+		}
+	})
+
+	t.Run("Context Timeout Between Attempts", func(t *testing.T) {
+		// Test timeout context cancellation between attempts
+		calls := 0
+
+		processor := Apply("test", func(_ context.Context, _ int) (int, error) {
+			calls++
+			// Add delay to ensure timeout can occur
+			time.Sleep(50 * time.Millisecond)
+			return 0, errors.New("processor error")
+		})
+
+		retry := NewRetry("test-retry", processor, 5)
+
+		// Create context that times out very quickly
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		defer cancel()
+
+		_, err := retry.Process(ctx, 5)
+
+		// Should get a timeout error
+		if err == nil {
+			t.Fatal("expected error from context timeout")
+		}
+
+		var pipzErr *Error[int]
+		if errors.As(err, &pipzErr) {
+			if !pipzErr.IsTimeout() {
+				t.Errorf("expected timeout error, got %v", err)
+			}
+		} else {
+			t.Errorf("expected pipz.Error, got %T", err)
+		}
+	})
+
+	t.Run("Defensive LastErr Nil Case", func(t *testing.T) {
+		// This tests the defensive code at line 103 in retry.go where lastErr could theoretically be nil
+		// This is unlikely to happen in practice, but the code handles it defensively
+
+		// Create a retry with zero attempts (clamped to 1)
+		processor := Transform("success", func(_ context.Context, n int) int {
+			return n * 2 // Always succeeds
+		})
+
+		retry := NewRetry("test-retry", processor, 1)
+		result, err := retry.Process(context.Background(), 5)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result != 10 {
+			t.Errorf("expected 10, got %d", result)
+		}
+	})
 }
 
 func TestBackoff(t *testing.T) {
@@ -410,6 +509,25 @@ func TestBackoff(t *testing.T) {
 			if !pipeErr.IsTimeout() && !strings.Contains(pipeErr.Err.Error(), "always fails") {
 				t.Errorf("expected timeout or 'always fails' error, got: %v", pipeErr.Err)
 			}
+		}
+	})
+
+	t.Run("Backoff Defensive LastErr Nil Case", func(t *testing.T) {
+		// This tests the defensive code at line 232 in retry.go where lastErr could theoretically be nil
+		// This is unlikely to happen in practice, but the code handles it defensively
+
+		processor := Transform("success", func(_ context.Context, n int) int {
+			return n * 3 // Always succeeds
+		})
+
+		backoff := NewBackoff("test-backoff", processor, 1, 10*time.Millisecond)
+		result, err := backoff.Process(context.Background(), 7)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result != 21 { // 7 * 3
+			t.Errorf("expected 21, got %d", result)
 		}
 	})
 }

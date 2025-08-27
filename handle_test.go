@@ -262,4 +262,88 @@ func TestHandle(t *testing.T) {
 			t.Errorf("expected second path element 'plain-error', got %s", capturedErr.Path[1])
 		}
 	})
+
+	t.Run("Pipeline Error Path Extension", func(t *testing.T) {
+		// This test covers lines 74-80 in handle.go where *Error[T] types get path extension
+		// We need to create a processor that passes pipeline errors through unchanged
+		// We'll use a Sequence with a failing processor inside
+		expectedErr := errors.New("underlying processor failed")
+		var capturedErr *Error[int]
+
+		// Create a failing processor inside a sequence
+		failingProcessor := Apply("inner", func(_ context.Context, _ int) (int, error) {
+			return 0, expectedErr
+		})
+
+		// Sequence will preserve the pipeline error from the Apply processor
+		sequenceProcessor := NewSequence("sequence", failingProcessor)
+
+		errorHandler := Effect("capture-pipeline-error", func(_ context.Context, err *Error[int]) error {
+			capturedErr = err
+			return nil
+		})
+
+		handle := NewHandle("test-handle", sequenceProcessor, errorHandler)
+		result, err := handle.Process(context.Background(), 5)
+
+		// Original pipeline error should pass through
+		var pipeErr *Error[int]
+		if !errors.As(err, &pipeErr) {
+			t.Fatalf("expected pipeline error, got %T: %v", err, err)
+		}
+		if result != 0 {
+			t.Errorf("expected result 0 on error, got %d", result)
+		}
+
+		// Handler should have been called with the same pipeline error
+		if capturedErr == nil {
+			t.Fatal("error handler not called")
+		}
+		if capturedErr.InputData != 5 {
+			t.Errorf("expected input data 5, got %d", capturedErr.InputData)
+		}
+		if !errors.Is(capturedErr.Err, expectedErr) {
+			t.Error("pipeline error should contain original error")
+		}
+
+		// Path should be extended: [test-handle, sequence, inner]
+		// Handle prepends "test-handle" to the sequence's path
+		if len(capturedErr.Path) != 3 {
+			t.Errorf("expected path length 3, got %d: %v", len(capturedErr.Path), capturedErr.Path)
+		}
+		if capturedErr.Path[0] != "test-handle" {
+			t.Errorf("expected first path element 'test-handle', got %s", capturedErr.Path[0])
+		}
+		if capturedErr.Path[1] != "sequence" {
+			t.Errorf("expected second path element 'sequence', got %s", capturedErr.Path[1])
+		}
+		if capturedErr.Path[2] != "inner" {
+			t.Errorf("expected third path element 'inner', got %s", capturedErr.Path[2])
+		}
+	})
+
+	t.Run("Success With Non-Zero Result", func(t *testing.T) {
+		// This test specifically covers the success path return (line 93) with non-zero result
+		handlerCalled := false
+		processor := Transform("multiply", func(_ context.Context, n int) int {
+			return n * 42 // Non-zero result
+		})
+		errorHandler := Effect("should-not-run", func(_ context.Context, _ *Error[int]) error {
+			handlerCalled = true
+			return nil
+		})
+
+		handle := NewHandle("success-handle", processor, errorHandler)
+		result, err := handle.Process(context.Background(), 3)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result != 126 { // 3 * 42
+			t.Errorf("expected 126, got %d", result)
+		}
+		if handlerCalled {
+			t.Error("error handler should not be called on success")
+		}
+	})
 }
