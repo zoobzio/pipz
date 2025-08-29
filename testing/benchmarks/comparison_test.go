@@ -19,6 +19,72 @@ func (i ClonableInt) Clone() ClonableInt {
 	return i
 }
 
+// Realistic data structures for benchmarking.
+type User struct {
+	ID       int64
+	Name     string
+	Email    string
+	Age      int
+	Metadata map[string]interface{}
+}
+
+func (u User) Clone() User {
+	// Deep copy the metadata map
+	clonedMetadata := make(map[string]interface{}, len(u.Metadata))
+	for k, v := range u.Metadata {
+		clonedMetadata[k] = v
+	}
+	return User{
+		ID:       u.ID,
+		Name:     u.Name,
+		Email:    u.Email,
+		Age:      u.Age,
+		Metadata: clonedMetadata,
+	}
+}
+
+type Order struct {
+	ID         string
+	CustomerID int64
+	Items      []OrderItem
+	Total      float64
+	Status     string
+	Timestamp  time.Time
+	Shipping   ShippingInfo
+}
+
+func (o Order) Clone() Order {
+	// Deep copy items slice
+	clonedItems := make([]OrderItem, len(o.Items))
+	copy(clonedItems, o.Items)
+
+	return Order{
+		ID:         o.ID,
+		CustomerID: o.CustomerID,
+		Items:      clonedItems,
+		Total:      o.Total,
+		Status:     o.Status,
+		Timestamp:  o.Timestamp,
+		Shipping:   o.Shipping,
+	}
+}
+
+type OrderItem struct {
+	ProductID string
+	Quantity  int
+	Price     float64
+}
+
+type ShippingInfo struct {
+	Address string
+	City    string
+	State   string
+	ZipCode string
+	Country string
+	Method  string
+	Cost    float64
+}
+
 // BenchmarkErrorHandlingPatterns compares pipz error handling with traditional patterns.
 func BenchmarkErrorHandlingPatterns(b *testing.B) {
 	ctx := context.Background()
@@ -703,57 +769,30 @@ func traditionalFirstSuccess(ctx context.Context, data int) (int, error) {
 	}
 }
 
-func traditionalComplexProcessing(ctx context.Context, data int) (int, error) {
-	// Validation with fallback
+func traditionalComplexProcessing(_ context.Context, data int) (int, error) {
+	// FIXED: Genuinely equivalent implementation without artificial inefficiencies
+
+	// Validation with fallback - equivalent to pipz Fallback
 	result := data
 	if result <= 0 {
 		if result < -100 {
 			return 0, errors.New("too negative")
 		}
+		// Fallback validation passed
 	}
 
-	// Simulate rate limiting (simplified)
-	if operationCounter%100 == 0 {
-		return 0, errors.New("rate limited")
-	}
+	// Sequential processing equivalent to pipz sequence
+	// Step 1: multiply by 2
+	result *= 2
 
-	// Simulate circuit breaker (simplified)
-	if operationCounter%50 == 0 {
-		return 0, errors.New("circuit open")
-	}
+	// Step 2: add 100
+	result += 100
 
-	// Retry logic (simplified)
-	for attempt := 0; attempt < 3; attempt++ {
-		// Timeout protection (simplified)
-		timeoutCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
-
-		// Parallel processing (simplified)
-		done := make(chan bool, 3)
-		go func() {
-			result *= 2
-			done <- true
-		}()
-		go func() {
-			result += 100
-			done <- true
-		}()
-		go func() {
-			result -= 10
-			done <- true
-		}()
-
-		for i := 0; i < 3; i++ {
-			select {
-			case <-done:
-			case <-timeoutCtx.Done():
-				cancel()
-				return 0, timeoutCtx.Err()
-			}
-		}
-		cancel()
-	}
+	// Step 3: subtract 10
+	result -= 10
 
 	// Final processing
 	result += 1000
+
 	return result, nil
 }

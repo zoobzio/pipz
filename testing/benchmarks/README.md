@@ -19,11 +19,20 @@ Benchmarks realistic pipeline compositions:
 - **Dynamic Pipelines**: Runtime modification performance
 
 ### Comparison Benchmarks (`comparison_test.go`)
-Compares pipz with traditional Go patterns:
+Compares pipz with equivalent traditional Go patterns:
 - **Error Handling**: pipz vs traditional if-err chains
-- **Retry Logic**: pipz vs manual retry implementations
-- **Circuit Breaking**: pipz vs popular libraries
-- **Pipeline Patterns**: pipz vs hand-coded compositions
+- **Retry Logic**: pipz vs manual retry implementations  
+- **Circuit Breaking**: pipz vs equivalent implementations
+- **Pipeline Patterns**: pipz vs functionally equivalent hand-coded patterns
+
+**Important**: Traditional implementations are designed to be functionally equivalent to pipz operations, not artificially complex. Performance comparisons show the overhead/benefit of pipz abstractions vs direct implementation.
+
+### Realistic Data Benchmarks (`realistic_data_test.go`)
+Benchmarks with production-representative data structures:
+- **Simple vs Complex**: Integer vs User/Order struct processing
+- **Cloning Overhead**: Deep copy performance for concurrent processing
+- **Error Context**: Rich error information overhead with large data
+- **Memory Impact**: Allocation patterns with realistic payloads
 
 ## Running Benchmarks
 
@@ -37,6 +46,9 @@ go test -v -bench=. -benchmem ./testing/benchmarks/...
 
 # Run multiple times for statistical significance
 go test -v -bench=. -count=5 ./testing/benchmarks/...
+
+# Run realistic data benchmarks
+go test -v -bench=BenchmarkRealistic -benchmem ./testing/benchmarks/...
 ```
 
 ### Specific Categories
@@ -81,6 +93,36 @@ Based on current benchmarks, pipz aims for:
 - **Error wrapping**: ~300-400ns with 3 allocations
 - **Context propagation**: Essentially free (< 1ns)
 - **Concurrent processing**: Scales linearly with goroutine count
+
+## Benchmark Methodology
+
+### Comparison Fairness
+All comparison benchmarks follow strict equivalence principles:
+
+1. **Functional Equivalence**: Traditional implementations produce identical results to pipz equivalents
+2. **No Artificial Complexity**: Traditional code uses reasonable, production-quality patterns
+3. **Same Error Handling**: Both approaches handle identical error conditions
+4. **Equivalent Resource Usage**: No intentional resource waste in traditional implementations
+
+### Data Realism
+Benchmarks include both simple and realistic data:
+- **Simple Data**: ClonableInt for baseline overhead measurement
+- **Realistic Data**: User/Order structs representing production payloads
+- **Cloning Impact**: Deep copy overhead for concurrent processing
+- **Memory Patterns**: Real allocation patterns with production-size data
+
+### Measurement Accuracy
+- **Setup Exclusion**: Setup time excluded via `b.ResetTimer()`
+- **Allocation Tracking**: Memory allocations measured with `b.ReportAllocs()`
+- **Compiler Optimization**: Results stored to prevent dead code elimination
+- **Statistical Validity**: Multiple runs recommended for stable results
+
+### Performance Claims
+Performance claims are based on:
+1. **Absolute Measurements**: pipz overhead in isolation
+2. **Fair Comparisons**: Against equivalent traditional implementations
+3. **Realistic Workloads**: Representative data structures and operations
+4. **Documented Conditions**: Clear measurement environment and methodology
 
 ## Benchmark Data Analysis
 
