@@ -398,4 +398,64 @@ func TestContest(t *testing.T) {
 			t.Errorf("expected value 75 under deadline pressure, got %d", result.Value)
 		}
 	})
+
+	t.Run("Contest condition panic recovery", func(t *testing.T) {
+		panicCondition := func(_ context.Context, _ TestData) bool {
+			panic("contest condition panic")
+		}
+		processor := Apply("processor", func(_ context.Context, d TestData) (TestData, error) {
+			d.Value = 100
+			return d, nil
+		})
+
+		contest := NewContest("panic_contest", panicCondition, processor)
+		data := TestData{Value: 42}
+
+		result, err := contest.Process(context.Background(), data)
+
+		// Contest should return zero value when condition panics
+		if result.Value != 0 {
+			t.Errorf("expected zero value 0, got %d", result.Value)
+		}
+
+		var pipzErr *Error[TestData]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error")
+		}
+
+		if pipzErr.Path[0] != "panic_contest" {
+			t.Errorf("expected path to start with 'panic_contest', got %v", pipzErr.Path)
+		}
+
+		if pipzErr.InputData.Value != 42 {
+			t.Errorf("expected input data value 42, got %d", pipzErr.InputData.Value)
+		}
+	})
+
+	t.Run("Contest processor panic recovery", func(t *testing.T) {
+		condition := func(_ context.Context, d TestData) bool {
+			return d.Value > 50
+		}
+		panicProcessor := Apply("panic_processor", func(_ context.Context, _ TestData) (TestData, error) {
+			panic("contest processor panic")
+		})
+		normalProcessor := Apply("normal_processor", func(_ context.Context, d TestData) (TestData, error) {
+			d.Value = 100
+			return d, nil
+		})
+
+		contest := NewContest("panic_contest", condition, panicProcessor, normalProcessor)
+		data := TestData{Value: 42}
+
+		result, err := contest.Process(context.Background(), data)
+
+		// Normal processor should succeed
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result.Value != 100 {
+			t.Errorf("expected normal processor result 100, got %d", result.Value)
+		}
+	})
 }

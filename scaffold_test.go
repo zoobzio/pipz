@@ -192,4 +192,30 @@ func TestScaffold(t *testing.T) {
 			t.Error("timeout waiting for trace ID")
 		}
 	})
+
+	t.Run("Scaffold panic recovery", func(t *testing.T) {
+		// Scaffold is fire-and-forget, so panics happen in background goroutines
+		// We test that the main process doesn't panic and returns original data
+		panicEffect := Effect("panic_effect", func(_ context.Context, _ TestData) error {
+			panic("scaffold panic")
+		})
+
+		scaffold := NewScaffold("panic_scaffold", panicEffect)
+
+		original := TestData{Value: 42}
+		result, err := scaffold.Process(context.Background(), original)
+
+		// Scaffold should return original data unchanged (fire-and-forget)
+		if err != nil {
+			t.Errorf("expected no error from scaffold process, got %v", err)
+		}
+
+		if result != original {
+			t.Errorf("expected original data %+v, got %+v", original, result)
+		}
+
+		// The panic happens in a background goroutine, so we can't directly test it
+		// But we can verify that the main process completes successfully
+		// This test ensures panic recovery in the main process works correctly
+	})
 }

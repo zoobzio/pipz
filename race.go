@@ -59,7 +59,9 @@ func NewRace[T Cloner[T]](name Name, processors ...Chainable[T]) *Race[T] {
 }
 
 // Process implements the Chainable interface.
-func (r *Race[T]) Process(ctx context.Context, input T) (T, error) {
+func (r *Race[T]) Process(ctx context.Context, input T) (result T, err error) {
+	defer recoverFromPanic(&result, &err, r.name, input)
+
 	r.mu.RLock()
 	processors := make([]Chainable[T], len(r.processors))
 	copy(processors, r.processors)
@@ -77,13 +79,13 @@ func (r *Race[T]) Process(ctx context.Context, input T) (T, error) {
 	}
 
 	// Create channels for results and errors
-	type result struct {
+	type raceResult struct {
 		data T
 		err  error
 		idx  int
 	}
 
-	resultCh := make(chan result, len(processors))
+	resultCh := make(chan raceResult, len(processors))
 	// Create a cancellable context to stop other processors when one wins
 	// This derives from the original context, preserving trace data
 	raceCtx, cancel := context.WithCancel(ctx)
@@ -98,7 +100,7 @@ func (r *Race[T]) Process(ctx context.Context, input T) (T, error) {
 			// Use race context which preserves parent values but adds cancellation
 			data, err := p.Process(raceCtx, inputCopy)
 			select {
-			case resultCh <- result{data: data, err: err, idx: idx}:
+			case resultCh <- raceResult{data: data, err: err, idx: idx}:
 			case <-raceCtx.Done():
 			}
 		}(i, processor)

@@ -379,4 +379,58 @@ func TestFilter_ChainableComposition(t *testing.T) {
 	if result != 15 { // 5 + 10 = 15
 		t.Errorf("Expected 15, got %d", result)
 	}
+
+	t.Run("Filter condition panic recovery", func(t *testing.T) {
+		panicCondition := func(_ context.Context, _ int) bool {
+			panic("filter condition panic")
+		}
+		processor := Transform("processor", func(_ context.Context, data int) int { return data * 2 })
+
+		filter := NewFilter("panic_filter", panicCondition, processor)
+		result, err := filter.Process(context.Background(), 42)
+
+		if result != 0 {
+			t.Errorf("expected zero value 0, got %d", result)
+		}
+
+		var pipzErr *Error[int]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error")
+		}
+
+		if pipzErr.Path[0] != "panic_filter" {
+			t.Errorf("expected path to start with 'panic_filter', got %v", pipzErr.Path)
+		}
+
+		if pipzErr.InputData != 42 {
+			t.Errorf("expected input data 42, got %d", pipzErr.InputData)
+		}
+	})
+
+	t.Run("Filter processor panic recovery", func(t *testing.T) {
+		condition := func(_ context.Context, _ int) bool { return true }
+		panicProcessor := Transform("panic_processor", func(_ context.Context, _ int) int {
+			panic("filter processor panic")
+		})
+
+		filter := NewFilter("panic_filter", condition, panicProcessor)
+		result, err := filter.Process(context.Background(), 42)
+
+		if result != 0 {
+			t.Errorf("expected zero value 0, got %d", result)
+		}
+
+		var pipzErr *Error[int]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error")
+		}
+
+		if pipzErr.Path[0] != "panic_filter" {
+			t.Errorf("expected path to start with 'panic_filter', got %v", pipzErr.Path)
+		}
+
+		if pipzErr.InputData != 42 {
+			t.Errorf("expected input data 42, got %d", pipzErr.InputData)
+		}
+	})
 }

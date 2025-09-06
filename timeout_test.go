@@ -271,4 +271,30 @@ func TestTimeout(t *testing.T) {
 				initialGoroutines, finalGoroutines)
 		}
 	})
+
+	t.Run("Timeout panic recovery", func(t *testing.T) {
+		panicProcessor := Apply("panic_processor", func(_ context.Context, _ int) (int, error) {
+			panic("timeout processor panic")
+		})
+
+		timeout := NewTimeout("panic_timeout", panicProcessor, 100*time.Millisecond)
+		result, err := timeout.Process(context.Background(), 42)
+
+		if result != 0 {
+			t.Errorf("expected zero value 0, got %d", result)
+		}
+
+		var pipzErr *Error[int]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error")
+		}
+
+		if pipzErr.Path[0] != "panic_timeout" {
+			t.Errorf("expected path to start with 'panic_timeout', got %v", pipzErr.Path)
+		}
+
+		if pipzErr.InputData != 42 {
+			t.Errorf("expected input data 42, got %d", pipzErr.InputData)
+		}
+	})
 }

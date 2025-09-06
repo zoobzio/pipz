@@ -62,13 +62,15 @@ func NewHandle[T any](name Name, processor Chainable[T], errorHandler Chainable[
 }
 
 // Process implements the Chainable interface.
-func (h *Handle[T]) Process(ctx context.Context, input T) (T, error) {
+func (h *Handle[T]) Process(ctx context.Context, input T) (result T, err error) {
+	defer recoverFromPanic(&result, &err, h.name, input)
+
 	h.mu.RLock()
 	processor := h.processor
 	errorHandler := h.errorHandler
 	h.mu.RUnlock()
 
-	result, err := processor.Process(ctx, input)
+	result, err = processor.Process(ctx, input)
 	if err != nil {
 		var pipeErr *Error[T]
 		if errors.As(err, &pipeErr) {

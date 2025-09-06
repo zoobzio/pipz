@@ -525,6 +525,109 @@ func TestCircuitBreaker(t *testing.T) {
 			t.Errorf("unexpected error from slow request: %v", slowErr)
 		}
 	})
+
+	t.Run("CircuitBreaker panic recovery", func(t *testing.T) {
+		calls := 0
+		processor := Apply("panic_processor", func(_ context.Context, n int) (int, error) {
+			calls++
+			if calls < 2 {
+				panic("circuit breaker processor panic")
+			}
+			return n * 2, nil
+		})
+
+		breaker := NewCircuitBreaker("panic_breaker", processor, 3, 100*time.Millisecond)
+		result, err := breaker.Process(context.Background(), 42)
+
+		// First call should panic and be recovered as error, incrementing failure count
+		// When panic is recovered, the zero value is returned, not original input
+		if result != 0 {
+			t.Errorf("expected zero value 0, got %d", result)
+		}
+
+		var pipzErr *Error[int]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error")
+		}
+
+		if pipzErr.Path[0] != "panic_breaker" {
+			t.Errorf("expected path to start with 'panic_breaker', got %v", pipzErr.Path)
+		}
+
+		if pipzErr.InputData != 42 {
+			t.Errorf("expected input data 42, got %d", pipzErr.InputData)
+		}
+
+		if calls != 1 {
+			t.Errorf("expected 1 call (panic recovered), got %d", calls)
+		}
+
+		// Circuit should still be closed (1 failure < 3 threshold)
+		if state := breaker.GetState(); state != "closed" {
+			t.Errorf("expected closed state after single panic, got %s", state)
+		}
+
+		// Second call should succeed
+		result2, err2 := breaker.Process(context.Background(), 42)
+		if err2 != nil {
+			t.Fatalf("unexpected error on second call: %v", err2)
+		}
+
+		if result2 != 84 {
+			t.Errorf("expected 84 on second call, got %d", result2)
+		}
+
+		if calls != 2 {
+			t.Errorf("expected 2 calls total, got %d", calls)
+		}
+	})
+
+	t.Run("CircuitBreaker opens on repeated panics", func(t *testing.T) {
+		calls := 0
+		processor := Apply("panic_processor", func(_ context.Context, _ int) (int, error) {
+			calls++
+			panic("circuit breaker processor panic")
+		})
+
+		breaker := NewCircuitBreaker("panic_breaker", processor, 3, 100*time.Millisecond)
+
+		// Make 3 calls to open the circuit
+		for i := 0; i < 3; i++ {
+			result, err := breaker.Process(context.Background(), 42)
+			if result != 0 {
+				t.Errorf("expected zero value 0 on call %d, got %d", i+1, result)
+			}
+			if err == nil {
+				t.Errorf("expected error on call %d", i+1)
+			}
+		}
+
+		if calls != 3 {
+			t.Errorf("expected 3 calls before circuit opens, got %d", calls)
+		}
+
+		// Circuit should now be open
+		if state := breaker.GetState(); state != "open" {
+			t.Errorf("expected open state after 3 panics, got %s", state)
+		}
+
+		// Fourth call should be rejected without calling processor
+		result, err := breaker.Process(context.Background(), 42)
+		if result != 42 {
+			t.Errorf("expected original input 42 (circuit open), got %d", result)
+		}
+		if err == nil {
+			t.Fatal("expected circuit open error")
+		}
+		if !strings.Contains(err.Error(), "circuit breaker is open") {
+			t.Errorf("expected circuit open error, got: %v", err)
+		}
+
+		// Processor should not have been called again
+		if calls != 3 {
+			t.Errorf("expected calls to remain at 3 after circuit open, got %d", calls)
+		}
+	})
 }
 
 func BenchmarkCircuitBreaker(b *testing.B) {

@@ -73,3 +73,86 @@ func (e *Error[T]) IsCanceled() bool {
 	}
 	return e.Canceled || errors.Is(e.Err, context.Canceled)
 }
+
+// panicError is a security-focused panic recovery error.
+// It represents a panic that occurred during processing, with sensitive
+// information sanitized to prevent information leakage through panic messages.
+type panicError struct {
+	processorName Name
+	sanitized     string
+}
+
+func (pe *panicError) Error() string {
+	return fmt.Sprintf("panic in processor %q: %s", pe.processorName, pe.sanitized)
+}
+
+// sanitizePanicMessage removes potentially sensitive information from panic messages.
+// This prevents accidental exposure of internal details, memory addresses, or
+// other sensitive data that might be contained in panic messages.
+func sanitizePanicMessage(panicValue interface{}) string {
+	if panicValue == nil {
+		return "unknown panic (nil value)"
+	}
+
+	msg := fmt.Sprintf("%v", panicValue)
+
+	// Remove memory addresses (replace hex digits after 0x)
+	for strings.Contains(msg, "0x") {
+		start := strings.Index(msg, "0x")
+		if start == -1 {
+			break
+		}
+		end := start + 2
+		// Find end of hex address
+		for end < len(msg) && ((msg[end] >= '0' && msg[end] <= '9') ||
+			(msg[end] >= 'a' && msg[end] <= 'f') ||
+			(msg[end] >= 'A' && msg[end] <= 'F')) {
+			end++
+		}
+		if end > start+2 {
+			msg = msg[:start] + "0x***" + msg[end:]
+		} else {
+			break
+		}
+	}
+
+	// Remove file paths that might contain sensitive directory names
+	if strings.Contains(msg, "/") || strings.Contains(msg, "\\") {
+		return "panic occurred (file path sanitized)"
+	}
+
+	// If message is very long, truncate to prevent excessive log spam
+	if len(msg) > 200 {
+		return "panic occurred (message truncated for security)"
+	}
+
+	// Remove any potential stack trace information
+	if strings.Contains(msg, "goroutine") || strings.Contains(msg, "runtime.") {
+		return "panic occurred (stack trace sanitized)"
+	}
+
+	return fmt.Sprintf("panic occurred: %s", msg)
+}
+
+// recoverFromPanic provides security-focused panic recovery for Process methods.
+// It captures panics, sanitizes the panic message to prevent information leakage,
+// and converts them to proper Error[T] instances.
+//
+// This function should be used as a deferred call at the beginning of all Process methods:
+//
+//	defer recoverFromPanic(&result, &err, processorName, inputData)
+func recoverFromPanic[T any](result *T, err *error, processorName Name, inputData T) {
+	if r := recover(); r != nil {
+		var zero T
+		*result = zero
+		*err = &Error[T]{
+			Path:      []Name{processorName},
+			InputData: inputData,
+			Err:       &panicError{processorName: processorName, sanitized: sanitizePanicMessage(r)},
+			Timestamp: time.Now(),
+			Duration:  0, // We don't track duration for panics
+			Timeout:   false,
+			Canceled:  false,
+		}
+	}
+}

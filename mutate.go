@@ -32,11 +32,14 @@ import "context"
 func Mutate[T any](name Name, transformer func(context.Context, T) T, condition func(context.Context, T) bool) Processor[T] {
 	return Processor[T]{
 		name: name,
-		fn: func(ctx context.Context, value T) (T, error) {
+		fn: func(ctx context.Context, value T) (result T, err error) {
+			defer recoverFromPanic(&result, &err, name, value)
 			if condition(ctx, value) {
-				return transformer(ctx, value), nil
+				result = transformer(ctx, value)
+			} else {
+				result = value
 			}
-			return value, nil
+			return result, nil
 		},
 	}
 }

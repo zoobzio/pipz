@@ -669,3 +669,384 @@ func BenchmarkTestingHelpers(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkPanicRecovery measures the performance impact of panic recovery mechanisms.
+// This critical benchmark ensures panic safety doesn't compromise pipz performance goals.
+func BenchmarkPanicRecovery(b *testing.B) {
+	ctx := context.Background()
+	data := ClonableInt(42)
+
+	b.Run("Normal_Path_Defer_Overhead", func(b *testing.B) {
+		// Measure the defer overhead in normal execution (no panic)
+		processor := pipz.Transform("normal", func(_ context.Context, n ClonableInt) ClonableInt {
+			return n * 2
+		})
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		for i := 0; i < b.N; i++ {
+			result, err := processor.Process(ctx, data)
+			if err != nil {
+				b.Fatal(err)
+			}
+			_ = result
+		}
+	})
+
+	b.Run("Panic_Recovery_Simple_Panic", func(b *testing.B) {
+		// Measure panic recovery with simple panic message
+		processor := pipz.Apply("panic-simple", func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
+			panic("simple test panic")
+		})
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		for i := 0; i < b.N; i++ {
+			result, err := processor.Process(ctx, data)
+			_ = result
+			_ = err // Expect panic error, don't fail benchmark
+		}
+	})
+
+	b.Run("Panic_Recovery_Complex_Message", func(b *testing.B) {
+		// Measure sanitization overhead with complex panic content
+		complexMessage := "panic with addresses 0x123456789abcdef and paths /sensitive/path/data"
+		processor := pipz.Apply("panic-complex", func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
+			panic(complexMessage)
+		})
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		for i := 0; i < b.N; i++ {
+			result, err := processor.Process(ctx, data)
+			_ = result
+			_ = err
+		}
+	})
+
+	b.Run("Panic_Recovery_Nil_Panic", func(b *testing.B) {
+		// Measure recovery from nil panic (edge case)
+		processor := pipz.Apply("panic-nil", func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
+			panic(nil)
+		})
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		for i := 0; i < b.N; i++ {
+			result, err := processor.Process(ctx, data)
+			_ = result
+			_ = err
+		}
+	})
+
+	b.Run("Panic_vs_Regular_Error", func(b *testing.B) {
+		// Compare panic recovery cost vs normal error handling
+		errorProcessor := pipz.Apply("regular-error", func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
+			return 0, errors.New("regular error")
+		})
+		panicProcessor := pipz.Apply("panic-error", func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
+			panic("equivalent panic")
+		})
+
+		b.Run("RegularError", func(b *testing.B) {
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				result, err := errorProcessor.Process(ctx, data)
+				_ = result
+				_ = err
+			}
+		})
+
+		b.Run("PanicError", func(b *testing.B) {
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				result, err := panicProcessor.Process(ctx, data)
+				_ = result
+				_ = err
+			}
+		})
+	})
+
+	b.Run("Pipeline_Defer_Overhead", func(b *testing.B) {
+		// Measure cumulative defer overhead in long pipelines
+		processors := make([]pipz.Chainable[ClonableInt], 20)
+		for i := 0; i < 20; i++ {
+			processors[i] = pipz.Transform("step", func(_ context.Context, n ClonableInt) ClonableInt {
+				return n + 1
+			})
+		}
+		pipeline := pipz.NewSequence("long-pipeline", processors...)
+
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		for i := 0; i < b.N; i++ {
+			result, err := pipeline.Process(ctx, data)
+			if err != nil {
+				b.Fatal(err)
+			}
+			_ = result
+		}
+	})
+
+	b.Run("Concurrent_Panic_Recovery", func(b *testing.B) {
+		// Test panic recovery under concurrent access
+		processor := pipz.Transform("concurrent-safe", func(_ context.Context, n ClonableInt) ClonableInt {
+			// Occasionally panic to test recovery under load
+			if n%1000 == 0 {
+				panic("concurrent panic test")
+			}
+			return n * 2
+		})
+
+		b.ResetTimer()
+		b.ReportAllocs()
+		b.SetParallelism(4)
+
+		b.RunParallel(func(pb *testing.PB) {
+			testData := ClonableInt(42)
+			for pb.Next() {
+				result, err := processor.Process(ctx, testData)
+				_ = result
+				_ = err    // May panic occasionally, that's expected
+				testData++ // Vary input to trigger occasional panics
+			}
+		})
+	})
+
+	b.Run("Memory_Pressure_With_Panics", func(b *testing.B) {
+		// Test panic recovery performance under memory pressure
+		// Allocate significant memory to stress test recovery allocation
+		ballast := make([]byte, 1024*1024*50) // 50MB ballast
+		defer func() { ballast = nil }()
+		_ = ballast // Prevent unused variable warning
+
+		processor := pipz.Apply("memory-pressure", func(_ context.Context, n ClonableInt) (ClonableInt, error) {
+			if n%100 == 0 {
+				panic("memory pressure panic test")
+			}
+			return n * 2, nil
+		})
+
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		testData := ClonableInt(1)
+		for i := 0; i < b.N; i++ {
+			result, err := processor.Process(ctx, testData)
+			_ = result
+			_ = err
+			testData++
+		}
+	})
+}
+
+// BenchmarkPanicRecovery_RealWorld measures panic recovery with realistic data and scenarios.
+func BenchmarkPanicRecovery_RealWorld(b *testing.B) {
+	ctx := context.Background()
+
+	// Create realistic panic scenarios that might occur in production
+	user := User{
+		ID:    12345,
+		Name:  "Test User",
+		Email: "test@example.com",
+		Age:   30,
+	}
+
+	b.Run("JSON_Parse_Panic", func(b *testing.B) {
+		// Simulate JSON parsing panic with realistic data
+		processor := pipz.Apply("json-parse", func(_ context.Context, u User) (User, error) {
+			// Simulate a panic that might occur during JSON processing
+			if u.Email == "test@example.com" {
+				panic("json: cannot unmarshal number into Go struct field")
+			}
+			return u, nil
+		})
+
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		for i := 0; i < b.N; i++ {
+			result, err := processor.Process(ctx, user)
+			_ = result
+			_ = err
+		}
+	})
+
+	b.Run("Database_Connection_Panic", func(b *testing.B) {
+		// Simulate database driver panic with realistic error
+		processor := pipz.Apply("db-query", func(_ context.Context, _ User) (User, error) {
+			panic("sql: database connection lost during query execution")
+		})
+
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		for i := 0; i < b.N; i++ {
+			result, err := processor.Process(ctx, user)
+			_ = result
+			_ = err
+		}
+	})
+
+	b.Run("Index_Out_Of_Bounds", func(b *testing.B) {
+		// Simulate slice bounds panic - common in data processing
+		processor := pipz.Apply("slice-access", func(_ context.Context, u User) (User, error) {
+			slice := []int{1, 2, 3}
+			_ = slice[10] // Panic: index out of range
+			return u, nil
+		})
+
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		for i := 0; i < b.N; i++ {
+			result, err := processor.Process(ctx, user)
+			_ = result
+			_ = err
+		}
+	})
+
+	b.Run("Nil_Pointer_Dereference", func(b *testing.B) {
+		// Simulate nil pointer panic - another common scenario
+		processor := pipz.Apply("nil-deref", func(_ context.Context, u User) (User, error) {
+			var ptr *string
+			_ = *ptr // Panic: nil pointer dereference
+			return u, nil
+		})
+
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		for i := 0; i < b.N; i++ {
+			result, err := processor.Process(ctx, user)
+			_ = result
+			_ = err
+		}
+	})
+
+	b.Run("Complex_Pipeline_With_Intermittent_Panics", func(b *testing.B) {
+		// Realistic pipeline where some stages might panic
+		pipeline := pipz.NewSequence("complex-pipeline",
+			pipz.Transform("validate", func(_ context.Context, u User) User {
+				if u.ID <= 0 {
+					panic("invalid user ID")
+				}
+				return u
+			}),
+			pipz.Apply("enrich", func(_ context.Context, u User) (User, error) {
+				// This succeeds normally
+				u.Age++
+				return u, nil
+			}),
+			pipz.Transform("format", func(_ context.Context, u User) User {
+				if u.Email == "" {
+					panic("empty email not allowed")
+				}
+				return u
+			}),
+		)
+
+		// Use data that will trigger panic in first step
+		panicUser := User{ID: 0, Name: "Invalid", Email: "test@example.com"}
+
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		for i := 0; i < b.N; i++ {
+			result, err := pipeline.Process(ctx, panicUser)
+			_ = result
+			_ = err // Expected to fail on validation
+		}
+	})
+}
+
+// BenchmarkPanicRecovery_Connectors measures panic recovery performance across different connector types.
+func BenchmarkPanicRecovery_Connectors(b *testing.B) {
+	ctx := context.Background()
+	data := ClonableInt(42)
+
+	// Create processors that may panic
+	panicProcessor := pipz.Transform("panic", func(_ context.Context, n ClonableInt) ClonableInt {
+		if n == 42 {
+			panic("test panic in connector")
+		}
+		return n * 2
+	})
+
+	safeProcessor := pipz.Transform("safe", func(_ context.Context, n ClonableInt) ClonableInt {
+		return n + 10
+	})
+
+	b.Run("Sequence_With_Panic", func(b *testing.B) {
+		seq := pipz.NewSequence("seq", panicProcessor, safeProcessor)
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		for i := 0; i < b.N; i++ {
+			result, err := seq.Process(ctx, data)
+			_ = result
+			_ = err
+		}
+	})
+
+	b.Run("Fallback_Primary_Panics", func(b *testing.B) {
+		fallback := pipz.NewFallback("fallback", panicProcessor, safeProcessor)
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		for i := 0; i < b.N; i++ {
+			result, err := fallback.Process(ctx, data)
+			if err != nil {
+				b.Fatal("fallback should have succeeded")
+			}
+			_ = result
+		}
+	})
+
+	b.Run("Retry_With_Panic", func(b *testing.B) {
+		retry := pipz.NewRetry("retry", panicProcessor, 3)
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		for i := 0; i < b.N; i++ {
+			result, err := retry.Process(ctx, data)
+			_ = result
+			_ = err // Will fail after 3 attempts
+		}
+	})
+
+	b.Run("CircuitBreaker_With_Panic", func(b *testing.B) {
+		cb := pipz.NewCircuitBreaker("cb", panicProcessor, 5, time.Minute)
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		for i := 0; i < b.N; i++ {
+			result, err := cb.Process(ctx, data)
+			_ = result
+			_ = err // Will eventually open circuit
+		}
+	})
+
+	b.Run("Handle_Panic_Processing", func(b *testing.B) {
+		// Test panic recovery in error handling
+		handler := pipz.NewHandle("handler", panicProcessor,
+			pipz.Effect("log-panic", func(_ context.Context, e *pipz.Error[ClonableInt]) error {
+				// Process the panic error
+				_ = e.Error()
+				return nil
+			}),
+		)
+
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		for i := 0; i < b.N; i++ {
+			result, err := handler.Process(ctx, data)
+			_ = result
+			_ = err
+		}
+	})
+}

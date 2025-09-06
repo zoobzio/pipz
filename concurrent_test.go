@@ -188,4 +188,70 @@ func TestConcurrent(t *testing.T) {
 			t.Errorf("expected ErrIndexOutOfBounds, got %v", err)
 		}
 	})
+
+	t.Run("Concurrent panic recovery", func(t *testing.T) {
+		panicProcessor := Transform("panic_processor", func(_ context.Context, _ TestData) TestData {
+			panic("concurrent processor panic")
+		})
+		normalProcessor := Transform("normal_processor", func(_ context.Context, d TestData) TestData {
+			return TestData{Value: d.Value + 1, Counter: d.Counter}
+		})
+
+		concurrent := NewConcurrent("panic_concurrent", panicProcessor, normalProcessor)
+		data := TestData{Value: 42}
+
+		result, err := concurrent.Process(context.Background(), data)
+
+		// Concurrent should return original data and no error even if individual processors panic
+		// This is by design - concurrent processors run independently and don't propagate errors
+		if err != nil {
+			t.Errorf("expected no error from concurrent processor, got %v", err)
+		}
+
+		if result.Value != 42 {
+			t.Errorf("expected original value 42, got %d", result.Value)
+		}
+	})
+
+	t.Run("No deadlock when processors panic", func(t *testing.T) {
+		// Test that verifies deadlock prevention when processor panics occur
+		// Multiple panicking processors ensure we test the WaitGroup properly
+		panicProcessor1 := Transform("panic1", func(_ context.Context, _ TestData) TestData {
+			panic("first processor panic")
+		})
+		panicProcessor2 := Transform("panic2", func(_ context.Context, _ TestData) TestData {
+			panic("second processor panic")
+		})
+		panicProcessor3 := Effect("panic3", func(_ context.Context, _ TestData) error {
+			panic("third processor panic")
+		})
+
+		concurrent := NewConcurrent("panic_deadlock_test", panicProcessor1, panicProcessor2, panicProcessor3)
+		data := TestData{Value: 42}
+
+		// This should complete without deadlocking despite all processors panicking
+		done := make(chan struct{})
+		var result TestData
+		var err error
+
+		go func() {
+			defer close(done)
+			result, err = concurrent.Process(context.Background(), data)
+		}()
+
+		// Set a timeout to detect deadlock - if the fix works, this should complete quickly
+		select {
+		case <-done:
+			// Success - no deadlock occurred
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if result.Value != 42 {
+				t.Errorf("expected original value 42, got %d", result.Value)
+			}
+		case <-time.After(1 * time.Second):
+			t.Fatal("deadlock detected: concurrent.Process() did not complete within timeout")
+		}
+	})
+
 }

@@ -2,6 +2,7 @@ package pipz
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -130,6 +131,72 @@ func TestMutate(t *testing.T) {
 					t.Errorf("expected discount %f, got %f", tt.expected, result.Discount)
 				}
 			})
+		}
+	})
+
+	t.Run("Mutate panic recovery in condition", func(t *testing.T) {
+		// Panic in condition function
+		panicCondition := Mutate("panic_condition",
+			func(_ context.Context, s string) string { return s + "_transformed" },
+			func(_ context.Context, _ string) bool { panic("condition panic") },
+		)
+
+		result, err := panicCondition.Process(context.Background(), "test")
+		if result != "" {
+			t.Errorf("expected empty string, got %q", result)
+		}
+
+		var pipzErr *Error[string]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error")
+		}
+
+		if pipzErr.InputData != "test" {
+			t.Errorf("expected input data 'test', got %q", pipzErr.InputData)
+		}
+
+		// Check that panic message is properly wrapped
+		var panicErr *panicError
+		if !errors.As(pipzErr.Err, &panicErr) {
+			t.Fatal("expected panicError")
+		}
+
+		expectedMsg := "panic occurred: condition panic"
+		if panicErr.sanitized != expectedMsg {
+			t.Errorf("expected %q, got %q", expectedMsg, panicErr.sanitized)
+		}
+	})
+
+	t.Run("Mutate panic recovery in transformer", func(t *testing.T) {
+		// Panic in transformer function
+		panicTransformer := Mutate("panic_transformer",
+			func(_ context.Context, _ string) string { panic("transformer panic") },
+			func(_ context.Context, _ string) bool { return true },
+		)
+
+		result, err := panicTransformer.Process(context.Background(), "test")
+		if result != "" {
+			t.Errorf("expected empty string, got %q", result)
+		}
+
+		var pipzErr *Error[string]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error")
+		}
+
+		if pipzErr.InputData != "test" {
+			t.Errorf("expected input data 'test', got %q", pipzErr.InputData)
+		}
+
+		// Check that panic message is properly wrapped
+		var panicErr *panicError
+		if !errors.As(pipzErr.Err, &panicErr) {
+			t.Fatal("expected panicError")
+		}
+
+		expectedMsg := "panic occurred: transformer panic"
+		if panicErr.sanitized != expectedMsg {
+			t.Errorf("expected %q, got %q", expectedMsg, panicErr.sanitized)
 		}
 	})
 }

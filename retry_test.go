@@ -530,4 +530,90 @@ func TestBackoff(t *testing.T) {
 			t.Errorf("expected 21, got %d", result)
 		}
 	})
+
+	t.Run("Retry panic recovery", func(t *testing.T) {
+		calls := 0
+		processor := Apply("panic_processor", func(_ context.Context, n int) (int, error) {
+			calls++
+			if calls < 2 {
+				panic("retry processor panic")
+			}
+			return n * 2, nil
+		})
+
+		retry := NewRetry("panic_retry", processor, 3)
+		result, err := retry.Process(context.Background(), 42)
+
+		// Should succeed on retry after panic recovery
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result != 84 {
+			t.Errorf("expected result 84, got %d", result)
+		}
+
+		if calls != 2 {
+			t.Errorf("expected 2 calls (1 panic + 1 success), got %d", calls)
+		}
+	})
+
+	t.Run("All retry attempts panic", func(t *testing.T) {
+		calls := 0
+		processor := Apply("panic_processor", func(_ context.Context, _ int) (int, error) {
+			calls++
+			panic("retry processor panic")
+		})
+
+		retry := NewRetry("all_panic_retry", processor, 3)
+		result, err := retry.Process(context.Background(), 42)
+
+		if result != 0 {
+			t.Errorf("expected zero value 0, got %d", result)
+		}
+
+		var pipzErr *Error[int]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error")
+		}
+
+		if pipzErr.Path[0] != "all_panic_retry" {
+			t.Errorf("expected path to start with 'all_panic_retry', got %v", pipzErr.Path)
+		}
+
+		if pipzErr.InputData != 42 {
+			t.Errorf("expected input data 42, got %d", pipzErr.InputData)
+		}
+
+		if calls != 3 {
+			t.Errorf("expected 3 calls (all panics), got %d", calls)
+		}
+	})
+
+	t.Run("Backoff panic recovery", func(t *testing.T) {
+		calls := 0
+		processor := Apply("panic_processor", func(_ context.Context, n int) (int, error) {
+			calls++
+			if calls < 2 {
+				panic("backoff processor panic")
+			}
+			return n * 2, nil
+		})
+
+		backoff := NewBackoff("panic_backoff", processor, 3, 10*time.Millisecond)
+		result, err := backoff.Process(context.Background(), 42)
+
+		// Should succeed on retry after panic recovery
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result != 84 {
+			t.Errorf("expected result 84, got %d", result)
+		}
+
+		if calls != 2 {
+			t.Errorf("expected 2 calls (1 panic + 1 success), got %d", calls)
+		}
+	})
 }

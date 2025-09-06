@@ -23,8 +23,10 @@ import "context"
 func Transform[T any](name Name, fn func(context.Context, T) T) Processor[T] {
 	return Processor[T]{
 		name: name,
-		fn: func(ctx context.Context, value T) (T, error) {
-			return fn(ctx, value), nil
+		fn: func(ctx context.Context, value T) (result T, err error) {
+			defer recoverFromPanic(&result, &err, name, value)
+			result = fn(ctx, value)
+			return result, nil
 		},
 	}
 }

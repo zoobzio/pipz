@@ -535,6 +535,49 @@ func TestWorkerPool(t *testing.T) {
 		wg.Wait()
 		// If we get here without race conditions, the test passes
 	})
+
+	t.Run("WorkerPool panic recovery", func(t *testing.T) {
+		var counter int32
+		data := TestData{Value: 1, Counter: &counter}
+
+		panicProcessor := Effect("panic_processor", func(_ context.Context, _ TestData) error {
+			panic("workerpool processor panic")
+		})
+		successProcessor := Effect("success_processor", func(_ context.Context, d TestData) error {
+			atomic.AddInt32(d.Counter, 10)
+			return nil
+		})
+
+		pool := NewWorkerPool("panic_pool", 2, panicProcessor, successProcessor, successProcessor)
+		result, err := pool.Process(context.Background(), data)
+
+		// Should return original data on error
+		if result.Value != 1 {
+			t.Errorf("expected original value 1, got %d", result.Value)
+		}
+
+		var pipzErr *Error[TestData]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error")
+		}
+
+		if pipzErr.Path[0] != "panic_pool" {
+			t.Errorf("expected path to start with 'panic_pool', got %v", pipzErr.Path)
+		}
+
+		if pipzErr.InputData.Value != 1 {
+			t.Errorf("expected input data value 1, got %d", pipzErr.InputData.Value)
+		}
+
+		// Wait for potential successful processors to complete
+		time.Sleep(50 * time.Millisecond)
+
+		// Some success processors may have run
+		finalCount := atomic.LoadInt32(&counter)
+		if finalCount != 0 && finalCount != 10 && finalCount != 20 {
+			t.Errorf("expected counter to be 0, 10, or 20, got %d", finalCount)
+		}
+	})
 }
 
 // Benchmark tests for performance verification.
@@ -592,4 +635,5 @@ func BenchmarkWorkerPool(b *testing.B) {
 			_, _ = pool.Process(context.Background(), data) //nolint:errcheck // Testing, errors not needed
 		}
 	})
+
 }

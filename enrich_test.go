@@ -102,4 +102,37 @@ func TestEnrich(t *testing.T) {
 			t.Errorf("enrichment function should be called for each invocation")
 		}
 	})
+
+	t.Run("Enrich panic recovery", func(t *testing.T) {
+		panicEnrich := Enrich("panic_enrich", func(_ context.Context, _ string) (string, error) {
+			panic("enrich panic")
+		})
+
+		result, err := panicEnrich.Process(context.Background(), "original")
+
+		// Enrich normally returns original data on error, but panic should be caught
+		if result != "" {
+			t.Errorf("expected empty string from panic recovery, got %q", result)
+		}
+
+		var pipzErr *Error[string]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error from panic")
+		}
+
+		if pipzErr.InputData != "original" {
+			t.Errorf("expected input data 'original', got %q", pipzErr.InputData)
+		}
+
+		// Check that panic message is properly wrapped
+		var panicErr *panicError
+		if !errors.As(pipzErr.Err, &panicErr) {
+			t.Fatal("expected panicError")
+		}
+
+		expectedMsg := "panic occurred: enrich panic"
+		if panicErr.sanitized != expectedMsg {
+			t.Errorf("expected %q, got %q", expectedMsg, panicErr.sanitized)
+		}
+	})
 }

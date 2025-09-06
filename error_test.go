@@ -297,4 +297,76 @@ func TestError(t *testing.T) {
 			t.Error("nil error IsCanceled should return false")
 		}
 	})
+
+	t.Run("PanicError", func(t *testing.T) {
+		t.Run("panicError implements error", func(t *testing.T) {
+			pe := &panicError{
+				processorName: "test_proc",
+				sanitized:     "test panic message",
+			}
+
+			expected := `panic in processor "test_proc": test panic message`
+			if pe.Error() != expected {
+				t.Errorf("expected %q, got %q", expected, pe.Error())
+			}
+		})
+	})
+
+	t.Run("PanicMessageSanitization", func(t *testing.T) {
+		testCases := []struct {
+			name     string
+			panic    interface{}
+			expected string
+		}{
+			{
+				name:     "simple string panic",
+				panic:    "simple error",
+				expected: "panic occurred: simple error",
+			},
+			{
+				name:     "nil panic",
+				panic:    nil,
+				expected: "unknown panic (nil value)",
+			},
+			{
+				name:     "memory address sanitization",
+				panic:    "error at 0x1234567890abcdef",
+				expected: "panic occurred: error at 0x***",
+			},
+			{
+				name:     "file path sanitization",
+				panic:    "/sensitive/path/file.go:123 error",
+				expected: "panic occurred (file path sanitized)",
+			},
+			{
+				name:     "windows path sanitization",
+				panic:    "C:\\sensitive\\path\\file.go:123 error",
+				expected: "panic occurred (file path sanitized)",
+			},
+			{
+				name:     "long message truncation",
+				panic:    strings.Repeat("a", 250),
+				expected: "panic occurred (message truncated for security)",
+			},
+			{
+				name:     "stack trace sanitization",
+				panic:    "error\ngoroutine 1 [running]:\nruntime.main()",
+				expected: "panic occurred (stack trace sanitized)",
+			},
+			{
+				name:     "runtime function sanitization",
+				panic:    "runtime.doPanic called",
+				expected: "panic occurred (stack trace sanitized)",
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				sanitized := sanitizePanicMessage(tc.panic)
+				if sanitized != tc.expected {
+					t.Errorf("expected %q, got %q", tc.expected, sanitized)
+				}
+			})
+		}
+	})
 }

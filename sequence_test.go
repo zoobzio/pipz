@@ -763,7 +763,7 @@ func TestSequenceEdgeCases(t *testing.T) {
 		}
 	})
 
-	t.Run("Processor Panic Not Recovered", func(t *testing.T) {
+	t.Run("Processor Panic Recovered", func(t *testing.T) {
 		Sequence := NewSequence[string](testSequence)
 		Sequence.Register(
 			Transform(beforePanic, func(_ context.Context, s string) string {
@@ -778,18 +778,28 @@ func TestSequenceEdgeCases(t *testing.T) {
 			}),
 		)
 
-		// The panic should NOT be caught - pipz does not recover panics
-		defer func() {
-			if r := recover(); r == nil {
-				t.Error("expected panic to propagate")
-			} else if r != "processor panic!" {
-				t.Errorf("expected 'processor panic!', got %v", r)
-			}
-		}()
+		// The panic should now be caught and converted to an error
+		result, err := Sequence.Process(context.Background(), "test")
 
-		//nolint:errcheck // We're testing panic behavior
-		_, _ = Sequence.Process(context.Background(), "test")
-		t.Error("should have panicked before reaching this line")
+		// Should get empty result from panic recovery
+		if result != "" {
+			t.Errorf("expected empty string from panic recovery, got %q", result)
+		}
+
+		// Should get pipz.Error with panic information
+		if err == nil {
+			t.Fatal("expected error from panic recovery")
+		}
+
+		var pipzErr *Error[string]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error from panic recovery")
+		}
+
+		// Check path includes both sequence and processor
+		if len(pipzErr.Path) != 2 || pipzErr.Path[0] != testSequence || pipzErr.Path[1] != panicProc {
+			t.Errorf("expected path [%s, %s], got %v", testSequence, panicProc, pipzErr.Path)
+		}
 	})
 }
 
@@ -1126,6 +1136,40 @@ func TestSequenceNameBasedOperationsConcurrency(t *testing.T) {
 		_, err := seq.Process(context.Background(), 1)
 		if err != nil {
 			t.Errorf("sequence should remain functional after concurrent modifications: %v", err)
+		}
+	})
+
+	t.Run("Sequence panic recovery", func(t *testing.T) {
+		// Create a sequence where one processor panics
+		seq := NewSequence("panic_sequence",
+			Transform("step1", func(_ context.Context, s string) string { return s + "_step1" }),
+			Transform("panic_step", func(_ context.Context, _ string) string { panic("sequence panic") }),
+			Transform("step3", func(_ context.Context, s string) string { return s + "_step3" }), // Never reached
+		)
+
+		result, err := seq.Process(context.Background(), "start")
+
+		if result != "" {
+			t.Errorf("expected empty string, got %q", result)
+		}
+
+		var pipzErr *Error[string]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error")
+		}
+
+		// Path should include both sequence name and processor name
+		expectedPath := []Name{"panic_sequence", "panic_step"}
+		if len(pipzErr.Path) != 2 {
+			t.Errorf("expected path length 2, got %d: %v", len(pipzErr.Path), pipzErr.Path)
+		}
+		if pipzErr.Path[0] != expectedPath[0] || pipzErr.Path[1] != expectedPath[1] {
+			t.Errorf("expected path %v, got %v", expectedPath, pipzErr.Path)
+		}
+
+		// The input data will be the transformed value from step1
+		if pipzErr.InputData != "start_step1" {
+			t.Errorf("expected input data 'start_step1', got %q", pipzErr.InputData)
 		}
 	})
 }

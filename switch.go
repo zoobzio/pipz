@@ -85,7 +85,9 @@ func NewSwitch[T any, K comparable](name Name, condition Condition[T, K]) *Switc
 
 // Process implements the Chainable interface.
 // If no route matches the condition result, the input is returned unchanged.
-func (s *Switch[T, K]) Process(ctx context.Context, data T) (T, error) {
+func (s *Switch[T, K]) Process(ctx context.Context, data T) (result T, err error) {
+	defer recoverFromPanic(&result, &err, s.name, data)
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -94,7 +96,7 @@ func (s *Switch[T, K]) Process(ctx context.Context, data T) (T, error) {
 	if !exists {
 		return data, nil
 	}
-	result, err := processor.Process(ctx, data)
+	result, err = processor.Process(ctx, data)
 	if err != nil {
 		var pipeErr *Error[T]
 		if errors.As(err, &pipeErr) {

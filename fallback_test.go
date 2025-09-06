@@ -424,4 +424,54 @@ func TestFallback(t *testing.T) {
 		// The line 95 case (lastErr == nil after loop) is defensive code
 		// It would only be hit if we had zero processors, but constructor prevents that
 	})
+
+	t.Run("Fallback panic recovery", func(t *testing.T) {
+		panicProcessor := Apply("panic_processor", func(_ context.Context, _ int) (int, error) {
+			panic("fallback processor panic")
+		})
+		successProcessor := Transform("success_processor", func(_ context.Context, n int) int {
+			return n * 2
+		})
+
+		fallback := NewFallback("panic_fallback", panicProcessor, successProcessor)
+		result, err := fallback.Process(context.Background(), 42)
+
+		// Fallback should use the success processor
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result != 84 {
+			t.Errorf("expected fallback result 84, got %d", result)
+		}
+	})
+
+	t.Run("All fallback processors panic", func(t *testing.T) {
+		panic1 := Apply("panic1", func(_ context.Context, _ int) (int, error) {
+			panic("first processor panic")
+		})
+		panic2 := Apply("panic2", func(_ context.Context, _ int) (int, error) {
+			panic("second processor panic")
+		})
+
+		fallback := NewFallback("all_panic_fallback", panic1, panic2)
+		result, err := fallback.Process(context.Background(), 42)
+
+		if result != 42 {
+			t.Errorf("expected original input 42, got %d", result)
+		}
+
+		var pipzErr *Error[int]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error")
+		}
+
+		if pipzErr.Path[0] != "all_panic_fallback" {
+			t.Errorf("expected path to start with 'all_panic_fallback', got %v", pipzErr.Path)
+		}
+
+		if pipzErr.InputData != 42 {
+			t.Errorf("expected input data 42, got %d", pipzErr.InputData)
+		}
+	})
 }

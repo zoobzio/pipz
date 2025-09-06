@@ -57,7 +57,8 @@ func (w *WorkerPool[T]) Name() Name {
 }
 
 // Process implements the Chainable interface.
-func (w *WorkerPool[T]) Process(ctx context.Context, input T) (T, error) {
+func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err error) {
+	defer recoverFromPanic(&result, &err, w.name, input)
 	w.mu.RLock()
 	processors := make([]Chainable[T], len(w.processors))
 	copy(processors, w.processors)

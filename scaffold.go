@@ -61,7 +61,8 @@ func NewScaffold[T Cloner[T]](name Name, processors ...Chainable[T]) *Scaffold[T
 }
 
 // Process implements the Chainable interface.
-func (s *Scaffold[T]) Process(ctx context.Context, input T) (T, error) {
+func (s *Scaffold[T]) Process(ctx context.Context, input T) (result T, err error) {
+	defer recoverFromPanic(&result, &err, s.name, input)
 	s.mu.RLock()
 	processors := make([]Chainable[T], len(s.processors))
 	copy(processors, s.processors)

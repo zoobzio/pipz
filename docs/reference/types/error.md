@@ -40,6 +40,7 @@ type Error[T any] struct {
 - **Type**: `error`
 - **Purpose**: The underlying error that caused the failure
 - **Usage**: Access original error details, use with `errors.Is` and `errors.As`
+- **Panic Recovery**: When processors panic, this contains a `panicError` type with sanitized panic message and processor name for security
 
 ### Path
 - **Type**: `[]Name`
@@ -50,6 +51,7 @@ type Error[T any] struct {
 - **Type**: `time.Duration`
 - **Purpose**: How long the operation ran before failing
 - **Usage**: Identify performance issues, detect timeout patterns
+- **Panic Behavior**: Always `0` for panic recovery - timing is not tracked when processors panic
 
 ### Timeout
 - **Type**: `bool`
@@ -272,6 +274,11 @@ func debugFailure(err error) {
     if errors.As(pipeErr.Err, &validationErr) {
         fmt.Printf("Validation failures: %v\n", validationErr.Fields)
     }
+    
+    // Check if it was a panic that was automatically recovered
+    if strings.Contains(pipeErr.Error(), "panic in processor") {
+        fmt.Println("This was a recovered panic (automatically handled by pipz)")
+    }
 }
 ```
 
@@ -376,9 +383,52 @@ if err != nil {
 }
 ```
 
+## Panic Recovery Errors
+
+pipz automatically recovers from all panics in processor and connector functions, converting them to `Error[T]` instances. When you see errors containing "panic in processor", these represent panics that were automatically caught and sanitized.
+
+### Identifying Panic Errors
+
+```go
+result, err := processor.Process(ctx, data)
+if err != nil {
+    var pipeErr *pipz.Error[Data]
+    if errors.As(err, &pipeErr) {
+        // Check if this was a recovered panic
+        if strings.Contains(pipeErr.Error(), "panic in processor") {
+            log.Warn("Processor panicked but was safely recovered")
+            
+            // The panic message is sanitized for security:
+            // - Memory addresses redacted (0x*** instead of 0x1234...)
+            // - File paths removed to prevent info leakage
+            // - Stack traces stripped
+            // - Long messages truncated
+        }
+    }
+}
+```
+
+### Security Sanitization
+
+Panic messages undergo security sanitization to prevent information leakage:
+
+- **Memory addresses**: `0x1234567890abcdef` → `0x***`
+- **File paths**: `panic in /sensitive/path/file.go:123` → `"panic occurred (file path sanitized)"`
+- **Stack traces**: `goroutine 1 [running]:...` → `"panic occurred (stack trace sanitized)"`
+- **Long messages**: Truncated to prevent log spam
+
+### What This Means for You
+
+1. **No crashes**: Your application will never crash due to panics in pipelines
+2. **Error handling**: Panics become regular errors in the error handling flow
+3. **Security**: Sensitive information is automatically stripped from panic messages
+4. **Monitoring**: You can detect and alert on panic occurrences in production
+5. **Debugging**: Use development environments to get more detailed panic information
+
 ## See Also
 
 - [Handle](../processors/handle.md) - Observe and react to errors
 - [Fallback](../connectors/fallback.md) - Automatic error recovery
 - [Retry](../connectors/retry.md) - Retry failed operations
 - [CircuitBreaker](../connectors/circuitbreaker.md) - Prevent cascading failures
+- [Safety and Reliability](../../guides/safety-reliability.md) - Complete panic recovery documentation

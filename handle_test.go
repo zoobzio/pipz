@@ -346,4 +346,41 @@ func TestHandle(t *testing.T) {
 			t.Error("error handler should not be called on success")
 		}
 	})
+
+	t.Run("Handle panic recovery", func(t *testing.T) {
+		panicProcessor := Apply("panic_processor", func(_ context.Context, _ int) (int, error) {
+			panic("handle processor panic")
+		})
+
+		errorHandler := Effect("error_handler", func(_ context.Context, _ *Error[int]) error {
+			return nil // Just handle the error
+		})
+
+		handle := NewHandle("panic_handle", panicProcessor, errorHandler)
+		result, err := handle.Process(context.Background(), 42)
+
+		if result != 0 {
+			t.Errorf("expected zero value, got %d", result)
+		}
+
+		var pipzErr *Error[int]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error")
+		}
+
+		if pipzErr.InputData != 42 {
+			t.Errorf("expected input data 42, got %d", pipzErr.InputData)
+		}
+
+		// Check that panic message is properly wrapped
+		var panicErr *panicError
+		if !errors.As(pipzErr.Err, &panicErr) {
+			t.Fatal("expected panicError")
+		}
+
+		expectedMsg := "panic occurred: handle processor panic"
+		if panicErr.sanitized != expectedMsg {
+			t.Errorf("expected %q, got %q", expectedMsg, panicErr.sanitized)
+		}
+	})
 }

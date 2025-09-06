@@ -53,7 +53,8 @@ func NewRetry[T any](name Name, processor Chainable[T], maxAttempts int) *Retry[
 }
 
 // Process implements the Chainable interface.
-func (r *Retry[T]) Process(ctx context.Context, data T) (T, error) {
+func (r *Retry[T]) Process(ctx context.Context, data T) (result T, err error) {
+	defer recoverFromPanic(&result, &err, r.name, data)
 	r.mu.RLock()
 	processor := r.processor
 	maxAttempts := r.maxAttempts
@@ -178,7 +179,8 @@ func NewBackoff[T any](name Name, processor Chainable[T], maxAttempts int, baseD
 }
 
 // Process implements the Chainable interface.
-func (b *Backoff[T]) Process(ctx context.Context, data T) (T, error) {
+func (b *Backoff[T]) Process(ctx context.Context, data T) (result T, err error) {
+	defer recoverFromPanic(&result, &err, b.name, data)
 	b.mu.RLock()
 	processor := b.processor
 	maxAttempts := b.maxAttempts

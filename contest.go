@@ -65,7 +65,9 @@ func NewContest[T Cloner[T]](name Name, condition func(context.Context, T) bool,
 }
 
 // Process implements the Chainable interface.
-func (c *Contest[T]) Process(ctx context.Context, input T) (T, error) {
+func (c *Contest[T]) Process(ctx context.Context, input T) (result T, err error) {
+	defer recoverFromPanic(&result, &err, c.name, input)
+
 	c.mu.RLock()
 	processors := make([]Chainable[T], len(c.processors))
 	copy(processors, c.processors)
@@ -95,13 +97,13 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (T, error) {
 	}
 
 	// Create channels for results and completion tracking
-	type result struct {
+	type contestResult struct {
 		data T
 		err  error
 		idx  int
 	}
 
-	resultCh := make(chan result, len(processors))
+	resultCh := make(chan contestResult, len(processors))
 	// Create a cancellable context to stop other processors when one wins
 	// This derives from the original context, preserving trace data
 	contestCtx, cancel := context.WithCancel(ctx)
@@ -114,9 +116,9 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (T, error) {
 			inputCopy := input.Clone()
 
 			// Use contest context which preserves parent values but adds cancellation
-			data, err := p.Process(contestCtx, inputCopy)
+			data, processErr := p.Process(contestCtx, inputCopy)
 			select {
-			case resultCh <- result{data: data, err: err, idx: idx}:
+			case resultCh <- contestResult{data: data, err: processErr, idx: idx}:
 			case <-contestCtx.Done():
 			}
 		}(i, processor)
@@ -153,7 +155,6 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (T, error) {
 	}
 
 	// No processor produced a result meeting the condition
-	var err error
 	if len(allErrors) == len(processors) {
 		// All processors failed with errors
 		err = fmt.Errorf("all processors failed: %d errors", len(allErrors))

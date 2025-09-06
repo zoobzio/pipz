@@ -140,4 +140,49 @@ func TestApply(t *testing.T) {
 			t.Errorf("unexpected error message: %v", err)
 		}
 	})
+
+	t.Run("Apply panic recovery", func(t *testing.T) {
+		// Create an Apply that panics
+		panicApply := Apply("panic_apply", func(_ context.Context, n int) (int, error) {
+			if n == 42 {
+				panic("the answer panics")
+			}
+			return n * 2, nil
+		})
+
+		// Test normal operation first
+		result, err := panicApply.Process(context.Background(), 5)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result != 10 {
+			t.Errorf("expected 10, got %d", result)
+		}
+
+		// Test panic recovery
+		result, err = panicApply.Process(context.Background(), 42)
+		if result != 0 {
+			t.Errorf("expected 0, got %d", result)
+		}
+
+		var pipzErr *Error[int]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error")
+		}
+
+		if pipzErr.InputData != 42 {
+			t.Errorf("expected input data 42, got %d", pipzErr.InputData)
+		}
+
+		// Check that panic message is properly wrapped
+		var panicErr *panicError
+		if !errors.As(pipzErr.Err, &panicErr) {
+			t.Fatal("expected panicError")
+		}
+
+		expectedMsg := "panic occurred: the answer panics"
+		if panicErr.sanitized != expectedMsg {
+			t.Errorf("expected %q, got %q", expectedMsg, panicErr.sanitized)
+		}
+	})
 }

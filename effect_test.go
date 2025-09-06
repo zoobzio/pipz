@@ -176,4 +176,36 @@ func TestEffectLogging(t *testing.T) {
 			t.Error("effect should have captured ID")
 		}
 	})
+
+	t.Run("Effect panic recovery", func(t *testing.T) {
+		panicEffect := Effect("panic_effect", func(_ context.Context, _ string) error {
+			panic("effect panic")
+		})
+
+		result, err := panicEffect.Process(context.Background(), "original")
+
+		if result != "" {
+			t.Errorf("expected empty string, got %q", result)
+		}
+
+		var pipzErr *Error[string]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error")
+		}
+
+		if pipzErr.InputData != "original" {
+			t.Errorf("expected input data 'original', got %q", pipzErr.InputData)
+		}
+
+		// Check that panic message is properly wrapped
+		var panicErr *panicError
+		if !errors.As(pipzErr.Err, &panicErr) {
+			t.Fatal("expected panicError")
+		}
+
+		expectedMsg := "panic occurred: effect panic"
+		if panicErr.sanitized != expectedMsg {
+			t.Errorf("expected %q, got %q", expectedMsg, panicErr.sanitized)
+		}
+	})
 }

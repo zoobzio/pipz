@@ -100,7 +100,9 @@ func NewRateLimiter[T any](name Name, ratePerSecond float64, burst int) *RateLim
 }
 
 // Process implements the Chainable interface.
-func (r *RateLimiter[T]) Process(ctx context.Context, data T) (T, error) {
+func (r *RateLimiter[T]) Process(ctx context.Context, data T) (result T, err error) {
+	defer recoverFromPanic(&result, &err, r.name, data)
+
 	r.mu.RLock()
 	limiter := r.limiter
 	mode := r.mode

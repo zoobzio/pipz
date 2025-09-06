@@ -35,9 +35,10 @@ import "context"
 func Enrich[T any](name Name, fn func(context.Context, T) (T, error)) Processor[T] {
 	return Processor[T]{
 		name: name,
-		fn: func(ctx context.Context, value T) (T, error) {
-			enriched, err := fn(ctx, value)
-			if err != nil {
+		fn: func(ctx context.Context, value T) (result T, err error) {
+			defer recoverFromPanic(&result, &err, name, value)
+			enriched, enrichErr := fn(ctx, value)
+			if enrichErr != nil {
 				// Continue with original data - enrichment is best-effort
 				return value, nil
 			}

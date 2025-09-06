@@ -209,4 +209,60 @@ func TestRace(t *testing.T) {
 			t.Errorf("expected ErrIndexOutOfBounds, got %v", err)
 		}
 	})
+
+	t.Run("Race processor panic recovery", func(t *testing.T) {
+		panicProcessor := Apply("panic_processor", func(_ context.Context, _ TestData) (TestData, error) {
+			panic("race processor panic")
+		})
+		successProcessor := Apply("success_processor", func(_ context.Context, d TestData) (TestData, error) {
+			time.Sleep(10 * time.Millisecond) // Small delay to ensure panic happens first
+			d.Value = 100
+			return d, nil
+		})
+
+		race := NewRace("panic_race", panicProcessor, successProcessor)
+		data := TestData{Value: 42}
+
+		result, err := race.Process(context.Background(), data)
+
+		// Success processor should win
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result.Value != 100 {
+			t.Errorf("expected success processor result 100, got %d", result.Value)
+		}
+	})
+
+	t.Run("All race processors panic", func(t *testing.T) {
+		panic1 := Apply("panic1", func(_ context.Context, _ TestData) (TestData, error) {
+			panic("first processor panic")
+		})
+		panic2 := Apply("panic2", func(_ context.Context, _ TestData) (TestData, error) {
+			panic("second processor panic")
+		})
+
+		race := NewRace("all_panic_race", panic1, panic2)
+		data := TestData{Value: 42}
+
+		result, err := race.Process(context.Background(), data)
+
+		if result.Value != 42 {
+			t.Errorf("expected original input value 42, got %d", result.Value)
+		}
+
+		var pipzErr *Error[TestData]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error")
+		}
+
+		if pipzErr.Path[0] != "all_panic_race" {
+			t.Errorf("expected path to start with 'all_panic_race', got %v", pipzErr.Path)
+		}
+
+		if pipzErr.InputData.Value != 42 {
+			t.Errorf("expected input data value 42, got %d", pipzErr.InputData.Value)
+		}
+	})
 }

@@ -100,7 +100,9 @@ func (c *Sequence[T]) Register(processors ...Chainable[T]) {
 //   - Always use context with timeout for production
 //   - Check ctx.Err() in long-running processors
 //   - Pass context through to external calls
-func (c *Sequence[T]) Process(ctx context.Context, value T) (T, error) {
+func (c *Sequence[T]) Process(ctx context.Context, value T) (result T, err error) {
+	defer recoverFromPanic(&result, &err, c.name, value)
+
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -109,7 +111,7 @@ func (c *Sequence[T]) Process(ctx context.Context, value T) (T, error) {
 		ctx = context.Background()
 	}
 
-	result := value
+	result = value
 
 	for _, proc := range c.processors {
 		// Check context before starting processor
@@ -125,7 +127,6 @@ func (c *Sequence[T]) Process(ctx context.Context, value T) (T, error) {
 				Timestamp: time.Now(),
 			}
 		default:
-			var err error
 			result, err = proc.Process(ctx, result)
 			if err != nil {
 				var pipeErr *Error[T]

@@ -36,9 +36,10 @@ import (
 func Apply[T any](name Name, fn func(context.Context, T) (T, error)) Processor[T] {
 	return Processor[T]{
 		name: name,
-		fn: func(ctx context.Context, value T) (T, error) {
+		fn: func(ctx context.Context, value T) (result T, err error) {
+			defer recoverFromPanic(&result, &err, name, value)
 			start := time.Now()
-			result, err := fn(ctx, value)
+			result, err = fn(ctx, value)
 			if err != nil {
 				var zero T
 				return zero, &Error[T]{

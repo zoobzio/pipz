@@ -35,9 +35,11 @@ import (
 func Effect[T any](name Name, fn func(context.Context, T) error) Processor[T] {
 	return Processor[T]{
 		name: name,
-		fn: func(ctx context.Context, value T) (T, error) {
+		fn: func(ctx context.Context, value T) (result T, err error) {
+			defer recoverFromPanic(&result, &err, name, value)
 			start := time.Now()
-			if err := fn(ctx, value); err != nil {
+			result = value // Effect always returns original value
+			if err = fn(ctx, value); err != nil {
 				var zero T
 				return zero, &Error[T]{
 					Path:      []Name{name},
@@ -49,7 +51,7 @@ func Effect[T any](name Name, fn func(context.Context, T) error) Processor[T] {
 					Canceled:  errors.Is(err, context.Canceled),
 				}
 			}
-			return value, nil
+			return result, nil
 		},
 	}
 }

@@ -50,7 +50,9 @@ func NewTimeout[T any](name Name, processor Chainable[T], duration time.Duration
 }
 
 // Process implements the Chainable interface.
-func (t *Timeout[T]) Process(ctx context.Context, data T) (T, error) {
+func (t *Timeout[T]) Process(ctx context.Context, data T) (result T, err error) {
+	defer recoverFromPanic(&result, &err, t.name, data)
+
 	t.mu.RLock()
 	processor := t.processor
 	duration := t.duration

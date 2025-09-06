@@ -75,7 +75,9 @@ func NewConcurrent[T Cloner[T]](name Name, processors ...Chainable[T]) *Concurre
 }
 
 // Process implements the Chainable interface.
-func (c *Concurrent[T]) Process(ctx context.Context, input T) (T, error) {
+func (c *Concurrent[T]) Process(ctx context.Context, input T) (result T, err error) {
+	defer recoverFromPanic(&result, &err, c.name, input)
+
 	c.mu.RLock()
 	processors := make([]Chainable[T], len(c.processors))
 	copy(processors, c.processors)
@@ -91,7 +93,16 @@ func (c *Concurrent[T]) Process(ctx context.Context, input T) (T, error) {
 	// Process all with the original context to preserve tracing
 	for _, processor := range processors {
 		go func(p Chainable[T]) {
-			defer wg.Done()
+			defer func() {
+				// Always call wg.Done() even if Clone() or Process() panics
+				// This prevents deadlock in wg.Wait()
+				if r := recover(); r != nil {
+					// Panic occurred, but we must complete wg.Done()
+					// The goroutine can die after this, we just prevent deadlock
+					_ = r // Acknowledge the panic but continue
+				}
+				wg.Done()
+			}()
 
 			// Create an isolated copy using the Clone method
 			inputCopy := input.Clone()

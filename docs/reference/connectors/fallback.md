@@ -136,6 +136,30 @@ fallback := pipz.NewFallback("monitored",
 )
 ```
 
+### ❌ Don't create circular fallback chains
+```go
+// WRONG - Creates infinite recursion risk
+primary := pipz.NewFallback("primary", processor1, secondary)
+secondary := pipz.NewFallback("secondary", processor2, tertiary)  
+tertiary := pipz.NewFallback("tertiary", processor3, primary) // ← Circular!
+
+// If processor1, processor2, and processor3 all fail:
+// primary → secondary → tertiary → primary → secondary → ...
+// Stack overflow!
+```
+
+### ✅ Use linear fallback chains instead
+```go
+// RIGHT - Clear fallback hierarchy
+primary := pipz.NewFallback("primary",
+    processor1,
+    pipz.NewFallback("secondary", 
+        processor2,
+        processor3, // Final fallback - no further chains
+    ),
+)
+```
+
 ## Common Patterns
 
 ```go

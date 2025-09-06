@@ -338,6 +338,40 @@ func TestRateLimiter(t *testing.T) {
 			t.Error("expected limiter name in error path")
 		}
 	})
+
+	t.Run("RateLimiter panic recovery", func(t *testing.T) {
+		// Rate limiters don't have embedded processors, so we test panic in the limiter logic itself
+		// by creating a custom scenario. Since rate limiters are pass-through processors,
+		// let's test with integration scenario where panic happens in chained processor
+
+		panicProcessor := Apply("panic_processor", func(_ context.Context, _ int) (int, error) {
+			panic("rate limiter downstream panic")
+		})
+
+		limiter := NewRateLimiter[int]("panic_limiter", 100, 10) // High rate, won't limit
+		sequence := NewSequence("test_sequence", limiter, panicProcessor)
+
+		result, err := sequence.Process(context.Background(), 42)
+
+		if result != 0 {
+			t.Errorf("expected zero value 0, got %d", result)
+		}
+
+		var pipzErr *Error[int]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error")
+		}
+
+		// Path should show the sequence and then the panicking processor
+		expectedPath := []string{"test_sequence", "panic_limiter", "panic_processor"}
+		if len(pipzErr.Path) < 2 || pipzErr.Path[0] != expectedPath[0] {
+			t.Errorf("expected path to start with sequence, got %v", pipzErr.Path)
+		}
+
+		if pipzErr.InputData != 42 {
+			t.Errorf("expected input data 42, got %d", pipzErr.InputData)
+		}
+	})
 }
 
 func BenchmarkRateLimiter(b *testing.B) {

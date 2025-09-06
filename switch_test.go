@@ -266,4 +266,30 @@ func TestSwitch(t *testing.T) {
 			t.Error("expected error to be of type *pipz.Error[int]")
 		}
 	})
+
+	t.Run("Switch panic recovery", func(t *testing.T) {
+		// Create a switch with panic in condition
+		panicSwitch := NewSwitch("panic_switch", func(_ context.Context, _ string) string {
+			panic("switch condition panic")
+		})
+
+		result, err := panicSwitch.Process(context.Background(), "test")
+
+		if result != "" {
+			t.Errorf("expected empty string, got %q", result)
+		}
+
+		var pipzErr *Error[string]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error")
+		}
+
+		if pipzErr.Path[0] != "panic_switch" {
+			t.Errorf("expected path to start with 'panic_switch', got %v", pipzErr.Path)
+		}
+
+		if pipzErr.InputData != "test" {
+			t.Errorf("expected input data 'test', got %q", pipzErr.InputData)
+		}
+	})
 }

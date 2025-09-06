@@ -215,6 +215,51 @@ apply := pipz.Apply("validate", func(ctx context.Context, user User) (User, erro
 })
 ```
 
+## Built-in Safety Features
+
+### Automatic Panic Recovery
+
+**Every processor and connector in pipz includes built-in panic recovery.** This means:
+
+- **No crashes**: Panics are automatically caught and converted to errors
+- **Security sanitization**: Sensitive information (memory addresses, file paths, stack traces) is stripped from panic messages
+- **Rich error context**: Panic errors include full pipeline path and input data (timing not tracked for panics)
+- **Always enabled**: No configuration needed, minimal performance overhead (~20ns per operation)
+- **Complete coverage**: All connectors (Sequence, Concurrent, WorkerPool, etc.) and all processors (Apply, Transform, Effect, etc.) are protected
+
+```go
+// This will NOT crash your application
+panickyProcessor := pipz.Transform("risky", func(ctx context.Context, data string) string {
+    if data == "boom" {
+        panic("something went wrong!") // Automatically recovered
+    }
+    return data
+})
+
+// The panic is converted to a proper error
+result, err := panickyProcessor.Process(ctx, "boom")
+if err != nil {
+    // err will be a *pipz.Error with sanitized panic message
+    fmt.Printf("Caught panic: %v\n", err)
+    // Output: risky failed after 0s: panic in processor "risky": panic occurred: something went wrong!
+}
+```
+
+**Security Benefits**:
+- Prevents accidental leakage of internal memory addresses
+- Sanitizes file paths that might contain sensitive directory names  
+- Removes stack trace information that could expose internal structure
+- Truncates excessively long panic messages
+
+**When You'll See This**:
+- Third-party library panics in your processor functions
+- Array/slice bounds errors
+- Nil pointer dereferences
+- Type assertion failures
+- Any other unexpected panics in user code
+
+**No Action Required**: Panic recovery is automatic and always enabled. Your pipeline will continue running, treating panics as regular errors in the pipeline flow.
+
 ## Common Issues and Solutions
 
 ### 1. Pipeline Execution Issues
@@ -225,7 +270,7 @@ apply := pipz.Apply("validate", func(ctx context.Context, user User) (User, erro
 
 **Possible Causes**:
 - Context cancellation or timeout
-- Panic in a processor function
+- Panic in a processor function (automatically recovered by pipz)
 - Deadlock in concurrent operations
 
 **Solutions**:
@@ -243,17 +288,19 @@ if err != nil {
     } else if errors.Is(err.Cause, context.Canceled) {
         log.Println("Pipeline was cancelled")
     }
+    
+    // Check if it's a panic that was automatically recovered
+    var panicErr *pipz.Error[T]
+    if errors.As(err, &panicErr) {
+        // Look for panic error in the chain
+        if strings.Contains(panicErr.Error(), "panic in processor") {
+            log.Printf("Processor panic was automatically recovered: %v", panicErr.Err)
+        }
+    }
 }
 
-// Add panic recovery
-safeProcessor := pipz.Apply("safe", func(ctx context.Context, data T) (T, error) {
-    defer func() {
-        if r := recover(); r != nil {
-            log.Printf("Panic recovered: %v", r)
-        }
-    }()
-    return riskyOperation(data)
-})
+// NOTE: Manual panic recovery is unnecessary - pipz handles all panics automatically
+// All processors and connectors include built-in panic recovery with security sanitization
 ```
 
 #### Pipeline Returns Unexpected Results
@@ -541,7 +588,48 @@ proc2 := createProcessor(nil)
 // Configure dependencies after creation if needed
 ```
 
-### 6. Circuit Breaker Issues
+### 6. Fallback Chain Stack Overflow
+
+**Symptom**: Stack overflow errors during error handling, infinite recursion in fallback chains.
+
+**Example Stack Trace Pattern**:
+```
+goroutine 1 [running]:
+runtime.main()
+    fallback.Process(ctx, data)
+    fallback.Process(ctx, data) // Same fallback called recursively
+    fallback.Process(ctx, data)
+    ...
+runtime: goroutine stack exceeds 1000000000-byte limit
+```
+
+**Possible Causes**:
+- Circular references in fallback chains
+- Fallback A points to Fallback B which points back to Fallback A
+- Complex multi-level circular dependencies
+
+**Solutions**:
+
+```go
+// Identify the circular dependency
+// Look for patterns like:
+fallback1 := pipz.NewFallback("f1", proc1, fallback2)
+fallback2 := pipz.NewFallback("f2", proc2, fallback3)
+fallback3 := pipz.NewFallback("f3", proc3, fallback1) // ← Creates circle
+
+// Fix: Use linear hierarchy instead
+fallback := pipz.NewFallback("primary",
+    proc1,
+    pipz.NewFallback("secondary",
+        proc2,
+        proc3, // Terminal processor - no further fallbacks
+    ),
+)
+```
+
+**Prevention**: Design fallback chains as hierarchical trees, not circular graphs.
+
+### 7. Circuit Breaker Issues
 
 #### Circuit Breaker Not Opening
 

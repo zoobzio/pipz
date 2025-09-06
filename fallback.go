@@ -30,6 +30,13 @@ import (
 //	    paypalProcessor,       // Fall back to PayPal on error
 //	    squareProcessor,       // Finally try Square
 //	)
+//
+// IMPORTANT: Avoid circular references between Fallback instances when all processors fail.
+// Example of DANGEROUS pattern:
+//
+//	fallback1 → fallback2 → fallback3 → fallback1
+//
+// This creates infinite recursion risk if all processors fail, leading to stack overflow.
 type Fallback[T any] struct {
 	name       Name
 	processors []Chainable[T]
@@ -56,7 +63,9 @@ func NewFallback[T any](name Name, processors ...Chainable[T]) *Fallback[T] {
 
 // Process implements the Chainable interface.
 // Tries each processor in order until one succeeds or all fail.
-func (f *Fallback[T]) Process(ctx context.Context, data T) (T, error) {
+func (f *Fallback[T]) Process(ctx context.Context, data T) (result T, err error) {
+	defer recoverFromPanic(&result, &err, f.name, data)
+
 	f.mu.RLock()
 	processors := make([]Chainable[T], len(f.processors))
 	copy(processors, f.processors)

@@ -93,6 +93,7 @@ result, err := pipeline.Process(ctx, order)
 - **Rich error context**: Know exactly where failures occur with complete path tracking
 - **Dynamic or static**: Build pipelines declaratively or modify them at runtime
 - **Errors are pipelines too**: Build sophisticated error recovery using the same pipeline tools
+- **Panic-safe**: Automatic panic recovery with security sanitization prevents crashes
 
 ## Installation
 
@@ -186,6 +187,8 @@ func main() {
 - Shows exactly where failures occurred in the pipeline
 - Includes timing information and input data
 - Distinguishes between timeouts, cancellations, and failures
+- Automatic panic recovery with security-focused sanitization
+- Panics converted to errors with sensitive information stripped
 
 **Design Philosophy**:
 - Processors are immutable values (simple, predictable)

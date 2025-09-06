@@ -892,6 +892,7 @@ func configureConnectors(breaker *pipz.CircuitBreaker[Request], limiter *pipz.Ra
 5. **Shared Mutable State**: Processors modifying shared data
 6. **Magic Strings**: Using strings instead of typed constants
 7. **Hidden Dependencies**: Processors with side effects on external state
+8. **Circular Fallbacks**: Creating recursive fallback chains that can cause stack overflow
 
 ## Next Steps
 

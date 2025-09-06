@@ -125,7 +125,9 @@ func NewCircuitBreaker[T any](name Name, processor Chainable[T], failureThreshol
 }
 
 // Process implements the Chainable interface.
-func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (T, error) {
+func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err error) {
+	defer recoverFromPanic(&result, &err, cb.name, data)
+
 	cb.mu.Lock()
 
 	// Check if we should transition from open to half-open
@@ -154,7 +156,7 @@ func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (T, error) {
 	cb.mu.Unlock()
 
 	// Try the operation
-	result, err := processor.Process(ctx, data)
+	result, err = processor.Process(ctx, data)
 
 	// Record the result
 	cb.mu.Lock()

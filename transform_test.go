@@ -2,6 +2,7 @@ package pipz
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -58,6 +59,45 @@ func TestTransform(t *testing.T) {
 		}
 		if result != "test_processed" {
 			t.Errorf("expected test_processed, got %s", result)
+		}
+	})
+
+	t.Run("Transform panic recovery", func(t *testing.T) {
+		// Create a Transform that panics
+		panicTransform := Transform("panic_transform", func(_ context.Context, _ string) string {
+			panic("test panic in transform")
+		})
+
+		result, err := panicTransform.Process(context.Background(), "test")
+
+		// Should get empty string as result
+		if result != "" {
+			t.Errorf("expected empty string, got %q", result)
+		}
+
+		// Should get Error[string] with sanitized panic message
+		var pipzErr *Error[string]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error")
+		}
+
+		if len(pipzErr.Path) != 1 || pipzErr.Path[0] != "panic_transform" {
+			t.Errorf("expected path [panic_transform], got %v", pipzErr.Path)
+		}
+
+		if pipzErr.InputData != "test" {
+			t.Errorf("expected input data 'test', got %q", pipzErr.InputData)
+		}
+
+		// Check that panic message is properly wrapped
+		var panicErr *panicError
+		if !errors.As(pipzErr.Err, &panicErr) {
+			t.Fatal("expected panicError")
+		}
+
+		expectedMsg := "panic occurred: test panic in transform"
+		if panicErr.sanitized != expectedMsg {
+			t.Errorf("expected %q, got %q", expectedMsg, panicErr.sanitized)
 		}
 	})
 }

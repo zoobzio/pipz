@@ -371,7 +371,8 @@ type Processor[T any] struct {
 //	// Or in connectors
 //	pipeline := pipz.NewSequence("validation").
 //	    Register(validator, transformer).Link()
-func (p Processor[T]) Process(ctx context.Context, data T) (T, error) {
+func (p Processor[T]) Process(ctx context.Context, data T) (result T, err error) {
+	defer recoverFromPanic(&result, &err, p.name, data)
 	return p.fn(ctx, data)
 }
 

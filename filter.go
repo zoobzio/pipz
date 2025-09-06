@@ -69,7 +69,9 @@ func NewFilter[T any](name Name, condition func(context.Context, T) bool, proces
 
 // Process implements the Chainable interface.
 // Evaluates the condition and either executes the processor or passes data through unchanged.
-func (f *Filter[T]) Process(ctx context.Context, data T) (T, error) {
+func (f *Filter[T]) Process(ctx context.Context, data T) (result T, err error) {
+	defer recoverFromPanic(&result, &err, f.name, data)
+
 	f.mu.RLock()
 	condition := f.condition
 	processor := f.processor
@@ -82,7 +84,7 @@ func (f *Filter[T]) Process(ctx context.Context, data T) (T, error) {
 	}
 
 	// Condition true - execute processor
-	result, err := processor.Process(ctx, data)
+	result, err = processor.Process(ctx, data)
 	if err != nil {
 		// Prepend this filter's name to the error path
 		var pipeErr *Error[T]
