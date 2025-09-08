@@ -65,11 +65,13 @@ func NewHandle[T any](name Name, processor Chainable[T], errorHandler Chainable[
 func (h *Handle[T]) Process(ctx context.Context, input T) (result T, err error) {
 	defer recoverFromPanic(&result, &err, h.name, input)
 
+	// Take a snapshot of processor and errorHandler to prevent race conditions
 	h.mu.RLock()
 	processor := h.processor
 	errorHandler := h.errorHandler
 	h.mu.RUnlock()
 
+	// Use the snapshots instead of accessing fields directly
 	result, err = processor.Process(ctx, input)
 	if err != nil {
 		var pipeErr *Error[T]
@@ -82,11 +84,13 @@ func (h *Handle[T]) Process(ctx context.Context, input T) (result T, err error) 
 			return result, err
 		}
 		// Handle non-pipeline errors by wrapping them
+		// Use the processor snapshot name to avoid race condition
+		processorName := processor.Name()
 		wrappedErr := &Error[T]{
 			Timestamp: time.Now(),
 			InputData: input,
 			Err:       err,
-			Path:      []Name{h.name, processor.Name()},
+			Path:      []Name{h.name, processorName},
 		}
 		_, _ = errorHandler.Process(ctx, wrappedErr) //nolint:errcheck // Handler errors are intentionally ignored
 		// Always pass through the original error

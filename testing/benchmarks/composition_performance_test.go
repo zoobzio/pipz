@@ -12,22 +12,73 @@ import (
 	"github.com/zoobzio/pipz"
 )
 
-// ClonableInt is defined in comparison_test.go
+// ClonableInt is a simple integer type that implements Clone for benchmarking..
+type ClonableInt int
+
+func (c ClonableInt) Clone() ClonableInt {
+	return c
+}
+
+// ShoppingCart represents a user's shopping cart - tests deep cloning with slices and maps..
+type ShoppingCart struct {
+	UserID   int64
+	Items    []CartItem
+	Total    float64
+	Updated  time.Time
+	Metadata map[string]interface{}
+}
+
+func (sc ShoppingCart) Clone() ShoppingCart {
+	// Deep copy required for Items slice and Metadata map
+	clonedItems := make([]CartItem, len(sc.Items))
+	copy(clonedItems, sc.Items)
+
+	clonedMetadata := make(map[string]interface{})
+	for k, v := range sc.Metadata {
+		clonedMetadata[k] = v
+	}
+
+	return ShoppingCart{
+		UserID:   sc.UserID,
+		Items:    clonedItems,
+		Total:    sc.Total,
+		Updated:  sc.Updated,
+		Metadata: clonedMetadata,
+	}
+}
+
+type CartItem struct {
+	ProductID string
+	Quantity  int
+	Price     float64
+}
 
 // BenchmarkPipelineLength measures how pipeline length affects performance.
 func BenchmarkPipelineLength(b *testing.B) {
 	ctx := context.Background()
-	data := ClonableInt(1)
+	data := ShoppingCart{
+		UserID:  12345,
+		Items:   []CartItem{{ProductID: "ITEM-001", Quantity: 1, Price: 29.99}},
+		Total:   29.99,
+		Updated: time.Now(),
+		Metadata: map[string]interface{}{
+			"source":  "web",
+			"session": "sess-123",
+		},
+	}
 
 	lengths := []int{1, 2, 5, 10, 25, 50, 100}
 
 	for _, length := range lengths {
 		b.Run("Length_"+strconv.Itoa(length), func(b *testing.B) {
 			// Create pipeline with specified length
-			processors := make([]pipz.Chainable[ClonableInt], length)
+			processors := make([]pipz.Chainable[ShoppingCart], length)
 			for i := 0; i < length; i++ {
 				processors[i] = pipz.Transform("step"+strconv.Itoa(i),
-					func(_ context.Context, n ClonableInt) ClonableInt { return n + 1 })
+					func(_ context.Context, cart ShoppingCart) ShoppingCart {
+						cart.Total += 0.01 // Add small processing fee
+						return cart
+					})
 			}
 
 			pipeline := pipz.NewSequence("pipeline", processors...)

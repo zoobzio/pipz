@@ -1,0 +1,3859 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>pipz: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/zoobzio/pipz/api.go (100.0%)</option>
+				
+				<option value="file1">github.com/zoobzio/pipz/apply.go (100.0%)</option>
+				
+				<option value="file2">github.com/zoobzio/pipz/circuitbreaker.go (98.8%)</option>
+				
+				<option value="file3">github.com/zoobzio/pipz/concurrent.go (98.0%)</option>
+				
+				<option value="file4">github.com/zoobzio/pipz/contest.go (100.0%)</option>
+				
+				<option value="file5">github.com/zoobzio/pipz/effect.go (100.0%)</option>
+				
+				<option value="file6">github.com/zoobzio/pipz/enrich.go (100.0%)</option>
+				
+				<option value="file7">github.com/zoobzio/pipz/error.go (97.7%)</option>
+				
+				<option value="file8">github.com/zoobzio/pipz/fallback.go (97.5%)</option>
+				
+				<option value="file9">github.com/zoobzio/pipz/filter.go (97.0%)</option>
+				
+				<option value="file10">github.com/zoobzio/pipz/handle.go (83.3%)</option>
+				
+				<option value="file11">github.com/zoobzio/pipz/mutate.go (100.0%)</option>
+				
+				<option value="file12">github.com/zoobzio/pipz/race.go (96.6%)</option>
+				
+				<option value="file13">github.com/zoobzio/pipz/ratelimiter.go (100.0%)</option>
+				
+				<option value="file14">github.com/zoobzio/pipz/retry.go (95.2%)</option>
+				
+				<option value="file15">github.com/zoobzio/pipz/scaffold.go (100.0%)</option>
+				
+				<option value="file16">github.com/zoobzio/pipz/sequence.go (98.9%)</option>
+				
+				<option value="file17">github.com/zoobzio/pipz/switch.go (98.0%)</option>
+				
+				<option value="file18">github.com/zoobzio/pipz/timeout.go (96.9%)</option>
+				
+				<option value="file19">github.com/zoobzio/pipz/transform.go (100.0%)</option>
+				
+				<option value="file20">github.com/zoobzio/pipz/workerpool.go (100.0%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">// Package pipz provides a lightweight, type-safe library for building composable data processing pipelines in Go.
+//
+// # Overview
+//
+// pipz enables developers to create clean, testable, and maintainable data processing workflows
+// by composing small, focused functions into larger pipelines. It addresses common challenges
+// in Go applications such as scattered business logic, repetitive error handling, and
+// difficult-to-test code that mixes pure logic with external dependencies.
+//
+// # Installation
+//
+//        go get github.com/zoobzio/pipz
+//
+// Requires Go 1.21+ for generic type constraints.
+//
+// # Core Concepts
+//
+// The library is built around a single, uniform interface:
+//
+//        type Chainable[T any] interface {
+//            Process(context.Context, T) (T, *Error[T])
+//            Name() Name
+//        }
+//
+// Key components:
+//   - Processors: Individual processing steps created with adapter functions (Transform, Apply, etc.)
+//   - Connectors: Compose multiple processors into complex flows (Sequence, Switch, Concurrent, etc.)
+//   - Sequence: The primary way to build sequential pipelines with runtime modification support
+//
+// Design philosophy:
+//   - Processors are immutable values (simple functions wrapped with metadata)
+//   - Connectors are mutable pointers (configurable containers with state)
+//
+// Everything implements Chainable[T], enabling seamless composition while maintaining
+// type safety through Go generics. Context support provides timeout control and cancellation.
+// Execution follows a fail-fast pattern where processing stops at the first error.
+//
+// # Adapter Functions
+//
+// Adapters wrap your functions to implement the Chainable interface:
+//
+// Transform - Pure transformations that cannot fail:
+//
+//        double := pipz.Transform("double", func(_ context.Context, n int) int {
+//            return n * 2
+//        })
+//
+// Apply - Operations that can fail:
+//
+//        parseJSON := pipz.Apply("parse", func(_ context.Context, s string) (Data, error) {
+//            var d Data
+//            return d, json.Unmarshal([]byte(s), &amp;d)
+//        })
+//
+// Effect - Side effects without modifying data:
+//
+//        logger := pipz.Effect("log", func(_ context.Context, d Data) error {
+//            log.Printf("Processing: %+v", d)
+//            return nil
+//        })
+//
+// Mutate - Conditional modifications:
+//
+//        discountPremium := pipz.Mutate("discount",
+//            func(_ context.Context, u User) bool { return u.IsPremium },
+//            func(_ context.Context, u User) User { u.Discount = 0.2; return u },
+//        )
+//
+// Enrich - Optional enhancements that log failures:
+//
+//        addLocation := pipz.Enrich("geo", func(ctx context.Context, u User) (User, error) {
+//            u.Country = detectCountry(u.IP) // May fail, but won't stop pipeline
+//            return u, nil
+//        })
+//
+// # Connectors
+//
+// Connectors compose multiple Chainables. Choose based on your needs:
+//
+// Sequential Processing:
+//
+//        pipeline := pipz.NewSequence("pipeline", step1, step2, step3)
+//        // Or build dynamically:
+//        seq := pipz.NewSequence[T]("name")
+//        seq.Register(step1, step2)
+//        seq.PushTail(step3)  // Add at runtime
+//
+// Parallel Processing (requires T implements Cloner[T]):
+//
+//        // Run all processors, return original data
+//        concurrent := pipz.NewConcurrent("parallel", proc1, proc2, proc3)
+//
+//        // Return first successful result
+//        race := pipz.NewRace("fastest", primary, secondary, tertiary)
+//
+//        // Return first result meeting a condition
+//        contest := pipz.NewContest("best", conditionFunc, option1, option2, option3)
+//
+// Error Handling:
+//
+//        // Try fallback on error
+//        fallback := pipz.NewFallback("safe", primary, backup)
+//
+//        // Retry with attempts
+//        retry := pipz.NewRetry("resilient", processor, 3)
+//
+//        // Retry with exponential backoff
+//        backoff := pipz.NewBackoff("api-call", processor, 5, time.Second)
+//
+//        // Handle errors without changing data flow
+//        handle := pipz.NewHandle("observed", processor, errorPipeline)
+//
+// Control Flow:
+//
+//        // Route based on conditions
+//        router := pipz.NewSwitch("router", func(ctx context.Context, d Data) string {
+//            if d.Type == "premium" { return "premium-flow" }
+//            return "standard-flow"
+//        })
+//        router.AddRoute("premium-flow", premiumProcessor)
+//        router.AddRoute("standard-flow", standardProcessor)
+//
+//        // Enforce timeouts
+//        timeout := pipz.NewTimeout("deadline", processor, 30*time.Second)
+//
+//        // Conditional processing
+//        filter := pipz.NewFilter("feature-flag",
+//            func(ctx context.Context, u User) bool { return u.BetaEnabled },
+//            betaProcessor,
+//        )
+//
+// Resource Protection:
+//
+//        // Rate limiting
+//        rateLimiter := pipz.NewRateLimiter("api-limit", 100, 10) // 100/sec, burst 10
+//        rateLimiter.SetMode("drop") // Or "wait" (default)
+//
+//        // Circuit breaker
+//        breaker := pipz.NewCircuitBreaker("service-breaker", processor, 5, 30*time.Second)
+//
+// # Quick Start
+//
+// Simple example - transform strings through a pipeline:
+//
+//        package main
+//
+//        import (
+//            "context"
+//            "strings"
+//            "github.com/zoobzio/pipz"
+//        )
+//
+//        func main() {
+//            // Create processors
+//            trim := pipz.Transform("trim", func(_ context.Context, s string) string {
+//                return strings.TrimSpace(s)
+//            })
+//            upper := pipz.Transform("uppercase", func(_ context.Context, s string) string {
+//                return strings.ToUpper(s)
+//            })
+//
+//            // Method 1: Direct composition
+//            pipeline := pipz.NewSequence("text-processor", trim, upper)
+//
+//            // Method 2: Build dynamically
+//            sequence := pipz.NewSequence[string]("text-processor")
+//            sequence.Register(trim, upper)
+//
+//            // Execute
+//            result, err := pipeline.Process(context.Background(), "  hello world  ")
+//            // result: "HELLO WORLD", err: nil
+//        }
+//
+// # Implementing Cloner[T]
+//
+// For parallel processing with Concurrent or Race, types must implement Cloner[T]:
+//
+//        type Order struct {
+//            ID    string
+//            Items []Item        // Slice needs copying
+//            Meta  map[string]any // Map needs copying
+//        }
+//
+//        func (o Order) Clone() Order {
+//            // Deep copy slice
+//            items := make([]Item, len(o.Items))
+//            for i, item := range o.Items {
+//                items[i] = item.Clone() // If Item also has references
+//            }
+//
+//            // Deep copy map
+//            meta := make(map[string]any, len(o.Meta))
+//            for k, v := range o.Meta {
+//                meta[k] = v // Adjust based on value types
+//            }
+//
+//            return Order{ID: o.ID, Items: items, Meta: meta}
+//        }
+//
+// # Choosing the Right Connector
+//
+//   - NewSequence: Default choice for step-by-step processing
+//   - Sequence: When you need to modify pipeline at runtime
+//   - Switch: For conditional routing based on data
+//   - Filter: For conditional processing (execute or skip)
+//   - Concurrent: For parallel independent operations (requires Cloner[T])
+//   - Race: When you need the fastest result
+//   - Contest: When you need the fastest result that meets criteria
+//   - Fallback: For primary/backup patterns
+//   - Retry/Backoff: For handling transient failures
+//   - Timeout: For operations that might hang
+//   - Handle: For error monitoring without changing flow
+//   - RateLimiter: For protecting rate-limited resources
+//   - CircuitBreaker: For preventing cascade failures
+//
+// # Error Handling
+//
+// pipz provides rich error information through the Error[T] type:
+//
+//        type Error[T any] struct {
+//            Path      []string      // Full path: ["pipeline", "validate", "parse_json"]
+//            InputData T             // The input that caused the failure
+//            Err       error         // The underlying error
+//            Timestamp time.Time     // When the error occurred
+//            Duration  time.Duration // How long before failure
+//            Timeout   bool          // Was it a timeout?
+//            Canceled  bool          // Was it canceled?
+//        }
+//
+// Error handling example:
+//
+//        result, err := pipeline.Process(ctx, data)
+//        if err != nil {
+//            var pipeErr *pipz.Error[Data]
+//            if errors.As(err, &amp;pipeErr) {
+//                log.Printf("Failed at: %s", strings.Join(pipeErr.Path, " → "))
+//                log.Printf("Input data: %+v", pipeErr.InputData)
+//                log.Printf("After: %v", pipeErr.Duration)
+//
+//                if pipeErr.Timeout {
+//                    // Handle timeout specifically
+//                }
+//            }
+//        }
+//
+// # Performance
+//
+// pipz is designed for exceptional performance:
+//
+//   - Transform: 2.7ns per operation with zero allocations
+//   - Apply/Effect (success): 46ns per operation with zero allocations
+//   - Basic pipeline overhead: ~88 bytes, 3 allocations (constant regardless of length)
+//   - Linear scaling: 5-step pipeline ~560ns, 50-step pipeline ~2.8μs
+//   - No reflection or runtime type assertions
+//   - Predictable performance characteristics
+//
+// See PERFORMANCE.md for detailed benchmarks.
+//
+// # Best Practices
+//
+//  1. Keep processors small and focused on a single responsibility
+//  2. Use descriptive names for processors to aid debugging
+//  3. Implement Cloner[T] correctly for types used with Concurrent/Race
+//  4. Use NewSequence() for both static and dynamic pipelines
+//  5. Check context.Err() in long-running processors
+//  6. Let errors bubble up - handle at pipeline level
+//  7. Use Effect for side effects to maintain purity
+//  8. Test processors in isolation before composing
+//  9. Prefer Transform over Apply when errors aren't possible
+//
+// 10. Use timeouts at the pipeline level, not individual processors
+//
+// # Common Patterns
+//
+// Validation Pipeline:
+//
+//        validation := pipz.NewSequence("validation",
+//            pipz.Effect("required", checkRequired),
+//            pipz.Effect("format", checkFormat),
+//            pipz.Apply("sanitize", sanitizeInput),
+//        )
+//
+// API with Retry and Timeout:
+//
+//        apiCall := pipz.NewTimeout("api-timeout",
+//            pipz.NewBackoff("api-retry",
+//                pipz.Apply("fetch", fetchFromAPI),
+//                3, time.Second,
+//            ),
+//            30*time.Second,
+//        )
+//
+// Multi-path Processing:
+//
+//        processor := pipz.NewSwitch("type-router", detectType)
+//        processor.AddRoute("json", jsonProcessor)
+//        processor.AddRoute("xml", xmlProcessor)
+//        processor.AddRoute("csv", csvProcessor)
+//
+// For more examples, see the examples directory.
+package pipz
+
+import "context"
+
+// Chainable defines the interface for any component that can process
+// values of type T. This interface enables composition of different
+// processing components that operate on the same type.
+//
+// Chainable is the foundation of pipz - every processor, pipeline,
+// and connector implements this interface. The uniform interface
+// enables seamless composition while maintaining type safety through
+// Go generics.
+//
+// Key design principles:
+//   - Context support for timeout and cancellation
+//   - Type safety through generics (no interface{})
+//   - Error propagation for fail-fast behavior
+//   - Immutable by convention (return modified copies)
+//   - Named components for debugging and monitoring
+type Chainable[T any] interface {
+        Process(context.Context, T) (T, error)
+        Name() Name
+}
+
+// Name is a type alias for processor and connector names.
+// Using this type encourages storing names as constants rather than
+// using inline strings throughout your code.
+//
+// Example:
+//
+//        const (
+//            ValidateOrderName  Name = "validate-order"
+//            EnrichCustomerName Name = "enrich-customer"
+//            ProcessPaymentName Name = "process-payment"
+//        )
+//
+//        validateOrder := pipz.Apply(ValidateOrderName, validateFunc)
+//        enrichCustomer := pipz.Transform(EnrichCustomerName, enrichFunc)
+type Name = string
+
+// Processor defines a named processing stage that transforms a value of type T.
+// It contains a descriptive name for debugging and a private function that processes the value.
+// The function receives a context for cancellation and timeout control.
+//
+// Processor is the basic building block created by adapter functions like
+// Apply, Transform, Effect, Mutate, and Enrich. The name field is crucial for debugging,
+// appearing in error messages and the Error[T].Path to identify exactly where failures occur.
+//
+// The fn field is intentionally private to ensure processors are only created through
+// the provided adapter functions, maintaining consistent error handling and path tracking.
+//
+// Best practices for processor names:
+//   - Use descriptive, action-oriented names ("validate_email", not "email")
+//   - Include the operation type ("parse_json", "fetch_user", "log_event")
+//   - Keep names concise but meaningful
+//   - Use consistent naming conventions across your application
+//   - Names appear in Error[T].Path for debugging (e.g., ["pipeline", "validate_email"])
+type Processor[T any] struct {
+        fn   func(context.Context, T) (T, error)
+        name Name
+}
+
+// Process implements the Chainable interface, allowing individual processors
+// to be used directly or composed in connectors.
+//
+// This means a single Processor can be used anywhere a Chainable is expected:
+//
+//        validator := pipz.Effect("validate", validateFunc)
+//        // Can be used directly
+//        result, err := validator.Process(ctx, data)
+//        // Or in connectors
+//        pipeline := pipz.NewSequence("validation").
+//            Register(validator, transformer).Link()
+func (p Processor[T]) Process(ctx context.Context, data T) (result T, err error) <span class="cov8" title="1">{
+        defer recoverFromPanic(&amp;result, &amp;err, p.name, data)
+        return p.fn(ctx, data)
+}</span>
+
+// Name returns the name of the processor for debugging and error reporting.
+func (p Processor[T]) Name() Name <span class="cov8" title="1">{
+        return p.name
+}</span>
+
+// Cloner is an interface for types that can create deep copies of themselves.
+// Implementing this interface is required to use types with Concurrent and Race connectors,
+// providing a type-safe and performant alternative to reflection-based copying.
+//
+// The Clone method must return a deep copy where modifications to the clone
+// do not affect the original value. For types containing pointers, slices, or maps,
+// ensure these are also copied to achieve true isolation between concurrent processors.
+//
+// Example implementation:
+//
+//        type Order struct {
+//            ID       string
+//            Items    []Item
+//            Status   string
+//            Metadata map[string]string
+//        }
+//
+//        func (o Order) Clone() Order {
+//            // Deep copy slice
+//            items := make([]Item, len(o.Items))
+//            copy(items, o.Items)
+//
+//            // Deep copy map
+//            metadata := make(map[string]string, len(o.Metadata))
+//            for k, v := range o.Metadata {
+//                metadata[k] = v
+//            }
+//
+//            return Order{
+//                ID:       o.ID,
+//                Items:    items,
+//                Status:   o.Status,
+//                Metadata: metadata,
+//            }
+//        }
+type Cloner[T any] interface {
+        Clone() T
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package pipz
+
+import (
+        "context"
+        "errors"
+        "time"
+)
+
+// Apply creates a Processor from a function that transforms data and may return an error.
+// Apply is the workhorse processor - use it when your transformation might fail due to
+// validation, parsing, external API calls, or business rule violations.
+//
+// The function receives a context for timeout/cancellation support. Long-running
+// operations should check ctx.Err() periodically. On error, the pipeline stops
+// immediately and returns the error wrapped with debugging context.
+//
+// Apply is ideal for:
+//   - Data validation with transformation
+//   - API calls that return modified data
+//   - Database lookups that enhance data
+//   - Parsing operations that might fail
+//   - Business rule enforcement
+//
+// For pure transformations that can't fail, use Transform for better performance.
+// For operations that should continue on failure, use Enrich.
+//
+// Example:
+//
+//        parseJSON := pipz.Apply("parse_json", func(ctx context.Context, raw string) (Data, error) {
+//            var data Data
+//            if err := json.Unmarshal([]byte(raw), &amp;data); err != nil {
+//                return Data{}, fmt.Errorf("invalid JSON: %w", err)
+//            }
+//            return data, nil
+//        })
+func Apply[T any](name Name, fn func(context.Context, T) (T, error)) Processor[T] <span class="cov8" title="1">{
+        return Processor[T]{
+                name: name,
+                fn: func(ctx context.Context, value T) (result T, err error) </span><span class="cov8" title="1">{
+                        defer recoverFromPanic(&amp;result, &amp;err, name, value)
+                        start := time.Now()
+                        result, err = fn(ctx, value)
+                        if err != nil </span><span class="cov8" title="1">{
+                                var zero T
+                                return zero, &amp;Error[T]{
+                                        Path:      []Name{name},
+                                        InputData: value,
+                                        Err:       err,
+                                        Timestamp: time.Now(),
+                                        Duration:  time.Since(start),
+                                        Timeout:   errors.Is(err, context.DeadlineExceeded),
+                                        Canceled:  errors.Is(err, context.Canceled),
+                                }
+                        }</span>
+                        <span class="cov8" title="1">return result, nil</span>
+                },
+        }
+}
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package pipz
+
+import (
+        "context"
+        "errors"
+        "fmt"
+        "sync"
+        "time"
+)
+
+const (
+        stateClosed   = "closed"
+        stateOpen     = "open"
+        stateHalfOpen = "half-open"
+)
+
+// CircuitBreaker prevents cascading failures by stopping requests to failing services.
+// CircuitBreaker implements the circuit breaker pattern with three states:
+//   - Closed: Normal operation, requests pass through
+//   - Open: Requests fail immediately without calling the wrapped processor
+//   - Half-Open: Testing state, limited requests to check if service recovered
+//
+// CRITICAL: CircuitBreaker is a STATEFUL connector that tracks failure counts across requests.
+// You MUST create it as a package-level variable (singleton) to maintain state.
+// Creating a new CircuitBreaker for each request means it will NEVER open!
+//
+// ❌ WRONG - Creating per request (never opens):
+//
+//        func handleRequest(req Request) Response {
+//            breaker := pipz.NewCircuitBreaker("api", proc, 5, 30*time.Second)  // NEW breaker!
+//            return breaker.Process(ctx, req)  // Always closed, failure count always 0
+//        }
+//
+// ✅ RIGHT - Package-level singleton:
+//
+//        var apiBreaker = pipz.NewCircuitBreaker("api", apiProcessor, 5, 30*time.Second)
+//
+//        func handleRequest(req Request) Response {
+//            return apiBreaker.Process(ctx, req)  // Tracks failures across requests
+//        }
+//
+// The circuit opens after consecutive failures reach the threshold. After a
+// timeout period, it transitions to half-open to test recovery. Successful
+// requests in half-open state close the circuit, while failures reopen it.
+//
+// CircuitBreaker is essential for:
+//   - Preventing cascade failures in distributed systems
+//   - Giving failing services time to recover
+//   - Failing fast when services are down
+//   - Reducing unnecessary load on struggling services
+//   - Improving overall system resilience
+//
+// Best Practices:
+//   - Use const names for all processors/connectors (see best-practices.md)
+//   - Declare CircuitBreakers as package-level vars
+//   - Set thresholds based on service characteristics
+//   - Combine with RateLimiter for comprehensive protection
+//   - Monitor circuit state for operational awareness
+//
+// Example:
+//
+//        // Define names as constants
+//        const (
+//            ConnectorAPIBreaker      = "api-breaker"
+//            ConnectorDatabaseBreaker = "db-breaker"
+//            ProcessorAPICall         = "api-call"
+//        )
+//
+//        // Create breakers as package-level singletons
+//        var (
+//            // External API - fail fast, longer recovery
+//            apiBreaker = pipz.NewCircuitBreaker(
+//                ConnectorAPIBreaker,
+//                pipz.Apply(ProcessorAPICall, callExternalAPI),
+//                5,                    // Open after 5 failures
+//                30 * time.Second,     // Try recovery after 30s
+//            )
+//
+//            // Internal database - more tolerant
+//            dbBreaker = pipz.NewCircuitBreaker(
+//                ConnectorDatabaseBreaker,
+//                pipz.Apply("db-query", queryDatabase),
+//                10,                   // Open after 10 failures
+//                10 * time.Second,     // Try recovery after 10s
+//            )
+//        )
+//
+//        // Combine with rate limiting for full protection
+//        func createResilientPipeline() pipz.Chainable[Request] {
+//            return pipz.NewSequence("resilient-pipeline",
+//                rateLimiter,    // Protect downstream from overload
+//                apiBreaker,     // Fail fast if service is down
+//                pipz.NewRetry("retry", processor, 3),  // Retry transient failures
+//            )
+//        }
+type CircuitBreaker[T any] struct {
+        lastFailTime     time.Time
+        processor        Chainable[T]
+        name             Name
+        state            string
+        resetTimeout     time.Duration
+        generation       uint64
+        failureThreshold int
+        successThreshold int
+        failures         int
+        successes        int
+        mu               sync.Mutex
+}
+
+// NewCircuitBreaker creates a new CircuitBreaker connector.
+// The failureThreshold sets how many consecutive failures trigger opening.
+// The resetTimeout sets how long to wait before attempting recovery.
+func NewCircuitBreaker[T any](name Name, processor Chainable[T], failureThreshold int, resetTimeout time.Duration) *CircuitBreaker[T] <span class="cov8" title="1">{
+        if failureThreshold &lt; 1 </span><span class="cov8" title="1">{
+                failureThreshold = 1
+        }</span>
+        <span class="cov8" title="1">return &amp;CircuitBreaker[T]{
+                name:             name,
+                processor:        processor,
+                failureThreshold: failureThreshold,
+                successThreshold: 1, // Default: 1 success to close from half-open
+                resetTimeout:     resetTimeout,
+                state:            stateClosed,
+        }</span>
+}
+
+// Process implements the Chainable interface.
+func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err error) <span class="cov8" title="1">{
+        defer recoverFromPanic(&amp;result, &amp;err, cb.name, data)
+
+        cb.mu.Lock()
+
+        // Check if we should transition from open to half-open
+        if cb.state == stateOpen &amp;&amp; time.Since(cb.lastFailTime) &gt; cb.resetTimeout </span><span class="cov8" title="1">{
+                cb.state = stateHalfOpen
+                cb.failures = 0
+                cb.successes = 0
+                cb.generation++
+        }</span>
+
+        <span class="cov8" title="1">state := cb.state
+        generation := cb.generation
+        processor := cb.processor
+
+        // Fail fast if circuit is open
+        if state == stateOpen </span><span class="cov8" title="1">{
+                cb.mu.Unlock()
+                return data, &amp;Error[T]{
+                        Err:       fmt.Errorf("circuit breaker is open"),
+                        InputData: data,
+                        Path:      []Name{cb.name},
+                        Timestamp: time.Now(),
+                }
+        }</span>
+
+        <span class="cov8" title="1">cb.mu.Unlock()
+
+        // Try the operation
+        result, err = processor.Process(ctx, data)
+
+        // Record the result
+        cb.mu.Lock()
+        defer cb.mu.Unlock()
+
+        // Only update state if we're still in the same generation
+        // This prevents race conditions in half-open state
+        if cb.generation != generation </span><span class="cov8" title="1">{
+                return result, err
+        }</span>
+
+        <span class="cov8" title="1">if err != nil </span><span class="cov8" title="1">{
+                cb.onFailure()
+                // Wrap the error with circuit breaker context
+                var pipeErr *Error[T]
+                if errors.As(err, &amp;pipeErr) </span><span class="cov8" title="1">{
+                        pipeErr.Path = append([]Name{cb.name}, pipeErr.Path...)
+                        return result, pipeErr
+                }</span>
+                <span class="cov0" title="0">return result, &amp;Error[T]{
+                        Err:       err,
+                        InputData: data,
+                        Path:      []Name{cb.name},
+                        Timestamp: time.Now(),
+                }</span>
+        }
+
+        <span class="cov8" title="1">cb.onSuccess()
+        return result, nil</span>
+}
+
+// onSuccess handles successful request.
+func (cb *CircuitBreaker[T]) onSuccess() <span class="cov8" title="1">{
+        switch cb.state </span>{
+        case stateClosed:<span class="cov8" title="1">
+                // Reset failure count on success
+                cb.failures = 0</span>
+        case stateHalfOpen:<span class="cov8" title="1">
+                cb.successes++
+                if cb.successes &gt;= cb.successThreshold </span><span class="cov8" title="1">{
+                        // Enough successes, close the circuit
+                        cb.state = stateClosed
+                        cb.failures = 0
+                        cb.successes = 0
+                }</span>
+        }
+}
+
+// onFailure handles failed request.
+func (cb *CircuitBreaker[T]) onFailure() <span class="cov8" title="1">{
+        cb.lastFailTime = time.Now()
+
+        switch cb.state </span>{
+        case stateClosed:<span class="cov8" title="1">
+                cb.failures++
+                if cb.failures &gt;= cb.failureThreshold </span><span class="cov8" title="1">{
+                        // Too many failures, open the circuit
+                        cb.state = stateOpen
+                }</span>
+        case stateHalfOpen:<span class="cov8" title="1">
+                // Any failure in half-open state reopens the circuit
+                cb.state = stateOpen
+                cb.failures = 0
+                cb.successes = 0</span>
+        }
+}
+
+// SetFailureThreshold updates the consecutive failures needed to open the circuit.
+func (cb *CircuitBreaker[T]) SetFailureThreshold(n int) *CircuitBreaker[T] <span class="cov8" title="1">{
+        if n &lt; 1 </span><span class="cov8" title="1">{
+                n = 1
+        }</span>
+        <span class="cov8" title="1">cb.mu.Lock()
+        defer cb.mu.Unlock()
+        cb.failureThreshold = n
+        return cb</span>
+}
+
+// SetSuccessThreshold updates the successes needed to close from half-open state.
+func (cb *CircuitBreaker[T]) SetSuccessThreshold(n int) *CircuitBreaker[T] <span class="cov8" title="1">{
+        if n &lt; 1 </span><span class="cov8" title="1">{
+                n = 1
+        }</span>
+        <span class="cov8" title="1">cb.mu.Lock()
+        defer cb.mu.Unlock()
+        cb.successThreshold = n
+        return cb</span>
+}
+
+// SetResetTimeout updates the time to wait before attempting recovery.
+func (cb *CircuitBreaker[T]) SetResetTimeout(d time.Duration) *CircuitBreaker[T] <span class="cov8" title="1">{
+        cb.mu.Lock()
+        defer cb.mu.Unlock()
+        cb.resetTimeout = d
+        return cb
+}</span>
+
+// GetState returns the current circuit state.
+func (cb *CircuitBreaker[T]) GetState() string <span class="cov8" title="1">{
+        cb.mu.Lock()
+        defer cb.mu.Unlock()
+
+        // Check for automatic transition to half-open
+        if cb.state == stateOpen &amp;&amp; time.Since(cb.lastFailTime) &gt; cb.resetTimeout </span><span class="cov8" title="1">{
+                return stateHalfOpen
+        }</span>
+
+        <span class="cov8" title="1">return cb.state</span>
+}
+
+// GetFailureThreshold returns the current failure threshold.
+func (cb *CircuitBreaker[T]) GetFailureThreshold() int <span class="cov8" title="1">{
+        cb.mu.Lock()
+        defer cb.mu.Unlock()
+        return cb.failureThreshold
+}</span>
+
+// GetSuccessThreshold returns the current success threshold.
+func (cb *CircuitBreaker[T]) GetSuccessThreshold() int <span class="cov8" title="1">{
+        cb.mu.Lock()
+        defer cb.mu.Unlock()
+        return cb.successThreshold
+}</span>
+
+// GetResetTimeout returns the current reset timeout.
+func (cb *CircuitBreaker[T]) GetResetTimeout() time.Duration <span class="cov8" title="1">{
+        cb.mu.Lock()
+        defer cb.mu.Unlock()
+        return cb.resetTimeout
+}</span>
+
+// Reset manually resets the circuit to closed state.
+func (cb *CircuitBreaker[T]) Reset() *CircuitBreaker[T] <span class="cov8" title="1">{
+        cb.mu.Lock()
+        defer cb.mu.Unlock()
+        cb.state = stateClosed
+        cb.failures = 0
+        cb.successes = 0
+        cb.generation++
+        return cb
+}</span>
+
+// Name returns the name of this connector.
+func (cb *CircuitBreaker[T]) Name() Name <span class="cov8" title="1">{
+        cb.mu.Lock()
+        defer cb.mu.Unlock()
+        return cb.name
+}</span>
+</pre>
+		
+		<pre class="file" id="file3" style="display: none">package pipz
+
+import (
+        "context"
+        "sync"
+)
+
+// Concurrent runs all processors in parallel with the original context preserved.
+// Unlike fire-and-forget operations, this connector passes the original context
+// directly to each processor, preserving distributed tracing information, spans,
+// and other context values. Each processor receives a deep copy of the input,
+// ensuring complete isolation. The original input is always returned unchanged.
+//
+// The input type T must implement the Cloner[T] interface to provide efficient,
+// type-safe copying without reflection. This ensures predictable performance and
+// allows types to control their own copying semantics.
+//
+// Use Concurrent when you need:
+//   - Distributed tracing to work across concurrent operations
+//   - All processors to respect the original context's cancellation
+//   - To wait for all processors to complete before continuing
+//   - Multiple side effects to happen simultaneously
+//
+// Common use cases:
+//   - Sending traced notifications to multiple channels
+//   - Updating multiple external systems with trace context
+//   - Parallel logging with trace IDs preserved
+//   - Triggering workflows that need distributed tracing
+//   - Operations that must all complete or be canceled together
+//
+// Important characteristics:
+//   - Input type must implement Cloner[T] interface
+//   - All processors run regardless of individual failures
+//   - Original input always returned (processors can't modify it)
+//   - Context cancellation immediately affects all processors
+//   - Preserves trace context and spans for distributed tracing
+//   - Waits for all processors to complete
+//
+// Example:
+//
+//        type Order struct {
+//            ID     string
+//            Items  []Item
+//            Status string
+//        }
+//
+//        func (o Order) Clone() Order {
+//            items := make([]Item, len(o.Items))
+//            copy(items, o.Items)
+//            return Order{
+//                ID:     o.ID,
+//                Items:  items,
+//                Status: o.Status,
+//            }
+//        }
+//
+//        concurrent := pipz.NewConcurrent(
+//            sendEmailNotification,
+//            sendSMSNotification,
+//            updateInventorySystem,
+//            logToAnalytics,
+//        )
+type Concurrent[T Cloner[T]] struct {
+        name       Name
+        processors []Chainable[T]
+        mu         sync.RWMutex
+}
+
+// NewConcurrent creates a new Concurrent connector.
+func NewConcurrent[T Cloner[T]](name Name, processors ...Chainable[T]) *Concurrent[T] <span class="cov8" title="1">{
+        return &amp;Concurrent[T]{
+                name:       name,
+                processors: processors,
+        }
+}</span>
+
+// Process implements the Chainable interface.
+func (c *Concurrent[T]) Process(ctx context.Context, input T) (result T, err error) <span class="cov8" title="1">{
+        defer recoverFromPanic(&amp;result, &amp;err, c.name, input)
+
+        c.mu.RLock()
+        processors := make([]Chainable[T], len(c.processors))
+        copy(processors, c.processors)
+        c.mu.RUnlock()
+
+        if len(processors) == 0 </span><span class="cov8" title="1">{
+                return input, nil
+        }</span>
+
+        <span class="cov8" title="1">var wg sync.WaitGroup
+        wg.Add(len(processors))
+
+        // Process all with the original context to preserve tracing
+        for _, processor := range processors </span><span class="cov8" title="1">{
+                go func(p Chainable[T]) </span><span class="cov8" title="1">{
+                        defer func() </span><span class="cov8" title="1">{
+                                // Always call wg.Done() even if Clone() or Process() panics
+                                // This prevents deadlock in wg.Wait()
+                                if r := recover(); r != nil </span><span class="cov0" title="0">{
+                                        // Panic occurred, but we must complete wg.Done()
+                                        // The goroutine can die after this, we just prevent deadlock
+                                        _ = r // Acknowledge the panic but continue
+                                }</span>
+                                <span class="cov8" title="1">wg.Done()</span>
+                        }()
+
+                        // Create an isolated copy using the Clone method
+                        <span class="cov8" title="1">inputCopy := input.Clone()
+
+                        // Process with the original context - preserves trace data
+                        if _, err := p.Process(ctx, inputCopy); err != nil </span><span class="cov8" title="1">{
+                                // Log or handle error if needed in the future
+                                _ = err
+                        }</span>
+                }(processor)
+        }
+
+        // Wait for completion or context cancellation
+        <span class="cov8" title="1">done := make(chan struct{})
+        go func() </span><span class="cov8" title="1">{
+                wg.Wait()
+                close(done)
+        }</span>()
+
+        <span class="cov8" title="1">select </span>{
+        case &lt;-done:<span class="cov8" title="1">
+                return input, nil</span>
+        case &lt;-ctx.Done():<span class="cov8" title="1">
+                // Context canceled - return without error as processors run independently
+                return input, nil</span>
+        }
+}
+
+// Add appends a processor to the concurrent execution list.
+func (c *Concurrent[T]) Add(processor Chainable[T]) *Concurrent[T] <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+        c.processors = append(c.processors, processor)
+        return c
+}</span>
+
+// Remove removes the processor at the specified index.
+func (c *Concurrent[T]) Remove(index int) error <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+
+        if index &lt; 0 || index &gt;= len(c.processors) </span><span class="cov8" title="1">{
+                return ErrIndexOutOfBounds
+        }</span>
+
+        <span class="cov8" title="1">c.processors = append(c.processors[:index], c.processors[index+1:]...)
+        return nil</span>
+}
+
+// Len returns the number of processors.
+func (c *Concurrent[T]) Len() int <span class="cov8" title="1">{
+        c.mu.RLock()
+        defer c.mu.RUnlock()
+        return len(c.processors)
+}</span>
+
+// Clear removes all processors from the concurrent execution list.
+func (c *Concurrent[T]) Clear() *Concurrent[T] <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+        c.processors = nil
+        return c
+}</span>
+
+// SetProcessors replaces all processors atomically.
+func (c *Concurrent[T]) SetProcessors(processors ...Chainable[T]) *Concurrent[T] <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+        c.processors = make([]Chainable[T], len(processors))
+        copy(c.processors, processors)
+        return c
+}</span>
+
+// Name returns the name of this connector.
+func (c *Concurrent[T]) Name() Name <span class="cov8" title="1">{
+        c.mu.RLock()
+        defer c.mu.RUnlock()
+        return c.name
+}</span>
+</pre>
+		
+		<pre class="file" id="file4" style="display: none">package pipz
+
+import (
+        "context"
+        "fmt"
+        "sync"
+        "time"
+)
+
+// Contest runs all processors in parallel and returns the first result that
+// meets a specified condition. Contest combines competitive processing (like Race)
+// with conditional selection, allowing you to define what makes a "winner" beyond
+// just being first to complete.
+//
+// Context handling: Contest uses context.WithCancel(ctx) to create a derived context
+// that preserves all parent context values (including trace IDs) while allowing
+// cancellation of other processors when a winner meeting the condition is found.
+//
+// The input type T must implement the Cloner[T] interface to provide efficient,
+// type-safe copying without reflection. This ensures predictable performance and
+// allows types to control their own copying semantics.
+//
+// This pattern excels when you have multiple ways to get a result and want the
+// fastest one that meets specific criteria:
+//   - Finding the cheapest shipping rate under a time constraint
+//   - Getting the first API response with required data completeness
+//   - Querying multiple sources for the best quality result quickly
+//   - Racing services where the "best" result matters more than just "first"
+//   - Any scenario where you need speed AND quality criteria
+//
+// Key behaviors:
+//   - First result meeting the condition wins and cancels others
+//   - If no results meet the condition, returns the original input with an error
+//   - Each processor gets an isolated copy via Clone()
+//   - Condition is evaluated as results arrive (no waiting for all)
+//   - Can reduce latency while ensuring quality constraints
+//
+// Example:
+//
+//        // Find the first shipping rate under $50
+//        contest := pipz.NewContest("cheapest-rate",
+//            func(_ context.Context, rate Rate) bool {
+//                return rate.Cost &lt; 50.00
+//            },
+//            fedexRates,
+//            upsRates,
+//            uspsRates,
+//        )
+type Contest[T Cloner[T]] struct {
+        name       Name
+        condition  func(context.Context, T) bool
+        processors []Chainable[T]
+        mu         sync.RWMutex
+}
+
+// NewContest creates a new Contest connector with the specified winning condition.
+// The condition function determines which results are acceptable winners.
+// A result must both complete successfully AND meet the condition to win.
+func NewContest[T Cloner[T]](name Name, condition func(context.Context, T) bool, processors ...Chainable[T]) *Contest[T] <span class="cov8" title="1">{
+        return &amp;Contest[T]{
+                name:       name,
+                condition:  condition,
+                processors: processors,
+        }
+}</span>
+
+// Process implements the Chainable interface.
+func (c *Contest[T]) Process(ctx context.Context, input T) (result T, err error) <span class="cov8" title="1">{
+        defer recoverFromPanic(&amp;result, &amp;err, c.name, input)
+
+        c.mu.RLock()
+        processors := make([]Chainable[T], len(c.processors))
+        copy(processors, c.processors)
+        condition := c.condition
+        c.mu.RUnlock()
+
+        if len(processors) == 0 </span><span class="cov8" title="1">{
+                var zero T
+                return zero, &amp;Error[T]{
+                        Path:      []Name{c.name},
+                        Err:       fmt.Errorf("no processors provided to Contest"),
+                        InputData: input,
+                        Timestamp: time.Now(),
+                        Duration:  0,
+                }
+        }</span>
+
+        <span class="cov8" title="1">if condition == nil </span><span class="cov8" title="1">{
+                var zero T
+                return zero, &amp;Error[T]{
+                        Path:      []Name{c.name},
+                        Err:       fmt.Errorf("no condition provided to Contest"),
+                        InputData: input,
+                        Timestamp: time.Now(),
+                        Duration:  0,
+                }
+        }</span>
+
+        // Create channels for results and completion tracking
+        <span class="cov8" title="1">type contestResult struct {
+                data T
+                err  error
+                idx  int
+        }
+
+        resultCh := make(chan contestResult, len(processors))
+        // Create a cancellable context to stop other processors when one wins
+        // This derives from the original context, preserving trace data
+        contestCtx, cancel := context.WithCancel(ctx)
+        defer cancel()
+
+        // Launch all processors
+        for i, processor := range processors </span><span class="cov8" title="1">{
+                go func(idx int, p Chainable[T]) </span><span class="cov8" title="1">{
+                        // Create an isolated copy using the Clone method
+                        inputCopy := input.Clone()
+
+                        // Use contest context which preserves parent values but adds cancellation
+                        data, processErr := p.Process(contestCtx, inputCopy)
+                        select </span>{
+                        case resultCh &lt;- contestResult{data: data, err: processErr, idx: idx}:<span class="cov8" title="1"></span>
+                        case &lt;-contestCtx.Done():<span class="cov8" title="1"></span>
+                        }
+                }(i, processor)
+        }
+
+        // Collect results and check conditions
+        <span class="cov8" title="1">var allErrors []error
+        completedCount := 0
+
+        for completedCount &lt; len(processors) </span><span class="cov8" title="1">{
+                select </span>{
+                case res := &lt;-resultCh:<span class="cov8" title="1">
+                        completedCount++
+
+                        if res.err == nil </span><span class="cov8" title="1">{
+                                // Check if this successful result meets the condition
+                                if condition(ctx, res.data) </span><span class="cov8" title="1">{
+                                        // Winner! Cancel other goroutines and return
+                                        cancel()
+                                        return res.data, nil
+                                }</span>
+                                // Result doesn't meet condition, continue waiting for others
+                        } else<span class="cov8" title="1"> {
+                                // Track errors for potential return if all fail
+                                if res.err != nil </span><span class="cov8" title="1">{
+                                        allErrors = append(allErrors, res.err)
+                                }</span>
+                        }
+
+                case &lt;-ctx.Done():<span class="cov8" title="1">
+                        // Context canceled - return original input
+                        return input, nil</span>
+                }
+        }
+
+        // No processor produced a result meeting the condition
+        <span class="cov8" title="1">if len(allErrors) == len(processors) </span><span class="cov8" title="1">{
+                // All processors failed with errors
+                err = fmt.Errorf("all processors failed: %d errors", len(allErrors))
+        }</span> else<span class="cov8" title="1"> {
+                // Some succeeded but none met the condition
+                err = fmt.Errorf("no processor results met the specified condition")
+        }</span>
+
+        <span class="cov8" title="1">return input, &amp;Error[T]{
+                Path:      []Name{c.name},
+                Err:       err,
+                InputData: input,
+                Timestamp: time.Now(),
+                Duration:  0,
+        }</span>
+}
+
+// SetCondition updates the winning condition.
+// This allows changing the criteria at runtime.
+func (c *Contest[T]) SetCondition(condition func(context.Context, T) bool) *Contest[T] <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+        c.condition = condition
+        return c
+}</span>
+
+// Add appends a processor to the contest execution list.
+func (c *Contest[T]) Add(processor Chainable[T]) *Contest[T] <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+        c.processors = append(c.processors, processor)
+        return c
+}</span>
+
+// Remove removes the processor at the specified index.
+func (c *Contest[T]) Remove(index int) error <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+
+        if index &lt; 0 || index &gt;= len(c.processors) </span><span class="cov8" title="1">{
+                return ErrIndexOutOfBounds
+        }</span>
+
+        <span class="cov8" title="1">c.processors = append(c.processors[:index], c.processors[index+1:]...)
+        return nil</span>
+}
+
+// Len returns the number of processors.
+func (c *Contest[T]) Len() int <span class="cov8" title="1">{
+        c.mu.RLock()
+        defer c.mu.RUnlock()
+        return len(c.processors)
+}</span>
+
+// Clear removes all processors from the contest execution list.
+func (c *Contest[T]) Clear() *Contest[T] <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+        c.processors = nil
+        return c
+}</span>
+
+// SetProcessors replaces all processors atomically.
+func (c *Contest[T]) SetProcessors(processors ...Chainable[T]) *Contest[T] <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+        c.processors = make([]Chainable[T], len(processors))
+        copy(c.processors, processors)
+        return c
+}</span>
+
+// Name returns the name of this connector.
+func (c *Contest[T]) Name() Name <span class="cov8" title="1">{
+        c.mu.RLock()
+        defer c.mu.RUnlock()
+        return c.name
+}</span>
+</pre>
+		
+		<pre class="file" id="file5" style="display: none">package pipz
+
+import (
+        "context"
+        "errors"
+        "time"
+)
+
+// Effect creates a Processor that performs side effects without modifying the data.
+// Effect is for operations that need to happen alongside your main processing flow,
+// such as logging, metrics collection, notifications, or audit trails.
+//
+// The function receives the data for inspection but must not modify it. Any returned
+// error stops the pipeline immediately. The original data always passes through
+// unchanged, making Effect perfect for:
+//   - Logging important events or data states
+//   - Recording metrics (counts, latencies, values)
+//   - Sending notifications or alerts
+//   - Writing audit logs for compliance
+//   - Triggering external systems
+//   - Validating without transformation
+//
+// Unlike Apply, Effect cannot transform data. Unlike Transform, it can fail.
+// This separation ensures side effects are explicit and testable.
+//
+// Example:
+//
+//        auditLog := pipz.Effect("audit_payment", func(ctx context.Context, payment Payment) error {
+//            return auditLogger.Log(ctx, "payment_processed", map[string]any{
+//                "amount": payment.Amount,
+//                "user_id": payment.UserID,
+//                "timestamp": time.Now(),
+//            })
+//        })
+func Effect[T any](name Name, fn func(context.Context, T) error) Processor[T] <span class="cov8" title="1">{
+        return Processor[T]{
+                name: name,
+                fn: func(ctx context.Context, value T) (result T, err error) </span><span class="cov8" title="1">{
+                        defer recoverFromPanic(&amp;result, &amp;err, name, value)
+                        start := time.Now()
+                        result = value // Effect always returns original value
+                        if err = fn(ctx, value); err != nil </span><span class="cov8" title="1">{
+                                var zero T
+                                return zero, &amp;Error[T]{
+                                        Path:      []Name{name},
+                                        InputData: value,
+                                        Err:       err,
+                                        Timestamp: time.Now(),
+                                        Duration:  time.Since(start),
+                                        Timeout:   errors.Is(err, context.DeadlineExceeded),
+                                        Canceled:  errors.Is(err, context.Canceled),
+                                }
+                        }</span>
+                        <span class="cov8" title="1">return result, nil</span>
+                },
+        }
+}
+</pre>
+		
+		<pre class="file" id="file6" style="display: none">package pipz
+
+import "context"
+
+// Enrich creates a Processor that attempts to enhance data with additional information.
+// Enrich is unique among processors - if the enrichment fails, it returns the original
+// data unchanged rather than stopping the pipeline. This makes it ideal for optional
+// enhancements that improve data quality but aren't critical for processing.
+//
+// The enrichment function should fetch additional data and return an enhanced version.
+// Common enrichment patterns include:
+//   - Adding user details from a cache or database
+//   - Geocoding addresses to add coordinates
+//   - Fetching current prices or exchange rates
+//   - Looking up metadata from external services
+//   - Adding computed fields from external data
+//
+// Use Enrich when the additional data is "nice to have" but not required.
+// If the enrichment is mandatory, use Apply instead. Enrich swallows errors
+// to ensure pipeline continuity, so consider logging failures within the
+// enrichment function for observability.
+//
+// Example:
+//
+//        addCustomerName := pipz.Enrich("add_customer_name", func(ctx context.Context, order Order) (Order, error) {
+//            customer, err := customerService.Get(ctx, order.CustomerID)
+//            if err != nil {
+//                // Log but don't fail - order processing continues without name
+//                log.Printf("failed to enrich customer data: %v", err)
+//                return order, err
+//            }
+//            order.CustomerName = customer.Name
+//            return order, nil
+//        })
+func Enrich[T any](name Name, fn func(context.Context, T) (T, error)) Processor[T] <span class="cov8" title="1">{
+        return Processor[T]{
+                name: name,
+                fn: func(ctx context.Context, value T) (result T, err error) </span><span class="cov8" title="1">{
+                        defer recoverFromPanic(&amp;result, &amp;err, name, value)
+                        enriched, enrichErr := fn(ctx, value)
+                        if enrichErr != nil </span><span class="cov8" title="1">{
+                                // Continue with original data - enrichment is best-effort
+                                return value, nil
+                        }</span>
+                        <span class="cov8" title="1">return enriched, nil</span>
+                },
+        }
+}
+</pre>
+		
+		<pre class="file" id="file7" style="display: none">package pipz
+
+import (
+        "context"
+        "errors"
+        "fmt"
+        "strings"
+        "time"
+)
+
+// Error provides rich context about pipeline execution failures.
+// It wraps the underlying error with information about where and when
+// the failure occurred, what data was being processed, and the complete
+// path through the processing chain.
+type Error[T any] struct {
+        Timestamp time.Time
+        InputData T
+        Err       error
+        Path      []Name
+        Duration  time.Duration
+        Timeout   bool
+        Canceled  bool
+}
+
+// Error implements the error interface, providing a detailed error message.
+func (e *Error[T]) Error() string <span class="cov8" title="1">{
+        if e == nil </span><span class="cov8" title="1">{
+                return "&lt;nil&gt;"
+        }</span>
+        <span class="cov8" title="1">path := strings.Join(e.Path, " -&gt; ")
+        if path == "" </span><span class="cov8" title="1">{
+                path = "unknown"
+        }</span>
+
+        <span class="cov8" title="1">if e.Timeout </span><span class="cov8" title="1">{
+                return fmt.Sprintf("%s timed out after %v: %v", path, e.Duration, e.Err)
+        }</span>
+        <span class="cov8" title="1">if e.Canceled </span><span class="cov8" title="1">{
+                return fmt.Sprintf("%s canceled after %v: %v", path, e.Duration, e.Err)
+        }</span>
+
+        <span class="cov8" title="1">return fmt.Sprintf("%s failed after %v: %v", path, e.Duration, e.Err)</span>
+}
+
+// Unwrap returns the underlying error, supporting error wrapping patterns.
+// This allows use of errors.Is and errors.As with the underlying error,
+// maintaining compatibility with Go's standard error handling patterns.
+func (e *Error[T]) Unwrap() error <span class="cov8" title="1">{
+        if e == nil </span><span class="cov8" title="1">{
+                return nil
+        }</span>
+        <span class="cov8" title="1">return e.Err</span>
+}
+
+// IsTimeout returns true if the error was caused by a timeout.
+// This includes both explicit timeout from the Timeout connector
+// and context deadline exceeded. Useful for implementing timeout-specific
+// retry logic or monitoring.
+func (e *Error[T]) IsTimeout() bool <span class="cov8" title="1">{
+        if e == nil </span><span class="cov8" title="1">{
+                return false
+        }</span>
+        <span class="cov8" title="1">return e.Timeout || errors.Is(e.Err, context.DeadlineExceeded)</span>
+}
+
+// IsCanceled returns true if the error was caused by cancellation.
+// This typically indicates intentional termination rather than failure,
+// useful for distinguishing between errors that should trigger alerts
+// versus expected shutdowns.
+func (e *Error[T]) IsCanceled() bool <span class="cov8" title="1">{
+        if e == nil </span><span class="cov8" title="1">{
+                return false
+        }</span>
+        <span class="cov8" title="1">return e.Canceled || errors.Is(e.Err, context.Canceled)</span>
+}
+
+// panicError is a security-focused panic recovery error.
+// It represents a panic that occurred during processing, with sensitive
+// information sanitized to prevent information leakage through panic messages.
+type panicError struct {
+        processorName Name
+        sanitized     string
+}
+
+func (pe *panicError) Error() string <span class="cov8" title="1">{
+        return fmt.Sprintf("panic in processor %q: %s", pe.processorName, pe.sanitized)
+}</span>
+
+// sanitizePanicMessage removes potentially sensitive information from panic messages.
+// This prevents accidental exposure of internal details, memory addresses, or
+// other sensitive data that might be contained in panic messages.
+func sanitizePanicMessage(panicValue interface{}) string <span class="cov8" title="1">{
+        if panicValue == nil </span><span class="cov8" title="1">{
+                return "unknown panic (nil value)"
+        }</span>
+
+        <span class="cov8" title="1">msg := fmt.Sprintf("%v", panicValue)
+
+        // Remove memory addresses (replace hex digits after 0x)
+        for strings.Contains(msg, "0x") </span><span class="cov8" title="1">{
+                start := strings.Index(msg, "0x")
+                if start == -1 </span><span class="cov0" title="0">{
+                        break</span>
+                }
+                <span class="cov8" title="1">end := start + 2
+                // Find end of hex address
+                for end &lt; len(msg) &amp;&amp; ((msg[end] &gt;= '0' &amp;&amp; msg[end] &lt;= '9') ||
+                        (msg[end] &gt;= 'a' &amp;&amp; msg[end] &lt;= 'f') ||
+                        (msg[end] &gt;= 'A' &amp;&amp; msg[end] &lt;= 'F')) </span><span class="cov8" title="1">{
+                        end++
+                }</span>
+                <span class="cov8" title="1">if end &gt; start+2 </span><span class="cov8" title="1">{
+                        msg = msg[:start] + "0x***" + msg[end:]
+                }</span> else<span class="cov8" title="1"> {
+                        break</span>
+                }
+        }
+
+        // Remove file paths that might contain sensitive directory names
+        <span class="cov8" title="1">if strings.Contains(msg, "/") || strings.Contains(msg, "\\") </span><span class="cov8" title="1">{
+                return "panic occurred (file path sanitized)"
+        }</span>
+
+        // If message is very long, truncate to prevent excessive log spam
+        <span class="cov8" title="1">if len(msg) &gt;= 200 </span><span class="cov8" title="1">{
+                return "panic occurred (message truncated for security)"
+        }</span>
+
+        // Remove any potential stack trace information
+        <span class="cov8" title="1">if strings.Contains(msg, "goroutine") || strings.Contains(msg, "runtime.") ||
+                strings.Contains(msg, "sync.") || strings.Contains(msg, "net.") ||
+                strings.Contains(msg, "os.") || strings.Contains(msg, "fmt.") ||
+                strings.Contains(msg, "io.") </span><span class="cov8" title="1">{
+                return "panic occurred (stack trace sanitized)"
+        }</span>
+
+        <span class="cov8" title="1">return fmt.Sprintf("panic occurred: %s", msg)</span>
+}
+
+// recoverFromPanic provides security-focused panic recovery for Process methods.
+// It captures panics, sanitizes the panic message to prevent information leakage,
+// and converts them to proper Error[T] instances.
+//
+// This function should be used as a deferred call at the beginning of all Process methods:
+//
+//        defer recoverFromPanic(&amp;result, &amp;err, processorName, inputData)
+func recoverFromPanic[T any](result *T, err *error, processorName Name, inputData T) <span class="cov8" title="1">{
+        if r := recover(); r != nil </span><span class="cov8" title="1">{
+                var zero T
+                *result = zero
+                *err = &amp;Error[T]{
+                        Path:      []Name{processorName},
+                        InputData: inputData,
+                        Err:       &amp;panicError{processorName: processorName, sanitized: sanitizePanicMessage(r)},
+                        Timestamp: time.Now(),
+                        Duration:  0, // We don't track duration for panics
+                        Timeout:   false,
+                        Canceled:  false,
+                }
+        }</span>
+}
+</pre>
+		
+		<pre class="file" id="file8" style="display: none">package pipz
+
+import (
+        "context"
+        "errors"
+        "sync"
+        "time"
+)
+
+// Fallback attempts processors in order, falling back to the next on error.
+// Fallback provides automatic failover through a chain of alternative processors
+// when earlier ones fail. This creates resilient processing chains that can recover
+// from failures gracefully.
+//
+// Unlike Retry which attempts the same operation multiple times,
+// Fallback switches to completely different implementations. Each processor
+// is tried in order until one succeeds or all fail.
+//
+// Common use cases:
+//   - Primary/backup/tertiary service failover
+//   - Graceful degradation strategies
+//   - Multiple payment provider support
+//   - Cache miss handling (try local cache, then redis, then database)
+//   - API version compatibility chains
+//
+// Example:
+//
+//        fallback := pipz.NewFallback("payment-providers",
+//            stripeProcessor,       // Try Stripe first
+//            paypalProcessor,       // Fall back to PayPal on error
+//            squareProcessor,       // Finally try Square
+//        )
+//
+// IMPORTANT: Avoid circular references between Fallback instances when all processors fail.
+// Example of DANGEROUS pattern:
+//
+//        fallback1 → fallback2 → fallback3 → fallback1
+//
+// This creates infinite recursion risk if all processors fail, leading to stack overflow.
+type Fallback[T any] struct {
+        name       Name
+        processors []Chainable[T]
+        mu         sync.RWMutex
+}
+
+// NewFallback creates a new Fallback connector that tries processors in order.
+// At least one processor must be provided. Each processor is tried in order
+// until one succeeds or all fail.
+//
+// Examples:
+//
+//        fallback := pipz.NewFallback("payment", stripe, paypal, square)
+//        fallback := pipz.NewFallback("cache", redis, database)
+func NewFallback[T any](name Name, processors ...Chainable[T]) *Fallback[T] <span class="cov8" title="1">{
+        if len(processors) == 0 </span><span class="cov8" title="1">{
+                panic("NewFallback requires at least one processor")</span>
+        }
+        <span class="cov8" title="1">return &amp;Fallback[T]{
+                name:       name,
+                processors: processors,
+        }</span>
+}
+
+// Process implements the Chainable interface.
+// Tries each processor in order until one succeeds or all fail.
+func (f *Fallback[T]) Process(ctx context.Context, data T) (result T, err error) <span class="cov8" title="1">{
+        defer recoverFromPanic(&amp;result, &amp;err, f.name, data)
+
+        f.mu.RLock()
+        processors := make([]Chainable[T], len(f.processors))
+        copy(processors, f.processors)
+        f.mu.RUnlock()
+
+        var lastErr error
+
+        for _, processor := range processors </span><span class="cov8" title="1">{
+                result, err := processor.Process(ctx, data)
+                if err == nil </span><span class="cov8" title="1">{
+                        // Success! Return immediately
+                        return result, nil
+                }</span>
+
+                // Store the error for potential return
+                <span class="cov8" title="1">lastErr = err</span>
+
+                // Continue to next processor (if any)
+        }
+
+        // All processors failed, return the last error with path
+        <span class="cov8" title="1">if lastErr != nil </span><span class="cov8" title="1">{
+                var pipeErr *Error[T]
+                if errors.As(lastErr, &amp;pipeErr) </span><span class="cov8" title="1">{
+                        pipeErr.Path = append([]Name{f.name}, pipeErr.Path...)
+                        return data, pipeErr
+                }</span>
+                // Wrap non-pipeline errors
+                <span class="cov0" title="0">return data, &amp;Error[T]{
+                        Timestamp: time.Now(),
+                        InputData: data,
+                        Err:       lastErr,
+                        Path:      []Name{f.name},
+                }</span>
+        }
+        <span class="cov0" title="0">return data, nil</span>
+}
+
+// SetProcessors replaces all processors with the provided ones.
+func (f *Fallback[T]) SetProcessors(processors ...Chainable[T]) *Fallback[T] <span class="cov8" title="1">{
+        if len(processors) == 0 </span><span class="cov8" title="1">{
+                panic("SetProcessors requires at least one processor")</span>
+        }
+        <span class="cov8" title="1">f.mu.Lock()
+        defer f.mu.Unlock()
+        f.processors = make([]Chainable[T], len(processors))
+        copy(f.processors, processors)
+        return f</span>
+}
+
+// AddFallback appends a processor to the end of the fallback chain.
+func (f *Fallback[T]) AddFallback(processor Chainable[T]) *Fallback[T] <span class="cov8" title="1">{
+        f.mu.Lock()
+        defer f.mu.Unlock()
+        f.processors = append(f.processors, processor)
+        return f
+}</span>
+
+// InsertAt inserts a processor at the specified index.
+func (f *Fallback[T]) InsertAt(index int, processor Chainable[T]) *Fallback[T] <span class="cov8" title="1">{
+        f.mu.Lock()
+        defer f.mu.Unlock()
+        if index &lt; 0 || index &gt; len(f.processors) </span><span class="cov8" title="1">{
+                panic("index out of bounds")</span>
+        }
+        <span class="cov8" title="1">f.processors = append(f.processors[:index], append([]Chainable[T]{processor}, f.processors[index:]...)...)
+        return f</span>
+}
+
+// RemoveAt removes the processor at the specified index.
+func (f *Fallback[T]) RemoveAt(index int) *Fallback[T] <span class="cov8" title="1">{
+        f.mu.Lock()
+        defer f.mu.Unlock()
+        if index &lt; 0 || index &gt;= len(f.processors) </span><span class="cov8" title="1">{
+                panic("index out of bounds")</span>
+        }
+        <span class="cov8" title="1">if len(f.processors) == 1 </span><span class="cov8" title="1">{
+                panic("cannot remove last processor from fallback")</span>
+        }
+        <span class="cov8" title="1">f.processors = append(f.processors[:index], f.processors[index+1:]...)
+        return f</span>
+}
+
+// Name returns the name of this connector.
+func (f *Fallback[T]) Name() Name <span class="cov8" title="1">{
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+        return f.name
+}</span>
+
+// GetProcessors returns a copy of all processors in order.
+func (f *Fallback[T]) GetProcessors() []Chainable[T] <span class="cov8" title="1">{
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+        processors := make([]Chainable[T], len(f.processors))
+        copy(processors, f.processors)
+        return processors
+}</span>
+
+// Len returns the number of processors in the fallback chain.
+func (f *Fallback[T]) Len() int <span class="cov8" title="1">{
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+        return len(f.processors)
+}</span>
+
+// GetPrimary returns the first processor (for backward compatibility).
+func (f *Fallback[T]) GetPrimary() Chainable[T] <span class="cov8" title="1">{
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+        if len(f.processors) &gt; 0 </span><span class="cov8" title="1">{
+                return f.processors[0]
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+
+// GetFallback returns the second processor (for backward compatibility).
+// Returns nil if there's no second processor.
+func (f *Fallback[T]) GetFallback() Chainable[T] <span class="cov8" title="1">{
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+        if len(f.processors) &gt; 1 </span><span class="cov8" title="1">{
+                return f.processors[1]
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+
+// SetPrimary updates the first processor (for backward compatibility).
+func (f *Fallback[T]) SetPrimary(processor Chainable[T]) *Fallback[T] <span class="cov8" title="1">{
+        f.mu.Lock()
+        defer f.mu.Unlock()
+        if len(f.processors) &gt; 0 </span><span class="cov8" title="1">{
+                f.processors[0] = processor
+        }</span>
+        <span class="cov8" title="1">return f</span>
+}
+
+// SetFallback updates the second processor (for backward compatibility).
+// If there's no second processor, adds one.
+func (f *Fallback[T]) SetFallback(processor Chainable[T]) *Fallback[T] <span class="cov8" title="1">{
+        f.mu.Lock()
+        defer f.mu.Unlock()
+        if len(f.processors) &gt; 1 </span><span class="cov8" title="1">{
+                f.processors[1] = processor
+        }</span> else<span class="cov8" title="1"> if len(f.processors) == 1 </span><span class="cov8" title="1">{
+                f.processors = append(f.processors, processor)
+        }</span>
+        <span class="cov8" title="1">return f</span>
+}
+</pre>
+		
+		<pre class="file" id="file9" style="display: none">package pipz
+
+import (
+        "context"
+        "errors"
+        "sync"
+        "time"
+)
+
+// Filter creates a conditional processor that either continues the pipeline unchanged
+// or executes a processor based on a predicate function.
+//
+// Filter provides a clean way to implement conditional processing without complex
+// if-else logic scattered throughout your code. When the condition returns true,
+// the processor is executed. When false, data passes through unchanged with no errors.
+//
+// This is ideal for:
+//   - Feature flags (process only for enabled users)
+//   - A/B testing (apply changes to test group)
+//   - Optional processing steps based on data state
+//   - Business rules that apply to subset of data
+//   - Conditional enrichment or validation
+//   - Performance optimizations (skip expensive operations)
+//
+// Unlike Switch which routes to different processors, Filter either processes
+// or passes through. Unlike Mutate which only supports transformations that
+// cannot fail, Filter can execute any Chainable including ones that may error.
+//
+// Example - Feature flag processing:
+//
+//        enableNewFeature := pipz.NewFilter("feature-flag",
+//            func(ctx context.Context, user User) bool {
+//                return user.BetaEnabled &amp;&amp; isFeatureEnabled(ctx, "new-algorithm")
+//            },
+//            newAlgorithmProcessor,
+//        )
+//
+// Example - Conditional validation:
+//
+//        validatePremium := pipz.NewFilter("premium-validation",
+//            func(ctx context.Context, order Order) bool {
+//                return order.CustomerTier == "premium"
+//            },
+//            pipz.NewSequence("premium-checks",
+//                validateCreditLimit,
+//                checkFraudScore,
+//                verifyIdentity,
+//            ),
+//        )
+//
+// The Filter connector is thread-safe and can be safely used in concurrent scenarios.
+// The condition function and processor can be updated at runtime for dynamic behavior.
+type Filter[T any] struct {
+        processor Chainable[T]
+        condition func(context.Context, T) bool
+        name      Name
+        mu        sync.RWMutex
+}
+
+// NewFilter creates a new Filter connector with the given condition and processor.
+// When condition returns true, processor is executed. When false, data passes through unchanged.
+func NewFilter[T any](name Name, condition func(context.Context, T) bool, processor Chainable[T]) *Filter[T] <span class="cov8" title="1">{
+        return &amp;Filter[T]{
+                name:      name,
+                condition: condition,
+                processor: processor,
+        }
+}</span>
+
+// Process implements the Chainable interface.
+// Evaluates the condition and either executes the processor or passes data through unchanged.
+func (f *Filter[T]) Process(ctx context.Context, data T) (result T, err error) <span class="cov8" title="1">{
+        defer recoverFromPanic(&amp;result, &amp;err, f.name, data)
+
+        f.mu.RLock()
+        condition := f.condition
+        processor := f.processor
+        f.mu.RUnlock()
+
+        // Evaluate condition
+        if !condition(ctx, data) </span><span class="cov8" title="1">{
+                // Condition false - pass through unchanged
+                return data, nil
+        }</span>
+
+        // Condition true - execute processor
+        <span class="cov8" title="1">result, err = processor.Process(ctx, data)
+        if err != nil </span><span class="cov8" title="1">{
+                // Prepend this filter's name to the error path
+                var pipeErr *Error[T]
+                if errors.As(err, &amp;pipeErr) </span><span class="cov8" title="1">{
+                        pipeErr.Path = append([]Name{f.name}, pipeErr.Path...)
+                        return result, pipeErr
+                }</span>
+                // Wrap non-pipeline errors
+                <span class="cov0" title="0">return data, &amp;Error[T]{
+                        Timestamp: time.Now(),
+                        InputData: data,
+                        Err:       err,
+                        Path:      []Name{f.name},
+                }</span>
+        }
+        <span class="cov8" title="1">return result, nil</span>
+}
+
+// SetCondition updates the condition function.
+// This allows for dynamic behavior changes at runtime.
+func (f *Filter[T]) SetCondition(condition func(context.Context, T) bool) *Filter[T] <span class="cov8" title="1">{
+        f.mu.Lock()
+        defer f.mu.Unlock()
+        f.condition = condition
+        return f
+}</span>
+
+// SetProcessor updates the processor to execute when condition is true.
+// This allows for dynamic processor changes at runtime.
+func (f *Filter[T]) SetProcessor(processor Chainable[T]) *Filter[T] <span class="cov8" title="1">{
+        f.mu.Lock()
+        defer f.mu.Unlock()
+        f.processor = processor
+        return f
+}</span>
+
+// Condition returns a copy of the current condition function.
+// Note: This returns the function reference, not a deep copy.
+func (f *Filter[T]) Condition() func(context.Context, T) bool <span class="cov8" title="1">{
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+        return f.condition
+}</span>
+
+// Processor returns the current processor.
+func (f *Filter[T]) Processor() Chainable[T] <span class="cov8" title="1">{
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+        return f.processor
+}</span>
+
+// Name returns the name of this connector.
+func (f *Filter[T]) Name() Name <span class="cov8" title="1">{
+        f.mu.RLock()
+        defer f.mu.RUnlock()
+        return f.name
+}</span>
+</pre>
+		
+		<pre class="file" id="file10" style="display: none">package pipz
+
+import (
+        "context"
+        "errors"
+        "sync"
+        "time"
+)
+
+// Handle provides error observation and handling for processors.
+// When the wrapped processor fails, Handle passes the error to an error handler
+// for processing (e.g., logging, cleanup, notifications), then passes the
+// original error through.
+//
+// Common patterns:
+//   - Log errors with additional context
+//   - Clean up resources on failure (e.g., release inventory)
+//   - Send notifications or alerts
+//   - Collect metrics about failures
+//   - Implement compensation logic
+//
+// The error handler receives a Chainable[*Error[T]] with full error context,
+// including the input data, error details, and processing path.
+//
+// Example:
+//
+//        // Log errors with context
+//        logged := pipz.NewHandle(
+//            "with-logging",
+//            processOrder,
+//            pipz.Effect("log", func(ctx context.Context, err *Error[Order]) error {
+//                log.Printf("order %s failed: %v", err.InputData.ID, err.Err)
+//                return nil
+//            }),
+//        )
+//
+//        // Clean up resources on failure
+//        withCleanup := pipz.NewHandle(
+//            "inventory-cleanup",
+//            reserveAndCharge,
+//            pipz.Effect("release", func(ctx context.Context, err *Error[Order]) error {
+//                if err.InputData.ReservationID != "" {
+//                    inventory.Release(err.InputData.ReservationID)
+//                }
+//                return nil
+//            }),
+//        )
+type Handle[T any] struct {
+        processor    Chainable[T]
+        errorHandler Chainable[*Error[T]]
+        name         Name
+        mu           sync.RWMutex
+}
+
+// NewHandle creates a new Handle connector.
+func NewHandle[T any](name Name, processor Chainable[T], errorHandler Chainable[*Error[T]]) *Handle[T] <span class="cov8" title="1">{
+        return &amp;Handle[T]{
+                name:         name,
+                processor:    processor,
+                errorHandler: errorHandler,
+        }
+}</span>
+
+// Process implements the Chainable interface.
+func (h *Handle[T]) Process(ctx context.Context, input T) (result T, err error) <span class="cov8" title="1">{
+        defer recoverFromPanic(&amp;result, &amp;err, h.name, input)
+
+        // Use processor under lock to prevent race conditions
+        h.mu.RLock()
+        result, err = h.processor.Process(ctx, input)
+        errorHandler := h.errorHandler
+        h.mu.RUnlock()
+        if err != nil </span><span class="cov8" title="1">{
+                var pipeErr *Error[T]
+                if errors.As(err, &amp;pipeErr) </span><span class="cov8" title="1">{
+                        // Prepend this handle's name to the path
+                        pipeErr.Path = append([]Name{h.name}, pipeErr.Path...)
+                        // Process the error through the error handler
+                        _, _ = errorHandler.Process(ctx, pipeErr) //nolint:errcheck // Handler errors are intentionally ignored
+                        // Always pass through the original error
+                        return result, err
+                }</span>
+                // Handle non-pipeline errors by wrapping them
+                <span class="cov0" title="0">h.mu.RLock()
+                processorName := h.processor.Name()
+                h.mu.RUnlock()
+                wrappedErr := &amp;Error[T]{
+                        Timestamp: time.Now(),
+                        InputData: input,
+                        Err:       err,
+                        Path:      []Name{h.name, processorName},
+                }
+                _, _ = errorHandler.Process(ctx, wrappedErr) //nolint:errcheck // Handler errors are intentionally ignored
+                // Always pass through the original error
+                return result, err</span>
+        }
+        <span class="cov8" title="1">return result, nil</span>
+}
+
+// SetProcessor updates the main processor.
+func (h *Handle[T]) SetProcessor(processor Chainable[T]) *Handle[T] <span class="cov8" title="1">{
+        h.mu.Lock()
+        defer h.mu.Unlock()
+        h.processor = processor
+        return h
+}</span>
+
+// SetErrorHandler updates the error handler.
+func (h *Handle[T]) SetErrorHandler(handler Chainable[*Error[T]]) *Handle[T] <span class="cov8" title="1">{
+        h.mu.Lock()
+        defer h.mu.Unlock()
+        h.errorHandler = handler
+        return h
+}</span>
+
+// Name returns the name of this connector.
+func (h *Handle[T]) Name() Name <span class="cov8" title="1">{
+        h.mu.RLock()
+        defer h.mu.RUnlock()
+        return h.name
+}</span>
+
+// GetProcessor returns the current main processor.
+func (h *Handle[T]) GetProcessor() Chainable[T] <span class="cov8" title="1">{
+        h.mu.RLock()
+        defer h.mu.RUnlock()
+        return h.processor
+}</span>
+
+// GetErrorHandler returns the current error handler.
+func (h *Handle[T]) GetErrorHandler() Chainable[*Error[T]] <span class="cov8" title="1">{
+        h.mu.RLock()
+        defer h.mu.RUnlock()
+        return h.errorHandler
+}</span>
+</pre>
+		
+		<pre class="file" id="file11" style="display: none">package pipz
+
+import "context"
+
+// Mutate creates a Processor that conditionally transforms data based on a predicate.
+// Mutate combines a condition check with a transformation, applying the transformer
+// only when the condition returns true. When false, data passes through unchanged.
+//
+// This pattern is cleaner than embedding if-statements in Transform functions and
+// makes the condition explicit and testable. Use Mutate for:
+//   - Feature flags (transform only for enabled users)
+//   - A/B testing (apply changes to test group)
+//   - Conditional formatting based on data values
+//   - Environment-specific transformations
+//   - Business rules that apply to subset of data
+//
+// The condition and transformer are separate functions for better testability
+// and reusability. The transformer cannot fail - use Apply with conditional
+// logic if you need error handling.
+//
+// Example:
+//
+//        discountPremium := pipz.Mutate("premium_discount",
+//            func(ctx context.Context, order Order) Order {
+//                order.Total *= 0.9  // 10% discount
+//                return order
+//            },
+//            func(ctx context.Context, order Order) bool {
+//                return order.CustomerTier == "premium" &amp;&amp; order.Total &gt; 100
+//            },
+//        )
+func Mutate[T any](name Name, transformer func(context.Context, T) T, condition func(context.Context, T) bool) Processor[T] <span class="cov8" title="1">{
+        return Processor[T]{
+                name: name,
+                fn: func(ctx context.Context, value T) (result T, err error) </span><span class="cov8" title="1">{
+                        defer recoverFromPanic(&amp;result, &amp;err, name, value)
+                        if condition(ctx, value) </span><span class="cov8" title="1">{
+                                result = transformer(ctx, value)
+                        }</span> else<span class="cov8" title="1"> {
+                                result = value
+                        }</span>
+                        <span class="cov8" title="1">return result, nil</span>
+                },
+        }
+}
+</pre>
+		
+		<pre class="file" id="file12" style="display: none">package pipz
+
+import (
+        "context"
+        "errors"
+        "fmt"
+        "sync"
+        "time"
+)
+
+// Race runs all processors in parallel and returns the result of the first
+// to complete successfully. Race implements competitive processing where speed
+// matters more than which specific processor succeeds. The first successful
+// result wins and cancels all other processors.
+//
+// Context handling: Race uses context.WithCancel(ctx) to create a derived context
+// that preserves all parent context values (including trace IDs) while allowing
+// cancellation of losing processors when a winner is found.
+//
+// The input type T must implement the Cloner[T] interface to provide efficient,
+// type-safe copying without reflection. This ensures predictable performance and
+// allows types to control their own copying semantics.
+//
+// This pattern excels when you have multiple ways to get the same result
+// and want the fastest one:
+//   - Querying multiple replicas or regions
+//   - Trying different algorithms with varying performance
+//   - Fetching from multiple caches
+//   - Calling primary and backup services simultaneously
+//   - Any scenario where latency matters more than specific source
+//
+// Key behaviors:
+//   - First success wins and cancels others
+//   - All failures returns the last error
+//   - Each processor gets an isolated copy via Clone()
+//   - Useful for reducing p99 latencies
+//   - Can increase load (all processors run)
+//
+// Example:
+//
+//        // UserQuery must implement Cloner[UserQuery]
+//        race := pipz.NewRace(
+//            fetchFromLocalCache,
+//            fetchFromRegionalCache,
+//            fetchFromDatabase,
+//        )
+type Race[T Cloner[T]] struct {
+        name       Name
+        processors []Chainable[T]
+        mu         sync.RWMutex
+}
+
+// NewRace creates a new Race connector.
+func NewRace[T Cloner[T]](name Name, processors ...Chainable[T]) *Race[T] <span class="cov8" title="1">{
+        return &amp;Race[T]{
+                name:       name,
+                processors: processors,
+        }
+}</span>
+
+// Process implements the Chainable interface.
+func (r *Race[T]) Process(ctx context.Context, input T) (result T, err error) <span class="cov8" title="1">{
+        defer recoverFromPanic(&amp;result, &amp;err, r.name, input)
+
+        r.mu.RLock()
+        processors := make([]Chainable[T], len(r.processors))
+        copy(processors, r.processors)
+        r.mu.RUnlock()
+
+        if len(processors) == 0 </span><span class="cov8" title="1">{
+                var zero T
+                return zero, &amp;Error[T]{
+                        Path:      []Name{r.name},
+                        Err:       fmt.Errorf("no processors provided to Race"),
+                        InputData: input,
+                        Timestamp: time.Now(),
+                        Duration:  0,
+                }
+        }</span>
+
+        // Create channels for results and errors
+        <span class="cov8" title="1">type raceResult struct {
+                data T
+                err  error
+                idx  int
+        }
+
+        resultCh := make(chan raceResult, len(processors))
+        // Create a cancellable context to stop other processors when one wins
+        // This derives from the original context, preserving trace data
+        raceCtx, cancel := context.WithCancel(ctx)
+        defer cancel()
+
+        // Launch all processors
+        for i, processor := range processors </span><span class="cov8" title="1">{
+                go func(idx int, p Chainable[T]) </span><span class="cov8" title="1">{
+                        // Create an isolated copy using the Clone method
+                        inputCopy := input.Clone()
+
+                        // Use race context which preserves parent values but adds cancellation
+                        data, err := p.Process(raceCtx, inputCopy)
+                        select </span>{
+                        case resultCh &lt;- raceResult{data: data, err: err, idx: idx}:<span class="cov8" title="1"></span>
+                        case &lt;-raceCtx.Done():<span class="cov0" title="0"></span>
+                        }
+                }(i, processor)
+        }
+
+        // Collect results
+        <span class="cov8" title="1">var lastErr error
+        for i := 0; i &lt; len(processors); i++ </span><span class="cov8" title="1">{
+                select </span>{
+                case res := &lt;-resultCh:<span class="cov8" title="1">
+                        if res.err == nil </span><span class="cov8" title="1">{
+                                // First success wins
+                                cancel() // Cancel other goroutines
+                                return res.data, nil
+                        }</span>
+                        <span class="cov8" title="1">lastErr = res.err</span>
+                case &lt;-ctx.Done():<span class="cov8" title="1">
+                        // Context done means we're complete - return current input
+                        return input, nil</span>
+                }
+        }
+
+        // All failed - return the last error
+        <span class="cov8" title="1">if lastErr != nil </span><span class="cov8" title="1">{
+                var pipeErr *Error[T]
+                if errors.As(lastErr, &amp;pipeErr) </span><span class="cov8" title="1">{
+                        // Prepend this race's name to the path
+                        pipeErr.Path = append([]Name{r.name}, pipeErr.Path...)
+                        return input, pipeErr
+                }</span>
+                // Handle non-pipeline errors by wrapping them
+                <span class="cov0" title="0">return input, &amp;Error[T]{
+                        Timestamp: time.Now(),
+                        InputData: input,
+                        Err:       lastErr,
+                        Path:      []Name{r.name},
+                }</span>
+        }
+        <span class="cov0" title="0">return input, nil</span>
+}
+
+// Add appends a processor to the race execution list.
+func (r *Race[T]) Add(processor Chainable[T]) *Race[T] <span class="cov8" title="1">{
+        r.mu.Lock()
+        defer r.mu.Unlock()
+        r.processors = append(r.processors, processor)
+        return r
+}</span>
+
+// Remove removes the processor at the specified index.
+func (r *Race[T]) Remove(index int) error <span class="cov8" title="1">{
+        r.mu.Lock()
+        defer r.mu.Unlock()
+
+        if index &lt; 0 || index &gt;= len(r.processors) </span><span class="cov8" title="1">{
+                return ErrIndexOutOfBounds
+        }</span>
+
+        <span class="cov8" title="1">r.processors = append(r.processors[:index], r.processors[index+1:]...)
+        return nil</span>
+}
+
+// Len returns the number of processors.
+func (r *Race[T]) Len() int <span class="cov8" title="1">{
+        r.mu.RLock()
+        defer r.mu.RUnlock()
+        return len(r.processors)
+}</span>
+
+// Clear removes all processors from the race execution list.
+func (r *Race[T]) Clear() *Race[T] <span class="cov8" title="1">{
+        r.mu.Lock()
+        defer r.mu.Unlock()
+        r.processors = nil
+        return r
+}</span>
+
+// SetProcessors replaces all processors atomically.
+func (r *Race[T]) SetProcessors(processors ...Chainable[T]) *Race[T] <span class="cov8" title="1">{
+        r.mu.Lock()
+        defer r.mu.Unlock()
+        r.processors = make([]Chainable[T], len(processors))
+        copy(r.processors, processors)
+        return r
+}</span>
+
+// Name returns the name of this connector.
+func (r *Race[T]) Name() Name <span class="cov8" title="1">{
+        r.mu.RLock()
+        defer r.mu.RUnlock()
+        return r.name
+}</span>
+</pre>
+		
+		<pre class="file" id="file13" style="display: none">package pipz
+
+import (
+        "context"
+        "errors"
+        "fmt"
+        "sync"
+        "time"
+
+        "golang.org/x/time/rate"
+)
+
+const (
+        modeWait = "wait"
+        modeDrop = "drop"
+)
+
+// RateLimiter controls the rate of processing to protect downstream services.
+// RateLimiter uses a token bucket algorithm to enforce rate limits, allowing
+// controlled bursts while maintaining a steady average rate. This is essential
+// for protecting external APIs, databases, and other rate-sensitive resources.
+//
+// CRITICAL: RateLimiter is a STATEFUL connector that maintains an internal token bucket.
+// You MUST create it as a package-level variable (singleton) to share state across requests.
+// Creating a new RateLimiter for each request defeats the purpose entirely!
+//
+// ❌ WRONG - Creating per request (useless):
+//
+//        func handleRequest(req Request) Response {
+//            limiter := pipz.NewRateLimiter("api", 100, 10)  // NEW limiter each time!
+//            return limiter.Process(ctx, req)                // Always allows through
+//        }
+//
+// ✅ RIGHT - Package-level singleton:
+//
+//        var apiLimiter = pipz.NewRateLimiter("api", 100, 10)  // Shared instance
+//
+//        func handleRequest(req Request) Response {
+//            return apiLimiter.Process(ctx, req)  // Actually rate limits
+//        }
+//
+// The limiter operates in two modes:
+//   - "wait": Blocks until a token is available (default)
+//   - "drop": Returns an error immediately if no tokens available
+//
+// RateLimiter is particularly useful for:
+//   - API client implementations with rate limits
+//   - Database connection throttling
+//   - Preventing overwhelming downstream services
+//   - Implementing fair resource sharing
+//   - Meeting SLA requirements
+//
+// Best Practices:
+//   - Use const names for all processors/connectors (see best-practices.md)
+//   - Declare RateLimiters as package-level vars
+//   - Configure limits based on actual downstream capacity
+//   - Layer multiple limiters for complex scenarios (global → service → endpoint)
+//
+// Example:
+//
+//        // Define names as constants
+//        const (
+//            ConnectorAPILimiter    = "api-limiter"
+//            ConnectorGlobalLimiter = "global-limiter"
+//        )
+//
+//        // Create limiters as package-level singletons
+//        var (
+//            // Global rate limit for entire system
+//            globalLimiter = pipz.NewRateLimiter(ConnectorGlobalLimiter, 10000, 1000)
+//
+//            // Service-specific limit (e.g., Stripe API)
+//            apiLimiter = pipz.NewRateLimiter(ConnectorAPILimiter, 100, 10)
+//        )
+//
+//        // Use in pipeline
+//        func createPaymentPipeline() pipz.Chainable[Payment] {
+//            return pipz.NewSequence("payment-pipeline",
+//                globalLimiter,                           // System-wide limit
+//                apiLimiter,                              // Service-specific limit
+//                pipz.Apply("charge", processPayment),   // Actual operation
+//            )
+//        }
+type RateLimiter[T any] struct {
+        name    Name
+        limiter *rate.Limiter
+        mode    string // "wait" or "drop"
+        mu      sync.RWMutex
+}
+
+// NewRateLimiter creates a new RateLimiter connector.
+// The ratePerSecond parameter sets the sustained rate limit.
+// The burst parameter sets the maximum burst size.
+func NewRateLimiter[T any](name Name, ratePerSecond float64, burst int) *RateLimiter[T] <span class="cov8" title="1">{
+        return &amp;RateLimiter[T]{
+                name:    name,
+                limiter: rate.NewLimiter(rate.Limit(ratePerSecond), burst),
+                mode:    modeWait, // Default to wait mode
+        }
+}</span>
+
+// Process implements the Chainable interface.
+func (r *RateLimiter[T]) Process(ctx context.Context, data T) (result T, err error) <span class="cov8" title="1">{
+        defer recoverFromPanic(&amp;result, &amp;err, r.name, data)
+
+        r.mu.RLock()
+        limiter := r.limiter
+        mode := r.mode
+        r.mu.RUnlock()
+
+        switch mode </span>{
+        case modeWait:<span class="cov8" title="1">
+                // Wait for permission
+                err := limiter.Wait(ctx)
+                if err != nil </span><span class="cov8" title="1">{
+                        // Context was canceled while waiting
+                        return data, &amp;Error[T]{
+                                Err:       err,
+                                InputData: data,
+                                Path:      []Name{r.name},
+                                Timeout:   errors.Is(err, context.DeadlineExceeded),
+                                Canceled:  errors.Is(err, context.Canceled),
+                                Timestamp: time.Now(),
+                        }
+                }</span>
+                <span class="cov8" title="1">return data, nil</span>
+
+        case modeDrop:<span class="cov8" title="1">
+                // Try to get permission without waiting
+                if !limiter.Allow() </span><span class="cov8" title="1">{
+                        return data, &amp;Error[T]{
+                                Err:       fmt.Errorf("rate limit exceeded"),
+                                InputData: data,
+                                Path:      []Name{r.name},
+                                Timestamp: time.Now(),
+                        }
+                }</span>
+                <span class="cov8" title="1">return data, nil</span>
+
+        default:<span class="cov8" title="1">
+                // Should not happen, but handle gracefully
+                return data, &amp;Error[T]{
+                        Err:       fmt.Errorf("invalid rate limiter mode: %s", mode),
+                        InputData: data,
+                        Path:      []Name{r.name},
+                        Timestamp: time.Now(),
+                }</span>
+        }
+}
+
+// SetRate updates the rate limit (requests per second).
+func (r *RateLimiter[T]) SetRate(ratePerSecond float64) *RateLimiter[T] <span class="cov8" title="1">{
+        r.mu.Lock()
+        defer r.mu.Unlock()
+        r.limiter.SetLimit(rate.Limit(ratePerSecond))
+        return r
+}</span>
+
+// SetBurst updates the burst capacity.
+func (r *RateLimiter[T]) SetBurst(burst int) *RateLimiter[T] <span class="cov8" title="1">{
+        r.mu.Lock()
+        defer r.mu.Unlock()
+        r.limiter.SetBurst(burst)
+        return r
+}</span>
+
+// SetMode sets the rate limiting mode ("wait" or "drop").
+func (r *RateLimiter[T]) SetMode(mode string) *RateLimiter[T] <span class="cov8" title="1">{
+        if mode != modeWait &amp;&amp; mode != modeDrop </span><span class="cov8" title="1">{
+                // Invalid mode, ignore
+                return r
+        }</span>
+        <span class="cov8" title="1">r.mu.Lock()
+        defer r.mu.Unlock()
+        r.mode = mode
+        return r</span>
+}
+
+// GetRate returns the current rate limit.
+func (r *RateLimiter[T]) GetRate() float64 <span class="cov8" title="1">{
+        r.mu.RLock()
+        defer r.mu.RUnlock()
+        return float64(r.limiter.Limit())
+}</span>
+
+// GetBurst returns the current burst capacity.
+func (r *RateLimiter[T]) GetBurst() int <span class="cov8" title="1">{
+        r.mu.RLock()
+        defer r.mu.RUnlock()
+        return r.limiter.Burst()
+}</span>
+
+// GetMode returns the current mode ("wait" or "drop").
+func (r *RateLimiter[T]) GetMode() string <span class="cov8" title="1">{
+        r.mu.RLock()
+        defer r.mu.RUnlock()
+        return r.mode
+}</span>
+
+// Name returns the name of this connector.
+func (r *RateLimiter[T]) Name() Name <span class="cov8" title="1">{
+        r.mu.RLock()
+        defer r.mu.RUnlock()
+        return r.name
+}</span>
+</pre>
+		
+		<pre class="file" id="file14" style="display: none">package pipz
+
+import (
+        "context"
+        "errors"
+        "sync"
+        "time"
+)
+
+// Retry attempts the processor up to maxAttempts times.
+// Retry provides simple retry logic for operations that may fail
+// transiently. It immediately retries on failure without delay,
+// making it suitable for quick operations or when failures are
+// expected to clear immediately.
+//
+// Each retry uses the same input data. Context cancellation is
+// checked between attempts to allow for early termination.
+// If all attempts fail, the last error is returned with attempt
+// count information for debugging.
+//
+// Use Retry for:
+//   - Network calls with transient failures
+//   - Database operations during brief contentions
+//   - File operations with temporary locks
+//   - Any operation with intermittent failures
+//
+// For operations needing delay between retries, use RetryWithBackoff.
+// For trying different approaches, use Fallback instead.
+//
+// Example:
+//
+//        retry := pipz.NewRetry(
+//            databaseWriter,
+//            3,  // Try up to 3 times
+//        )
+type Retry[T any] struct {
+        processor   Chainable[T]
+        name        Name
+        maxAttempts int
+        mu          sync.RWMutex
+}
+
+// NewRetry creates a new Retry connector.
+func NewRetry[T any](name Name, processor Chainable[T], maxAttempts int) *Retry[T] <span class="cov8" title="1">{
+        if maxAttempts &lt; 1 </span><span class="cov8" title="1">{
+                maxAttempts = 1
+        }</span>
+        <span class="cov8" title="1">return &amp;Retry[T]{
+                name:        name,
+                processor:   processor,
+                maxAttempts: maxAttempts,
+        }</span>
+}
+
+// Process implements the Chainable interface.
+func (r *Retry[T]) Process(ctx context.Context, data T) (result T, err error) <span class="cov8" title="1">{
+        defer recoverFromPanic(&amp;result, &amp;err, r.name, data)
+        r.mu.RLock()
+        processor := r.processor
+        maxAttempts := r.maxAttempts
+        r.mu.RUnlock()
+
+        var lastErr error
+        var lastResult T
+
+        for i := 0; i &lt; maxAttempts; i++ </span><span class="cov8" title="1">{
+                result, err := processor.Process(ctx, data)
+                if err == nil </span><span class="cov8" title="1">{
+                        return result, nil
+                }</span>
+                <span class="cov8" title="1">lastErr = err
+                lastResult = result
+
+                // Check if context is canceled between attempts
+                if ctx.Err() != nil </span><span class="cov8" title="1">{
+                        // Context canceled/timed out - return error
+                        return data, &amp;Error[T]{
+                                Err:       ctx.Err(),
+                                InputData: data,
+                                Path:      []Name{r.name},
+                                Timeout:   errors.Is(ctx.Err(), context.DeadlineExceeded),
+                                Canceled:  errors.Is(ctx.Err(), context.Canceled),
+                                Timestamp: time.Now(),
+                        }
+                }</span>
+        }
+
+        // All attempts failed - return the last error
+        <span class="cov8" title="1">if lastErr != nil </span><span class="cov8" title="1">{
+                var pipeErr *Error[T]
+                if errors.As(lastErr, &amp;pipeErr) </span><span class="cov8" title="1">{
+                        // Prepend this retry's name to the path
+                        pipeErr.Path = append([]Name{r.name}, pipeErr.Path...)
+                        return lastResult, pipeErr
+                }</span>
+                // Handle non-pipeline errors by wrapping them
+                <span class="cov0" title="0">return lastResult, &amp;Error[T]{
+                        Timestamp: time.Now(),
+                        InputData: data,
+                        Err:       lastErr,
+                        Path:      []Name{r.name},
+                }</span>
+        }
+        <span class="cov0" title="0">return lastResult, nil</span>
+}
+
+// SetMaxAttempts updates the maximum number of retry attempts.
+func (r *Retry[T]) SetMaxAttempts(n int) *Retry[T] <span class="cov8" title="1">{
+        if n &lt; 1 </span><span class="cov8" title="1">{
+                n = 1
+        }</span>
+        <span class="cov8" title="1">r.mu.Lock()
+        defer r.mu.Unlock()
+        r.maxAttempts = n
+        return r</span>
+}
+
+// GetMaxAttempts returns the current maximum attempts setting.
+func (r *Retry[T]) GetMaxAttempts() int <span class="cov8" title="1">{
+        r.mu.RLock()
+        defer r.mu.RUnlock()
+        return r.maxAttempts
+}</span>
+
+// Name returns the name of this connector.
+func (r *Retry[T]) Name() Name <span class="cov8" title="1">{
+        r.mu.RLock()
+        defer r.mu.RUnlock()
+        return r.name
+}</span>
+
+// Backoff attempts the processor with exponential backoff between attempts.
+// Backoff adds intelligent spacing between retry attempts, starting with
+// baseDelay and doubling after each failure. This prevents overwhelming failed
+// services and allows time for transient issues to resolve.
+//
+// The exponential backoff pattern (delay, 2*delay, 4*delay, ...) is widely
+// used for its effectiveness in handling various failure scenarios without
+// overwhelming systems. The operation can be canceled via context during waits.
+//
+// Ideal for:
+//   - API calls to rate-limited services
+//   - Database operations during high load
+//   - Distributed system interactions
+//   - Any operation where immediate retry is counterproductive
+//
+// The total time spent can be significant with multiple retries.
+// For example, with baseDelay=1s and maxAttempts=5:
+//
+//        Delays: 1s, 2s, 4s, 8s (total wait: 15s plus processing time)
+//
+// Example:
+//
+//        backoff := pipz.NewBackoff(
+//            "api-backoff",
+//            apiProcessor,
+//            5,                    // Max 5 attempts
+//            100*time.Millisecond, // Start with 100ms delay
+//        )
+type Backoff[T any] struct {
+        processor   Chainable[T]
+        name        Name
+        maxAttempts int
+        baseDelay   time.Duration
+        mu          sync.RWMutex
+}
+
+// NewBackoff creates a new Backoff connector.
+func NewBackoff[T any](name Name, processor Chainable[T], maxAttempts int, baseDelay time.Duration) *Backoff[T] <span class="cov8" title="1">{
+        if maxAttempts &lt; 1 </span><span class="cov8" title="1">{
+                maxAttempts = 1
+        }</span>
+        <span class="cov8" title="1">return &amp;Backoff[T]{
+                name:        name,
+                processor:   processor,
+                maxAttempts: maxAttempts,
+                baseDelay:   baseDelay,
+        }</span>
+}
+
+// Process implements the Chainable interface.
+func (b *Backoff[T]) Process(ctx context.Context, data T) (result T, err error) <span class="cov8" title="1">{
+        defer recoverFromPanic(&amp;result, &amp;err, b.name, data)
+        b.mu.RLock()
+        processor := b.processor
+        maxAttempts := b.maxAttempts
+        baseDelay := b.baseDelay
+        b.mu.RUnlock()
+
+        var lastErr error
+        delay := baseDelay
+
+        for i := 0; i &lt; maxAttempts; i++ </span><span class="cov8" title="1">{
+                result, err := processor.Process(ctx, data)
+                if err == nil </span><span class="cov8" title="1">{
+                        return result, nil
+                }</span>
+                <span class="cov8" title="1">lastErr = err
+
+                // Don't sleep after the last attempt
+                if i &lt; maxAttempts-1 </span><span class="cov8" title="1">{
+                        select </span>{
+                        case &lt;-time.After(delay):<span class="cov8" title="1">
+                                delay *= 2</span> // Exponential backoff
+                        case &lt;-ctx.Done():<span class="cov8" title="1">
+                                // Context canceled/timed out - create appropriate error
+                                return data, &amp;Error[T]{
+                                        Err:       ctx.Err(),
+                                        InputData: data,
+                                        Path:      []Name{b.name},
+                                        Timeout:   errors.Is(ctx.Err(), context.DeadlineExceeded),
+                                        Canceled:  errors.Is(ctx.Err(), context.Canceled),
+                                        Timestamp: time.Now(),
+                                }</span>
+                        }
+                }
+        }
+        // All attempts failed - return the last error
+        <span class="cov8" title="1">if lastErr != nil </span><span class="cov8" title="1">{
+                var pipeErr *Error[T]
+                if errors.As(lastErr, &amp;pipeErr) </span><span class="cov8" title="1">{
+                        // Prepend this backoff's name to the path
+                        pipeErr.Path = append([]Name{b.name}, pipeErr.Path...)
+                        return data, pipeErr
+                }</span>
+                // Handle non-pipeline errors by wrapping them
+                <span class="cov0" title="0">return data, &amp;Error[T]{
+                        Timestamp: time.Now(),
+                        InputData: data,
+                        Err:       lastErr,
+                        Path:      []Name{b.name},
+                }</span>
+        }
+        <span class="cov0" title="0">return data, nil</span>
+}
+
+// SetMaxAttempts updates the maximum number of retry attempts.
+func (b *Backoff[T]) SetMaxAttempts(n int) *Backoff[T] <span class="cov8" title="1">{
+        if n &lt; 1 </span><span class="cov8" title="1">{
+                n = 1
+        }</span>
+        <span class="cov8" title="1">b.mu.Lock()
+        defer b.mu.Unlock()
+        b.maxAttempts = n
+        return b</span>
+}
+
+// SetBaseDelay updates the base delay duration.
+func (b *Backoff[T]) SetBaseDelay(d time.Duration) *Backoff[T] <span class="cov8" title="1">{
+        b.mu.Lock()
+        defer b.mu.Unlock()
+        b.baseDelay = d
+        return b
+}</span>
+
+// GetMaxAttempts returns the current maximum attempts setting.
+func (b *Backoff[T]) GetMaxAttempts() int <span class="cov8" title="1">{
+        b.mu.RLock()
+        defer b.mu.RUnlock()
+        return b.maxAttempts
+}</span>
+
+// GetBaseDelay returns the current base delay setting.
+func (b *Backoff[T]) GetBaseDelay() time.Duration <span class="cov8" title="1">{
+        b.mu.RLock()
+        defer b.mu.RUnlock()
+        return b.baseDelay
+}</span>
+
+// Name returns the name of this connector.
+func (b *Backoff[T]) Name() Name <span class="cov8" title="1">{
+        b.mu.RLock()
+        defer b.mu.RUnlock()
+        return b.name
+}</span>
+</pre>
+		
+		<pre class="file" id="file15" style="display: none">package pipz
+
+import (
+        "context"
+        "sync"
+)
+
+// Scaffold runs all processors in parallel with context isolation for true fire-and-forget behavior.
+// Unlike Concurrent, Scaffold uses context.WithoutCancel to ensure processors continue
+// running even if the parent context is canceled. This is ideal for operations that
+// must complete regardless of the main pipeline's state.
+//
+// The input type T must implement the Cloner[T] interface to provide efficient,
+// type-safe copying without reflection. This ensures predictable performance and
+// allows types to control their own copying semantics.
+//
+// Use Scaffold when you need:
+//   - True fire-and-forget operations that outlive the request
+//   - Background tasks that shouldn't be canceled with the main flow
+//   - Cleanup or logging operations that must complete
+//   - Non-critical side effects that shouldn't block the pipeline
+//
+// Common use cases:
+//   - Asynchronous audit logging
+//   - Background cache warming
+//   - Non-critical notifications
+//   - Metrics collection
+//   - Cleanup tasks that should complete independently
+//
+// Important characteristics:
+//   - Input type must implement Cloner[T] interface
+//   - Processors continue even after parent context cancellation
+//   - Returns immediately without waiting for completion
+//   - Original input always returned unchanged
+//   - No error reporting from background processors
+//   - Trace context is preserved (but cancellation is not)
+//
+// Example:
+//
+//        scaffold := pipz.NewScaffold(
+//            "async-operations",
+//            asyncAuditLog,
+//            warmCache,
+//            collectMetrics,
+//        )
+//
+//        // Returns immediately, processors run in background
+//        result, err := scaffold.Process(ctx, order)
+type Scaffold[T Cloner[T]] struct {
+        name       Name
+        processors []Chainable[T]
+        mu         sync.RWMutex
+}
+
+// NewScaffold creates a new Scaffold connector.
+func NewScaffold[T Cloner[T]](name Name, processors ...Chainable[T]) *Scaffold[T] <span class="cov8" title="1">{
+        return &amp;Scaffold[T]{
+                name:       name,
+                processors: processors,
+        }
+}</span>
+
+// Process implements the Chainable interface.
+func (s *Scaffold[T]) Process(ctx context.Context, input T) (result T, err error) <span class="cov8" title="1">{
+        defer recoverFromPanic(&amp;result, &amp;err, s.name, input)
+        s.mu.RLock()
+        processors := make([]Chainable[T], len(s.processors))
+        copy(processors, s.processors)
+        s.mu.RUnlock()
+
+        if len(processors) == 0 </span><span class="cov8" title="1">{
+                return input, nil
+        }</span>
+
+        // Create context that won't be canceled when parent is
+        // This preserves values like trace IDs while removing cancellation
+        <span class="cov8" title="1">bgCtx := context.WithoutCancel(ctx)
+
+        // Launch all processors in background without waiting
+        for _, processor := range processors </span><span class="cov8" title="1">{
+                go func(p Chainable[T]) </span><span class="cov8" title="1">{
+                        // Create an isolated copy using the Clone method
+                        inputCopy := input.Clone()
+
+                        // Process with isolated context - continues even if parent canceled
+                        if _, err := p.Process(bgCtx, inputCopy); err != nil </span><span class="cov8" title="1">{
+                                // Fire-and-forget: errors are not reported back
+                                _ = err
+                        }</span>
+                }(processor)
+        }
+
+        // Return immediately without waiting
+        <span class="cov8" title="1">return input, nil</span>
+}
+
+// Add appends a processor to the scaffold execution list.
+func (s *Scaffold[T]) Add(processor Chainable[T]) *Scaffold[T] <span class="cov8" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+        s.processors = append(s.processors, processor)
+        return s
+}</span>
+
+// Remove removes the processor at the specified index.
+func (s *Scaffold[T]) Remove(index int) error <span class="cov8" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        if index &lt; 0 || index &gt;= len(s.processors) </span><span class="cov8" title="1">{
+                return ErrIndexOutOfBounds
+        }</span>
+
+        <span class="cov8" title="1">s.processors = append(s.processors[:index], s.processors[index+1:]...)
+        return nil</span>
+}
+
+// Len returns the number of processors.
+func (s *Scaffold[T]) Len() int <span class="cov8" title="1">{
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+        return len(s.processors)
+}</span>
+
+// Clear removes all processors from the scaffold execution list.
+func (s *Scaffold[T]) Clear() *Scaffold[T] <span class="cov8" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+        s.processors = nil
+        return s
+}</span>
+
+// SetProcessors replaces all processors atomically.
+func (s *Scaffold[T]) SetProcessors(processors ...Chainable[T]) *Scaffold[T] <span class="cov8" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+        s.processors = make([]Chainable[T], len(processors))
+        copy(s.processors, processors)
+        return s
+}</span>
+
+// Name returns the name of this connector.
+func (s *Scaffold[T]) Name() Name <span class="cov8" title="1">{
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+        return s.name
+}</span>
+</pre>
+		
+		<pre class="file" id="file16" style="display: none">package pipz
+
+import (
+        "context"
+        "errors"
+        "fmt"
+        "slices"
+        "sync"
+        "time"
+)
+
+// Sequence modification errors.
+var (
+        ErrIndexOutOfBounds = errors.New("index out of bounds")
+        ErrEmptySequence    = errors.New("sequence is empty")
+        ErrInvalidRange     = errors.New("invalid range")
+)
+
+// Sequence provides a type-safe sequence for processing values of type T.
+// It maintains an ordered list of processors that are executed sequentially.
+//
+// Sequence offers a rich API with methods to dynamically modify the processor
+// chain. This makes it ideal for scenarios where the processing steps need
+// to be configured at runtime or modified based on conditions.
+//
+// Key features:
+//   - Thread-safe for concurrent access
+//   - Dynamic modification of processor chain
+//   - Named processors for debugging
+//   - Rich API for reordering and modification
+//   - Fail-fast execution with detailed errors
+//
+// Sequence is the primary way to chain processors together.
+type Sequence[T any] struct {
+        name       Name
+        processors []Chainable[T]
+        mu         sync.RWMutex
+}
+
+// NewSequence creates a new Sequence with optional initial processors.
+// The sequence is ready to use immediately and can be safely
+// accessed concurrently. Additional processors can be added using Register
+// or the various modification methods.
+//
+// Example:
+//
+//        // Single line declaration
+//        sequence := pipz.NewSequence("user-processing",
+//            pipz.Effect("validate", validateUser),
+//            pipz.Apply("enrich", enrichUser),
+//            pipz.Effect("audit", auditUser),
+//        )
+//
+//        // Or create empty and add later
+//        sequence := pipz.NewSequence[User]("user-processing")
+//        sequence.Register(validateUser, enrichUser)
+func NewSequence[T any](name Name, processors ...Chainable[T]) *Sequence[T] <span class="cov8" title="1">{
+        return &amp;Sequence[T]{
+                name:       name,
+                processors: slices.Clone(processors),
+        }
+}</span>
+
+// Register adds processors to this Sequence.
+// Processors are executed in the order they are registered.
+//
+// This method is thread-safe and can be called concurrently.
+// New processors are appended to the existing chain, making
+// Register ideal for building sequences incrementally:
+//
+//        sequence := pipz.NewSequence[Order]("order-processing")
+//        sequence.Register(validateOrder)
+//        sequence.Register(calculateTax, applyDiscount)
+//        if config.RequiresApproval {
+//            sequence.Register(requireApproval)
+//        }
+func (c *Sequence[T]) Register(processors ...Chainable[T]) <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+        c.processors = append(c.processors, processors...)
+}</span>
+
+// Process executes all registered processors on the input value.
+// Each processor receives the output of the previous processor.
+// The context is checked before each processor execution - if the context
+// is canceled or expired, processing stops immediately.
+// If any processor returns an error, execution stops and a Error
+// is returned with rich debugging information.
+//
+// Process is thread-safe and can be called concurrently. The sequence's
+// processor list is locked during execution to prevent modifications.
+//
+// Error handling includes:
+//   - Processor name and stage index for debugging
+//   - Original input data that caused the failure
+//   - Execution duration for performance analysis
+//   - Timeout/cancellation detection
+//
+// Context best practices:
+//   - Always use context with timeout for production
+//   - Check ctx.Err() in long-running processors
+//   - Pass context through to external calls
+func (c *Sequence[T]) Process(ctx context.Context, value T) (result T, err error) <span class="cov8" title="1">{
+        defer recoverFromPanic(&amp;result, &amp;err, c.name, value)
+
+        c.mu.RLock()
+        defer c.mu.RUnlock()
+
+        // Handle nil context
+        if ctx == nil </span><span class="cov8" title="1">{
+                ctx = context.Background()
+        }</span>
+
+        <span class="cov8" title="1">result = value
+
+        for _, proc := range c.processors </span><span class="cov8" title="1">{
+                // Check context before starting processor
+                select </span>{
+                case &lt;-ctx.Done():<span class="cov8" title="1">
+                        // Context canceled/timed out - create appropriate error
+                        return result, &amp;Error[T]{
+                                Err:       ctx.Err(),
+                                InputData: value,
+                                Path:      []Name{c.name},
+                                Timeout:   errors.Is(ctx.Err(), context.DeadlineExceeded),
+                                Canceled:  errors.Is(ctx.Err(), context.Canceled),
+                                Timestamp: time.Now(),
+                        }</span>
+                default:<span class="cov8" title="1">
+                        result, err = proc.Process(ctx, result)
+                        if err != nil </span><span class="cov8" title="1">{
+                                var pipeErr *Error[T]
+                                if errors.As(err, &amp;pipeErr) </span><span class="cov8" title="1">{
+                                        // Prepend this sequence's name to the path
+                                        pipeErr.Path = append([]Name{c.name}, pipeErr.Path...)
+                                        return result, pipeErr
+                                }</span>
+                                // Handle non-pipeline errors by wrapping them
+                                <span class="cov0" title="0">return result, &amp;Error[T]{
+                                        Timestamp: time.Now(),
+                                        InputData: value,
+                                        Err:       err,
+                                        Path:      []Name{c.name},
+                                }</span>
+                        }
+                }
+        }
+        <span class="cov8" title="1">return result, nil</span>
+}
+
+// Len returns the number of processors in the Sequence.
+func (c *Sequence[T]) Len() int <span class="cov8" title="1">{
+        c.mu.RLock()
+        defer c.mu.RUnlock()
+        return len(c.processors)
+}</span>
+
+// Clear removes all processors from the Sequence.
+func (c *Sequence[T]) Clear() <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+        c.processors = c.processors[:0]
+}</span>
+
+// Unshift adds processors to the front of the Sequence (runs first).
+func (c *Sequence[T]) Unshift(processors ...Chainable[T]) <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+        c.processors = slices.Insert(c.processors, 0, processors...)
+}</span>
+
+// Push adds processors to the back of the Sequence (runs last).
+func (c *Sequence[T]) Push(processors ...Chainable[T]) <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+        c.processors = append(c.processors, processors...)
+}</span>
+
+// Shift removes and returns the first processor.
+func (c *Sequence[T]) Shift() (Chainable[T], error) <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+
+        if len(c.processors) == 0 </span><span class="cov8" title="1">{
+                var zero Chainable[T]
+                return zero, ErrEmptySequence
+        }</span>
+
+        <span class="cov8" title="1">processor := c.processors[0]
+        c.processors = c.processors[1:]
+        return processor, nil</span>
+}
+
+// Pop removes and returns the last processor.
+func (c *Sequence[T]) Pop() (Chainable[T], error) <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+
+        if len(c.processors) == 0 </span><span class="cov8" title="1">{
+                var zero Chainable[T]
+                return zero, ErrEmptySequence
+        }</span>
+
+        <span class="cov8" title="1">lastIndex := len(c.processors) - 1
+        processor := c.processors[lastIndex]
+        c.processors = c.processors[:lastIndex]
+        return processor, nil</span>
+}
+
+// Names returns the names of all processors in order.
+func (c *Sequence[T]) Names() []Name <span class="cov8" title="1">{
+        c.mu.RLock()
+        defer c.mu.RUnlock()
+
+        names := make([]Name, len(c.processors))
+        for i, proc := range c.processors </span><span class="cov8" title="1">{
+                names[i] = proc.Name()
+        }</span>
+        <span class="cov8" title="1">return names</span>
+}
+
+// Remove removes the first processor with the specified name.
+func (c *Sequence[T]) Remove(name Name) error <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+
+        for i, proc := range c.processors </span><span class="cov8" title="1">{
+                if proc.Name() == name </span><span class="cov8" title="1">{
+                        c.processors = slices.Delete(c.processors, i, i+1)
+                        return nil
+                }</span>
+        }
+
+        <span class="cov8" title="1">return fmt.Errorf("processor %q not found", name)</span>
+}
+
+// Replace replaces the first processor with the specified name.
+func (c *Sequence[T]) Replace(name Name, processor Chainable[T]) error <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+
+        for i, proc := range c.processors </span><span class="cov8" title="1">{
+                if proc.Name() == name </span><span class="cov8" title="1">{
+                        c.processors[i] = processor
+                        return nil
+                }</span>
+        }
+
+        <span class="cov8" title="1">return fmt.Errorf("processor %q not found", name)</span>
+}
+
+// After inserts processors after the first processor with the specified name.
+func (c *Sequence[T]) After(afterName Name, processors ...Chainable[T]) error <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+
+        for i, proc := range c.processors </span><span class="cov8" title="1">{
+                if proc.Name() == afterName </span><span class="cov8" title="1">{
+                        c.processors = slices.Insert(c.processors, i+1, processors...)
+                        return nil
+                }</span>
+        }
+
+        <span class="cov8" title="1">return fmt.Errorf("processor %q not found", afterName)</span>
+}
+
+// Before inserts processors before the first processor with the specified name.
+func (c *Sequence[T]) Before(beforeName Name, processors ...Chainable[T]) error <span class="cov8" title="1">{
+        c.mu.Lock()
+        defer c.mu.Unlock()
+
+        for i, proc := range c.processors </span><span class="cov8" title="1">{
+                if proc.Name() == beforeName </span><span class="cov8" title="1">{
+                        c.processors = slices.Insert(c.processors, i, processors...)
+                        return nil
+                }</span>
+        }
+
+        <span class="cov8" title="1">return fmt.Errorf("processor %q not found", beforeName)</span>
+}
+
+// Name returns the name of this sequence.
+func (c *Sequence[T]) Name() Name <span class="cov8" title="1">{
+        c.mu.RLock()
+        defer c.mu.RUnlock()
+        return c.name
+}</span>
+</pre>
+		
+		<pre class="file" id="file17" style="display: none">package pipz
+
+import (
+        "context"
+        "errors"
+        "sync"
+        "time"
+)
+
+// Condition determines routing based on input data.
+// Returns a route key of any comparable type for multi-way branching.
+//
+// Using generic keys instead of strings enables type-safe routing
+// beyond simple string matching. Define custom types for your routes:
+//
+//        type PaymentRoute string
+//        const (
+//            RouteStandard   PaymentRoute = "standard"
+//            RouteHighValue  PaymentRoute = "high_value"
+//            RouteCrypto     PaymentRoute = "crypto"
+//            RouteDefault    PaymentRoute = "default"
+//        )
+//
+// Common patterns include routing by:
+//   - Typed enums for business states
+//   - Integer codes for priority levels
+//   - Custom types for domain concepts
+type Condition[T any, K comparable] func(context.Context, T) K
+
+// Switch routes to different processors based on condition result.
+// Switch enables conditional processing where the path taken depends
+// on the input data. The condition function examines the data and
+// returns a route key that determines which processor to use.
+//
+// The key type K must be comparable (can be used as map key). This enables
+// type-safe routing with custom types, avoiding magic strings. If no route
+// exists for the returned key, the input passes through unchanged.
+//
+// Switch is perfect for:
+//   - Type-based processing with enum safety
+//   - Status-based workflows with defined states
+//   - Region-specific logic with typed regions
+//   - Priority handling with numeric levels
+//   - A/B testing with experiment types
+//   - Dynamic routing tables that change at runtime
+//   - Feature flag controlled processing paths
+//
+// Example with type-safe keys:
+//
+//        type PaymentRoute string
+//        const (
+//            RouteStandard   PaymentRoute = "standard"
+//            RouteHighValue  PaymentRoute = "high_value"
+//            RouteCrypto     PaymentRoute = "crypto"
+//        )
+//
+//        switch := pipz.NewSwitch(
+//            func(ctx context.Context, p Payment) PaymentRoute {
+//                if p.Amount &gt; 10000 {
+//                    return RouteHighValue
+//                } else if p.Method == "crypto" {
+//                    return RouteCrypto
+//                }
+//                return RouteStandard
+//            },
+//        )
+//        switch.AddRoute(RouteStandard, standardProcessor)
+//        switch.AddRoute(RouteHighValue, highValueProcessor)
+//        switch.AddRoute(RouteCrypto, cryptoProcessor)
+type Switch[T any, K comparable] struct {
+        condition Condition[T, K]
+        routes    map[K]Chainable[T]
+        name      Name
+        mu        sync.RWMutex
+}
+
+// NewSwitch creates a new Switch connector with the given condition function.
+func NewSwitch[T any, K comparable](name Name, condition Condition[T, K]) *Switch[T, K] <span class="cov8" title="1">{
+        return &amp;Switch[T, K]{
+                name:      name,
+                condition: condition,
+                routes:    make(map[K]Chainable[T]),
+        }
+}</span>
+
+// Process implements the Chainable interface.
+// If no route matches the condition result, the input is returned unchanged.
+func (s *Switch[T, K]) Process(ctx context.Context, data T) (result T, err error) <span class="cov8" title="1">{
+        defer recoverFromPanic(&amp;result, &amp;err, s.name, data)
+
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        route := s.condition(ctx, data)
+        processor, exists := s.routes[route]
+        if !exists </span><span class="cov8" title="1">{
+                return data, nil
+        }</span>
+        <span class="cov8" title="1">result, err = processor.Process(ctx, data)
+        if err != nil </span><span class="cov8" title="1">{
+                var pipeErr *Error[T]
+                if errors.As(err, &amp;pipeErr) </span><span class="cov8" title="1">{
+                        // Prepend this switch's name to the path
+                        pipeErr.Path = append([]Name{s.name}, pipeErr.Path...)
+                        return result, pipeErr
+                }</span>
+                // Handle non-pipeline errors by wrapping them
+                <span class="cov0" title="0">return result, &amp;Error[T]{
+                        Timestamp: time.Now(),
+                        InputData: data,
+                        Err:       err,
+                        Path:      []Name{s.name},
+                }</span>
+        }
+        <span class="cov8" title="1">return result, nil</span>
+}
+
+// AddRoute adds or updates a route in the switch.
+func (s *Switch[T, K]) AddRoute(key K, processor Chainable[T]) *Switch[T, K] <span class="cov8" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+        s.routes[key] = processor
+        return s
+}</span>
+
+// RemoveRoute removes a route from the switch.
+func (s *Switch[T, K]) RemoveRoute(key K) *Switch[T, K] <span class="cov8" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+        delete(s.routes, key)
+        return s
+}</span>
+
+// SetCondition updates the condition function.
+func (s *Switch[T, K]) SetCondition(condition Condition[T, K]) *Switch[T, K] <span class="cov8" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+        s.condition = condition
+        return s
+}</span>
+
+// Routes returns a copy of the current routes map.
+func (s *Switch[T, K]) Routes() map[K]Chainable[T] <span class="cov8" title="1">{
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+
+        routes := make(map[K]Chainable[T], len(s.routes))
+        for k, v := range s.routes </span><span class="cov8" title="1">{
+                routes[k] = v
+        }</span>
+        <span class="cov8" title="1">return routes</span>
+}
+
+// HasRoute checks if a route exists for the given key.
+func (s *Switch[T, K]) HasRoute(key K) bool <span class="cov8" title="1">{
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+        _, exists := s.routes[key]
+        return exists
+}</span>
+
+// ClearRoutes removes all routes from the switch.
+func (s *Switch[T, K]) ClearRoutes() *Switch[T, K] <span class="cov8" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+        s.routes = make(map[K]Chainable[T])
+        return s
+}</span>
+
+// SetRoutes replaces all routes in the switch atomically.
+func (s *Switch[T, K]) SetRoutes(routes map[K]Chainable[T]) *Switch[T, K] <span class="cov8" title="1">{
+        s.mu.Lock()
+        defer s.mu.Unlock()
+        s.routes = make(map[K]Chainable[T], len(routes))
+        for k, v := range routes </span><span class="cov8" title="1">{
+                s.routes[k] = v
+        }</span>
+        <span class="cov8" title="1">return s</span>
+}
+
+// Name returns the name of this connector.
+func (s *Switch[T, K]) Name() Name <span class="cov8" title="1">{
+        s.mu.RLock()
+        defer s.mu.RUnlock()
+        return s.name
+}</span>
+</pre>
+		
+		<pre class="file" id="file18" style="display: none">package pipz
+
+import (
+        "context"
+        "errors"
+        "sync"
+        "time"
+)
+
+// Timeout enforces a timeout on the processor's execution.
+// Timeout wraps any processor with a hard time limit, ensuring operations
+// complete within acceptable bounds. If the timeout expires, the operation
+// is canceled via context and a timeout error is returned.
+//
+// This connector is critical for:
+//   - Preventing hung operations
+//   - Meeting SLA requirements
+//   - Protecting against slow external services
+//   - Ensuring predictable system behavior
+//   - Resource management in concurrent systems
+//
+// The wrapped operation should respect context cancellation for
+// immediate termination. Operations that ignore context may continue
+// running in the background even after timeout.
+//
+// Timeout is often combined with Retry for robust error handling:
+//
+//        pipz.NewRetry(pipz.NewTimeout(operation, 5*time.Second), 3)
+//
+// Example:
+//
+//        timeout := pipz.NewTimeout(
+//            userServiceCall,
+//            2*time.Second,  // Must complete within 2 seconds
+//        )
+type Timeout[T any] struct {
+        processor Chainable[T]
+        name      Name
+        duration  time.Duration
+        mu        sync.RWMutex
+}
+
+// NewTimeout creates a new Timeout connector.
+func NewTimeout[T any](name Name, processor Chainable[T], duration time.Duration) *Timeout[T] <span class="cov8" title="1">{
+        return &amp;Timeout[T]{
+                name:      name,
+                processor: processor,
+                duration:  duration,
+        }
+}</span>
+
+// Process implements the Chainable interface.
+func (t *Timeout[T]) Process(ctx context.Context, data T) (result T, err error) <span class="cov8" title="1">{
+        defer recoverFromPanic(&amp;result, &amp;err, t.name, data)
+
+        t.mu.RLock()
+        processor := t.processor
+        duration := t.duration
+        t.mu.RUnlock()
+
+        // Add this timeout to the processing path
+
+        ctx, cancel := context.WithTimeout(ctx, duration)
+        defer cancel()
+
+        // Channel to receive the result from the goroutine
+        type processResult struct {
+                result T
+                err    error
+        }
+        resultCh := make(chan processResult, 1)
+
+        go func() </span><span class="cov8" title="1">{
+                result, err := processor.Process(ctx, data)
+                // Use non-blocking send to avoid goroutine leak if main function has already returned
+                select </span>{
+                case resultCh &lt;- processResult{result: result, err: err}:<span class="cov8" title="1"></span>
+                case &lt;-ctx.Done():<span class="cov8" title="1"></span>
+                        // Context was canceled, don't block trying to send result
+                }
+        }()
+
+        <span class="cov8" title="1">select </span>{
+        case res := &lt;-resultCh:<span class="cov8" title="1">
+                if res.err != nil </span><span class="cov8" title="1">{
+                        var pipeErr *Error[T]
+                        if errors.As(res.err, &amp;pipeErr) </span><span class="cov8" title="1">{
+                                // Prepend this timeout's name to the path
+                                pipeErr.Path = append([]Name{t.name}, pipeErr.Path...)
+                                return res.result, pipeErr
+                        }</span>
+                        // Handle non-pipeline errors by wrapping them
+                        <span class="cov0" title="0">return res.result, &amp;Error[T]{
+                                Timestamp: time.Now(),
+                                InputData: data,
+                                Err:       res.err,
+                                Path:      []Name{t.name},
+                        }</span>
+                }
+                <span class="cov8" title="1">return res.result, nil</span>
+        case &lt;-ctx.Done():<span class="cov8" title="1">
+                // Timeout occurred - return error
+                return data, &amp;Error[T]{
+                        Err:       ctx.Err(),
+                        InputData: data,
+                        Path:      []Name{t.name},
+                        Timeout:   errors.Is(ctx.Err(), context.DeadlineExceeded),
+                        Canceled:  errors.Is(ctx.Err(), context.Canceled),
+                        Timestamp: time.Now(),
+                }</span>
+        }
+}
+
+// SetDuration updates the timeout duration.
+func (t *Timeout[T]) SetDuration(d time.Duration) *Timeout[T] <span class="cov8" title="1">{
+        t.mu.Lock()
+        defer t.mu.Unlock()
+        t.duration = d
+        return t
+}</span>
+
+// GetDuration returns the current timeout duration.
+func (t *Timeout[T]) GetDuration() time.Duration <span class="cov8" title="1">{
+        t.mu.RLock()
+        defer t.mu.RUnlock()
+        return t.duration
+}</span>
+
+// Name returns the name of this connector.
+func (t *Timeout[T]) Name() Name <span class="cov8" title="1">{
+        t.mu.RLock()
+        defer t.mu.RUnlock()
+        return t.name
+}</span>
+</pre>
+		
+		<pre class="file" id="file19" style="display: none">package pipz
+
+import "context"
+
+// Transform creates a Processor that applies a pure transformation function to data.
+// Transform is the simplest processor - use it when your operation always succeeds
+// and always modifies the data in a predictable way.
+//
+// The transformation function cannot fail, making Transform ideal for:
+//   - Data formatting (uppercase, trimming, parsing that can't fail)
+//   - Mathematical calculations that can't error
+//   - Field mapping or restructuring
+//   - Adding computed fields
+//
+// If your transformation might fail (e.g., parsing, validation), use Apply instead.
+// If you need conditional transformation, use Mutate.
+//
+// Example:
+//
+//        uppercase := pipz.Transform("uppercase", func(ctx context.Context, s string) string {
+//            return strings.ToUpper(s)
+//        })
+func Transform[T any](name Name, fn func(context.Context, T) T) Processor[T] <span class="cov8" title="1">{
+        return Processor[T]{
+                name: name,
+                fn: func(ctx context.Context, value T) (result T, err error) </span><span class="cov8" title="1">{
+                        defer recoverFromPanic(&amp;result, &amp;err, name, value)
+                        result = fn(ctx, value)
+                        return result, nil
+                }</span>,
+        }
+}
+</pre>
+		
+		<pre class="file" id="file20" style="display: none">package pipz
+
+import (
+        "context"
+        "sync"
+        "time"
+)
+
+// WorkerPool provides bounded parallel execution with a fixed number of workers.
+// Uses semaphore pattern to limit concurrent processor execution while maintaining
+// the same API and behavior as other connectors in the pipz ecosystem.
+//
+// The input type T must implement Cloner[T] to provide safe concurrent processing.
+// Each processor receives an isolated copy of the input data.
+//
+// Example:
+//
+//        pool := pipz.NewWorkerPool("api-calls", 5,
+//            pipz.Apply("service-a", callServiceA),
+//            pipz.Apply("service-b", callServiceB),
+//            pipz.Apply("service-c", callServiceC),
+//        )
+//
+//nolint:govet // fieldalignment: 8-byte difference in struct size is negligible vs. readability
+type WorkerPool[T Cloner[T]] struct {
+        processors []Chainable[T]
+        sem        chan struct{} // Semaphore for worker limit
+        name       Name
+        mu         sync.RWMutex  // Thread safety
+        timeout    time.Duration // Optional per-task timeout
+        queueSize  int           // Optional queue size (unused but kept for future)
+}
+
+// NewWorkerPool creates a WorkerPool with specified worker count.
+// Workers parameter controls maximum concurrent processors (semaphore slots).
+func NewWorkerPool[T Cloner[T]](name Name, workers int, processors ...Chainable[T]) *WorkerPool[T] <span class="cov8" title="1">{
+        if workers &lt;= 0 </span><span class="cov8" title="1">{
+                workers = 1 // Sensible default
+        }</span>
+
+        <span class="cov8" title="1">wp := &amp;WorkerPool[T]{
+                processors: make([]Chainable[T], len(processors)),
+                sem:        make(chan struct{}, workers),
+                name:       name,
+                timeout:    0, // Default no timeout
+                queueSize:  0, // Default no buffering
+        }
+        copy(wp.processors, processors) // Defensive copy
+        return wp</span>
+}
+
+// Name returns the name of this connector.
+func (w *WorkerPool[T]) Name() Name <span class="cov8" title="1">{
+        w.mu.RLock()
+        defer w.mu.RUnlock()
+        return w.name
+}</span>
+
+// Process implements the Chainable interface.
+func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err error) <span class="cov8" title="1">{
+        defer recoverFromPanic(&amp;result, &amp;err, w.name, input)
+        w.mu.RLock()
+        processors := make([]Chainable[T], len(w.processors))
+        copy(processors, w.processors)
+        timeout := w.timeout
+        w.mu.RUnlock()
+
+        if len(processors) == 0 </span><span class="cov8" title="1">{
+                return input, nil
+        }</span>
+
+        <span class="cov8" title="1">var wg sync.WaitGroup
+        errors := make(chan error, len(processors))
+
+        for _, processor := range processors </span><span class="cov8" title="1">{
+                wg.Add(1)
+                go func(p Chainable[T]) </span><span class="cov8" title="1">{
+                        defer wg.Done()
+
+                        // Acquire semaphore slot (blocks if all workers busy)
+                        select </span>{
+                        case w.sem &lt;- struct{}{}:<span class="cov8" title="1">
+                                defer func() </span><span class="cov8" title="1">{ &lt;-w.sem }</span>() // Release slot when done
+                        case &lt;-ctx.Done():<span class="cov8" title="1">
+                                errors &lt;- ctx.Err()
+                                return</span>
+                        }
+
+                        // Create task context with optional timeout
+                        <span class="cov8" title="1">taskCtx := ctx
+                        var cancel context.CancelFunc
+                        if timeout &gt; 0 </span><span class="cov8" title="1">{
+                                taskCtx, cancel = context.WithTimeout(ctx, timeout)
+                                defer cancel()
+                        }</span>
+
+                        // Process with cloned input
+                        <span class="cov8" title="1">inputCopy := input.Clone()
+                        if _, err := p.Process(taskCtx, inputCopy); err != nil </span><span class="cov8" title="1">{
+                                errors &lt;- err
+                        }</span>
+                }(processor)
+        }
+
+        // Wait for all processors to complete
+        <span class="cov8" title="1">wg.Wait()
+        close(errors)
+
+        // Handle errors (first error wins)
+        for err := range errors </span><span class="cov8" title="1">{
+                if err != nil </span><span class="cov8" title="1">{
+                        return input, &amp;Error[T]{
+                                Err:       err,
+                                InputData: input,
+                                Path:      []Name{w.name},
+                                Timestamp: time.Now(),
+                                Duration:  0, // Duration not tracked at connector level
+                        }
+                }</span>
+        }
+
+        <span class="cov8" title="1">return input, nil</span>
+}
+
+// Add appends a processor to the worker pool execution list.
+func (w *WorkerPool[T]) Add(processor Chainable[T]) *WorkerPool[T] <span class="cov8" title="1">{
+        w.mu.Lock()
+        defer w.mu.Unlock()
+        w.processors = append(w.processors, processor)
+        return w
+}</span>
+
+// Remove removes the processor at the specified index.
+func (w *WorkerPool[T]) Remove(index int) error <span class="cov8" title="1">{
+        w.mu.Lock()
+        defer w.mu.Unlock()
+
+        if index &lt; 0 || index &gt;= len(w.processors) </span><span class="cov8" title="1">{
+                return ErrIndexOutOfBounds
+        }</span>
+
+        <span class="cov8" title="1">w.processors = append(w.processors[:index], w.processors[index+1:]...)
+        return nil</span>
+}
+
+// Len returns the number of processors.
+func (w *WorkerPool[T]) Len() int <span class="cov8" title="1">{
+        w.mu.RLock()
+        defer w.mu.RUnlock()
+        return len(w.processors)
+}</span>
+
+// Clear removes all processors from the worker pool execution list.
+func (w *WorkerPool[T]) Clear() *WorkerPool[T] <span class="cov8" title="1">{
+        w.mu.Lock()
+        defer w.mu.Unlock()
+        w.processors = nil
+        return w
+}</span>
+
+// SetProcessors replaces all processors atomically.
+func (w *WorkerPool[T]) SetProcessors(processors ...Chainable[T]) *WorkerPool[T] <span class="cov8" title="1">{
+        w.mu.Lock()
+        defer w.mu.Unlock()
+        w.processors = make([]Chainable[T], len(processors))
+        copy(w.processors, processors)
+        return w
+}</span>
+
+// WithTimeout sets per-task timeout. Each processor must complete within this duration.
+func (w *WorkerPool[T]) WithTimeout(timeout time.Duration) *WorkerPool[T] <span class="cov8" title="1">{
+        w.mu.Lock()
+        defer w.mu.Unlock()
+        w.timeout = timeout
+        return w
+}</span>
+
+// SetWorkerCount adjusts the worker pool size by recreating the semaphore.
+func (w *WorkerPool[T]) SetWorkerCount(workers int) *WorkerPool[T] <span class="cov8" title="1">{
+        if workers &lt;= 0 </span><span class="cov8" title="1">{
+                return w // Invalid count, ignore
+        }</span>
+
+        <span class="cov8" title="1">w.mu.Lock()
+        defer w.mu.Unlock()
+
+        // Create new semaphore with updated size
+        w.sem = make(chan struct{}, workers)
+        return w</span>
+}
+
+// GetWorkerCount returns the maximum number of concurrent workers.
+func (w *WorkerPool[T]) GetWorkerCount() int <span class="cov8" title="1">{
+        w.mu.RLock()
+        defer w.mu.RUnlock()
+        return cap(w.sem)
+}</span>
+
+// GetActiveWorkers returns the number of currently active workers.
+func (w *WorkerPool[T]) GetActiveWorkers() int <span class="cov8" title="1">{
+        w.mu.RLock()
+        defer w.mu.RUnlock()
+        return len(w.sem)
+}</span>
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

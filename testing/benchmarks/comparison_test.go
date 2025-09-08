@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,11 +13,26 @@ import (
 	"github.com/zoobzio/pipz"
 )
 
-// ClonableInt wraps int to implement Cloner interface.
-type ClonableInt int
+// ProfileUpdate represents a user profile modification - tests basic cloning with simple fields..
+type ProfileUpdate struct {
+	UserID    int64
+	Field     string // The field being updated
+	OldValue  string // Previous value
+	NewValue  string // New value
+	Timestamp int64  // Unix timestamp
+	Priority  int    // Update priority (0-10)
+}
 
-func (i ClonableInt) Clone() ClonableInt {
-	return i
+func (p ProfileUpdate) Clone() ProfileUpdate {
+	// Shallow copy is sufficient - all fields are value types
+	return ProfileUpdate{
+		UserID:    p.UserID,
+		Field:     p.Field,
+		OldValue:  p.OldValue,
+		NewValue:  p.NewValue,
+		Timestamp: p.Timestamp,
+		Priority:  p.Priority,
+	}
 }
 
 // Realistic data structures for benchmarking.
@@ -354,13 +370,41 @@ func BenchmarkConcurrentPatterns(b *testing.B) {
 
 	b.Run("Pipz_Concurrent", func(b *testing.B) {
 		concurrent := pipz.NewConcurrent("concurrent",
-			pipz.Transform("proc1", func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 }),
-			pipz.Transform("proc2", func(_ context.Context, n ClonableInt) ClonableInt { return n + 10 }),
-			pipz.Transform("proc3", func(_ context.Context, n ClonableInt) ClonableInt { return n - 5 }),
-			pipz.Transform("proc4", func(_ context.Context, n ClonableInt) ClonableInt { return n * 3 }),
+			pipz.Transform("validate", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+				if p.Priority < 0 {
+					p.Priority = 0
+				}
+				if p.Priority > 10 {
+					p.Priority = 10
+				}
+				return p
+			}),
+			pipz.Transform("normalize", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+				p.Field = strings.ToLower(p.Field)
+				return p
+			}),
+			pipz.Transform("timestamp", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+				if p.Timestamp == 0 {
+					p.Timestamp = time.Now().Unix()
+				}
+				return p
+			}),
+			pipz.Transform("prioritize", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+				if p.Field == "email" || p.Field == "password" {
+					p.Priority += 2
+				}
+				return p
+			}),
 		)
 
-		data := ClonableInt(42)
+		data := ProfileUpdate{
+			UserID:    12345,
+			Field:     "email",
+			OldValue:  "old@example.com",
+			NewValue:  "new@example.com",
+			Timestamp: 0, // Will be set by processor
+			Priority:  5,
+		}
 
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -391,18 +435,32 @@ func BenchmarkConcurrentPatterns(b *testing.B) {
 
 	b.Run("Pipz_Race", func(b *testing.B) {
 		race := pipz.NewRace("race",
-			pipz.Transform("fast", func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 }),
-			pipz.Transform("slow", func(_ context.Context, n ClonableInt) ClonableInt {
-				time.Sleep(time.Microsecond)
-				return n + 10
+			pipz.Transform("fast-validate", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+				if p.Priority < 5 {
+					p.Priority = 5
+				} // Quick priority boost
+				return p
 			}),
-			pipz.Transform("slower", func(_ context.Context, n ClonableInt) ClonableInt {
+			pipz.Transform("slow-enrich", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+				time.Sleep(time.Microsecond)
+				p.Field = "enriched_" + p.Field // Simulate database lookup
+				return p
+			}),
+			pipz.Transform("slower-audit", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
 				time.Sleep(2 * time.Microsecond)
-				return n - 5
+				p.Timestamp = time.Now().Unix() // Audit timestamp
+				return p
 			}),
 		)
 
-		data := ClonableInt(42)
+		data := ProfileUpdate{
+			UserID:    12345,
+			Field:     "email",
+			OldValue:  "old@example.com",
+			NewValue:  "new@example.com",
+			Timestamp: 0, // Will be set by processor
+			Priority:  5,
+		}
 
 		b.ResetTimer()
 		b.ReportAllocs()

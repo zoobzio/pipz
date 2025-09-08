@@ -9,6 +9,22 @@ import (
 	"unsafe"
 )
 
+// plainErrorProcessor is a test helper that returns plain errors (not Error[T] types).
+// This is needed to test the non-pipeline error wrapping in fallback.go lines 97-102.
+type plainErrorProcessor[T any] struct {
+	name Name
+	err  error
+}
+
+func (p *plainErrorProcessor[T]) Process(_ context.Context, _ T) (T, error) {
+	var zero T
+	return zero, p.err
+}
+
+func (p *plainErrorProcessor[T]) Name() Name {
+	return p.name
+}
+
 func TestFallback(t *testing.T) {
 	t.Run("Primary Success", func(t *testing.T) {
 		primary := Transform("primary", func(_ context.Context, n int) int {
@@ -472,6 +488,78 @@ func TestFallback(t *testing.T) {
 
 		if pipzErr.InputData != 42 {
 			t.Errorf("expected input data 42, got %d", pipzErr.InputData)
+		}
+	})
+
+	// High-value coverage improvement tests targeting specific execution paths
+	t.Run("Non-Pipeline Error Wrapping Coverage", func(t *testing.T) {
+		// Test lines 97-102: non-pipeline error wrapping when all processors fail
+		// Need to create processors that return plain errors, not Error[T] types
+		plainErr := errors.New("plain error")
+		// Create a processor that returns a plain error (not wrapped in Error[T])
+		// We'll implement this by creating a fake processor that doesn't use the pipz error wrapping
+		fakeProcessor := &plainErrorProcessor[int]{
+			name: "plain-error-proc",
+			err:  plainErr,
+		}
+		fallback := NewFallback("error-wrapper", fakeProcessor)
+		result, err := fallback.Process(context.Background(), 42)
+
+		// Should return original input
+		if result != 42 {
+			t.Errorf("expected original input 42, got %d", result)
+		}
+
+		// Should return wrapped error (lines 97-102)
+		var pipeErr *Error[int]
+		if !errors.As(err, &pipeErr) {
+			t.Fatalf("expected wrapped Error[T], got %T", err)
+		}
+
+		// Verify wrapping details
+		if !errors.Is(pipeErr.Err, plainErr) {
+			t.Error("wrapped error should contain plain error")
+		}
+		if pipeErr.InputData != 42 {
+			t.Errorf("expected input data 42, got %d", pipeErr.InputData)
+		}
+		if len(pipeErr.Path) != 1 || pipeErr.Path[0] != "error-wrapper" {
+			t.Errorf("expected path [error-wrapper], got %v", pipeErr.Path)
+		}
+		if pipeErr.Timestamp.IsZero() {
+			t.Error("timestamp should be set")
+		}
+	})
+
+	t.Run("Empty Processor Defensive Code Coverage", func(t *testing.T) {
+		// This tests line 104 in fallback.go (return data, nil when lastErr == nil)
+		// This is defensive code that's technically unreachable with current constructor
+		// but we test it for completeness
+
+		processor := Transform("success", func(_ context.Context, n int) int {
+			return n * 2
+		})
+
+		fallback := NewFallback("defensive", processor)
+
+		// Use reflection to create an edge case scenario
+		fbValue := reflect.ValueOf(fallback).Elem()
+		processorsField := fbValue.FieldByName("processors")
+
+		// Create a scenario where we have zero processors (bypassing constructor validation)
+		processorsField = reflect.NewAt(processorsField.Type(),
+			unsafe.Pointer(processorsField.UnsafeAddr())).Elem()
+		emptyProcessors := reflect.MakeSlice(processorsField.Type(), 0, 0)
+		processorsField.Set(emptyProcessors)
+
+		// Process should hit line 104 (return data, nil)
+		result, err := fallback.Process(context.Background(), 42)
+
+		if err != nil {
+			t.Errorf("expected nil error for empty processors, got %v", err)
+		}
+		if result != 42 {
+			t.Errorf("expected original data 42, got %d", result)
 		}
 	})
 }

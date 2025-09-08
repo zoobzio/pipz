@@ -71,6 +71,27 @@ func (t *Timeout[T]) Process(ctx context.Context, data T) (result T, err error) 
 	resultCh := make(chan processResult, 1)
 
 	go func() {
+		defer func() {
+			// Ensure goroutine cleanup on panic
+			if r := recover(); r != nil {
+				// Convert panic to error and send it
+				var zero T
+				panicErr := &Error[T]{
+					Path:      []Name{t.name},
+					InputData: data,
+					Err:       &panicError{processorName: t.name, sanitized: sanitizePanicMessage(r)},
+					Timestamp: time.Now(),
+					Duration:  0,
+					Timeout:   false,
+					Canceled:  false,
+				}
+				select {
+				case resultCh <- processResult{result: zero, err: panicErr}:
+				case <-ctx.Done():
+					// Context was canceled, don't block
+				}
+			}
+		}()
 		result, err := processor.Process(ctx, data)
 		// Use non-blocking send to avoid goroutine leak if main function has already returned
 		select {

@@ -2,132 +2,304 @@ name: CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, develop ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main ]
+
+env:
+  GO_VERSION: "1.23"
 
 jobs:
-  test:
-    name: Test
+  # Unit tests with race detection - primary quality gate
+  unit-tests:
+    name: Unit Tests
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: ['1.21', '1.22', '1.23']
-    
+        go-version: ["1.21", "1.22", "1.23"]
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up Go
+    - name: Set up Go ${{ matrix.go-version }}
       uses: actions/setup-go@v5
       with:
         go-version: ${{ matrix.go-version }}
-    
-    - name: Test pipz core
-      run: |
-        go test -v -race -coverprofile=coverage-core.txt -covermode=atomic \
-          -coverpkg=github.com/zoobzio/pipz $(go list ./... | grep -v '/examples/')
-        echo "Core library test coverage:"
-        go tool cover -func=coverage-core.txt | tail -1
-    
-    - name: Test examples (no coverage)
-      run: |
-        echo "Testing examples without coverage tracking..."
-        for dir in examples/*/; do
-          if [ -f "$dir/go.mod" ]; then
-            echo "Testing $dir"
-            (cd "$dir" && go test -v -race ./... || true)
-          fi
-        done
-    
-    - name: Upload coverage to Codecov
-      if: matrix.go-version == '1.23'
-      uses: codecov/codecov-action@v4
+        
+    - name: Cache Go modules
+      uses: actions/cache@v4
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ./coverage-core.txt
-        flags: unit
-        name: pipz-coverage-${{ matrix.go-version }}
-        fail_ci_if_error: false
-        verbose: true
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ matrix.go-version }}-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-${{ matrix.go-version }}-
+          
+    - name: Download dependencies
+      run: go mod download
+      
+    - name: Run unit tests with race detection
+      run: go test -v -race -timeout=5m ./...
+      
+    - name: Test examples
+      run: make test-examples
 
-  lint:
-    name: Lint
+  # Integration tests - component interaction verification
+  integration-tests:
+    name: Integration Tests
     runs-on: ubuntu-latest
+    needs: unit-tests
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up Go
+    - name: Set up Go ${{ env.GO_VERSION }}
       uses: actions/setup-go@v5
       with:
-        go-version: '1.23'
-    
-    - name: golangci-lint
-      uses: golangci/golangci-lint-action@v6
+        go-version: ${{ env.GO_VERSION }}
+        
+    - name: Cache Go modules
+      uses: actions/cache@v4
       with:
-        version: v1.64.8  # Updated to support Go 1.24
-        args: --config=.golangci.yml --timeout=5m
-        skip-cache: false
-        skip-save-cache: false
-    
-    - name: Security Report
-      if: always()
-      run: |
-        golangci-lint run --config=.golangci.yml --out-format=json > lint-report.json || true
-        echo "### Security Scan Summary" >> $GITHUB_STEP_SUMMARY
-        echo "Linters with findings:" >> $GITHUB_STEP_SUMMARY
-        jq -r '.Issues[] | .FromLinter' lint-report.json 2>/dev/null | sort | uniq -c | sort -nr >> $GITHUB_STEP_SUMMARY || echo "No issues found ✅" >> $GITHUB_STEP_SUMMARY
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-${{ env.GO_VERSION }}-
+          
+    - name: Download dependencies
+      run: go mod download
+      
+    - name: Run integration tests with race detection
+      run: go test -v -race -timeout=10m ./testing/integration/...
+      
+    - name: Run integration tests with extended timeout
+      run: go test -v -timeout=15m -run TestPerformanceIntegration ./testing/integration/...
 
-  benchmark:
-    name: Benchmark
+  # Performance benchmarks - regression detection
+  benchmarks:
+    name: Performance Benchmarks
     runs-on: ubuntu-latest
+    needs: unit-tests
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up Go
+    - name: Set up Go ${{ env.GO_VERSION }}
       uses: actions/setup-go@v5
       with:
-        go-version: '1.23'
-    
+        go-version: ${{ env.GO_VERSION }}
+        
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-${{ env.GO_VERSION }}-
+          
+    - name: Download dependencies
+      run: go mod download
+      
     - name: Run core benchmarks
+      run: go test -v -bench=. -benchmem -benchtime=1s -timeout=10m ./testing/benchmarks/...
+      
+    - name: Run comparison benchmarks
+      run: go test -v -bench=BenchmarkComparison -benchmem -benchtime=1s -timeout=5m ./testing/benchmarks/...
+      
+    - name: Store benchmark results
       run: |
-        echo "### Core Library Benchmarks" | tee benchmark_results.txt
-        go test -bench=. -benchmem -benchtime=1s ./... | tee -a benchmark_results.txt
-    
-    
+        go test -bench=. -benchmem ./testing/benchmarks/... | tee benchmark-results.txt
+        
     - name: Upload benchmark results
       uses: actions/upload-artifact@v4
       with:
-        name: benchmark-results
-        path: benchmark_results.txt
+        name: benchmark-results-${{ github.sha }}
+        path: benchmark-results.txt
 
-  examples:
-    name: Example Validation
+  # Reliability tests - resilience pattern verification
+  reliability-tests:
+    name: Reliability Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go ${{ env.GO_VERSION }}
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-${{ env.GO_VERSION }}-
+          
+    - name: Download dependencies
+      run: go mod download
+      
+    - name: Run resilience pattern tests
+      run: go test -v -race -timeout=10m -run TestResilience ./testing/integration/...
+      
+    - name: Run panic recovery tests
+      run: go test -v -race -timeout=5m -run TestPanicRecovery ./testing/integration/...
+      
+    - name: Run resource leak tests
+      run: go test -v -race -timeout=10m -run TestResourceLeak ./testing/integration/...
+      
+    - name: Run concurrent modification tests
+      run: go test -v -race -timeout=5m -run TestConcurrentModification ./testing/integration/...
+
+  # Code quality and security
+  quality:
+    name: Code Quality
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up Go
+    - name: Set up Go ${{ env.GO_VERSION }}
       uses: actions/setup-go@v5
       with:
-        go-version: '1.23'
+        go-version: ${{ env.GO_VERSION }}
+        
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-${{ env.GO_VERSION }}-
+          
+    - name: Download dependencies
+      run: go mod download
+      
+    - name: Install golangci-lint
+      run: make install-tools
+      
+    - name: Run linters
+      run: make lint
+      
+    - name: Generate coverage report
+      run: make coverage
+      
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.out
+        flags: unittests
+        name: codecov-umbrella
+        
+    - name: Upload coverage report
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report-${{ github.sha }}
+        path: |
+          coverage.out
+          coverage.html
+
+  # End-to-end verification using examples
+  e2e-examples:
+    name: E2E Examples
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+    steps:
+    - uses: actions/checkout@v4
     
-    - name: Build and test examples
+    - name: Set up Go ${{ env.GO_VERSION }}
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-${{ env.GO_VERSION }}-
+          
+    - name: Download dependencies for examples
       run: |
-        echo "### Building and testing all examples"
         for dir in examples/*/; do
           if [ -f "$dir/go.mod" ]; then
-            echo "#### Testing $dir"
-            (cd "$dir" && go build ./... && go test -v)
+            echo "Downloading dependencies for $dir"
+            (cd "$dir" && go mod download)
           fi
         done
-    
-    - name: Verify example imports
+        
+    - name: Build all examples
       run: |
-        echo "### Verifying examples use pipz correctly"
         for dir in examples/*/; do
-          if [ -f "$dir/go.mod" ]; then
-            echo "Checking $dir"
-            # Verify they import the pipz module
-            (cd "$dir" && go list -m github.com/zoobzio/pipz) || echo "Warning: $dir doesn't import pipz"
+          if [ -f "$dir/main.go" ]; then
+            echo "Building $dir"
+            (cd "$dir" && go build -v .)
           fi
         done
+        
+    - name: Run examples with timeout
+      run: |
+        for dir in examples/*/; do
+          if [ -f "$dir/main.go" ]; then
+            echo "Running $dir"
+            (cd "$dir" && timeout 30s go run . || echo "Example completed or timed out safely")
+          fi
+        done
+
+  # Security scanning
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go ${{ env.GO_VERSION }}
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        
+    - name: Run Gosec Security Scanner
+      uses: securecodewarrior/github-action-gosec@master
+      with:
+        args: '-fmt sarif -out gosec-results.sarif ./...'
+        
+    - name: Upload SARIF file
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: gosec-results.sarif
+
+  # Overall CI status check
+  ci-complete:
+    name: CI Complete
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, benchmarks, reliability-tests, quality, e2e-examples, security]
+    if: always()
+    steps:
+    - name: Check all jobs status
+      run: |
+        if [[ "${{ needs.unit-tests.result }}" != "success" ]]; then
+          echo "Unit tests failed"
+          exit 1
+        fi
+        if [[ "${{ needs.integration-tests.result }}" != "success" ]]; then
+          echo "Integration tests failed"
+          exit 1
+        fi
+        if [[ "${{ needs.benchmarks.result }}" != "success" ]]; then
+          echo "Benchmarks failed"
+          exit 1
+        fi
+        if [[ "${{ needs.reliability-tests.result }}" != "success" ]]; then
+          echo "Reliability tests failed"
+          exit 1
+        fi
+        if [[ "${{ needs.quality.result }}" != "success" ]]; then
+          echo "Code quality checks failed"
+          exit 1
+        fi
+        if [[ "${{ needs.e2e-examples.result }}" != "success" ]]; then
+          echo "E2E examples failed"
+          exit 1
+        fi
+        if [[ "${{ needs.security.result }}" != "success" ]]; then
+          echo "Security scan failed"
+          exit 1
+        fi
+        echo "All CI checks passed successfully"

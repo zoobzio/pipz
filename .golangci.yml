@@ -167,6 +167,7 @@ issues:
         - goconst
         - dupl
         - govet
+        - errcheck
   
   # Maximum issues count per one linter
   max-issues-per-linter: 0

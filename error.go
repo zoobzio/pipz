@@ -126,8 +126,11 @@ func sanitizePanicMessage(panicValue interface{}) string {
 		return "panic occurred (message truncated for security)"
 	}
 
-	// Remove any potential stack trace information
-	if strings.Contains(msg, "goroutine") || strings.Contains(msg, "runtime.") {
+	// Remove any potential stack trace information and package addresses
+	if strings.Contains(msg, "goroutine") || strings.Contains(msg, "runtime.") ||
+		strings.Contains(msg, "sync.") || strings.Contains(msg, "net.") ||
+		strings.Contains(msg, "os.") || strings.Contains(msg, "fmt.") ||
+		strings.Contains(msg, "io.") {
 		return "panic occurred (stack trace sanitized)"
 	}
 

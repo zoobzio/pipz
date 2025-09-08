@@ -3,8 +3,10 @@ package pipz
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestHandle(t *testing.T) {
@@ -383,4 +385,308 @@ func TestHandle(t *testing.T) {
 			t.Errorf("expected %q, got %q", expectedMsg, panicErr.sanitized)
 		}
 	})
+
+	// High-value coverage improvement tests targeting specific execution paths
+	t.Run("Error Handler Execution Path Coverage", func(t *testing.T) {
+		t.Run("Pipeline Error Handler Execution", func(t *testing.T) {
+			// Test line 79: errorHandler.Process(ctx, pipeErr) for pipeline errors
+			var handlerCallCount int32
+			var capturedError *Error[int]
+			// Create a processor that returns pipeline error (Error[T])
+			failingSequence := NewSequence("failing-seq",
+				Apply("fail", func(_ context.Context, _ int) (int, error) {
+					return 0, errors.New("sequence processor failed")
+				}))
+			errorHandler := Effect("handler", func(_ context.Context, err *Error[int]) error {
+				atomic.AddInt32(&handlerCallCount, 1)
+				capturedError = err
+				return nil
+			})
+
+			handle := NewHandle("test-handle", failingSequence, errorHandler)
+			result, err := handle.Process(context.Background(), 42)
+
+			// Verify error pass-through
+			if err == nil {
+				t.Fatal("expected error from failing processor")
+			}
+			if result != 0 {
+				t.Errorf("expected zero result on error, got %d", result)
+			}
+
+			// Verify handler was called (line 79)
+			if atomic.LoadInt32(&handlerCallCount) != 1 {
+				t.Errorf("expected handler to be called once, got %d", handlerCallCount)
+			}
+
+			// Verify handler received properly structured error
+			if capturedError == nil {
+				t.Fatal("handler should have received error")
+			}
+			if capturedError.InputData != 42 {
+				t.Errorf("expected input data 42, got %d", capturedError.InputData)
+			}
+			if len(capturedError.Path) < 3 { // [test-handle, failing-seq, fail]
+				t.Errorf("expected path with 3+ elements, got %v", capturedError.Path)
+			}
+		})
+
+		t.Run("Non-Pipeline Error Handler Execution", func(t *testing.T) {
+			// Test line 93: errorHandler.Process(ctx, wrappedErr) for non-pipeline errors
+			var handlerCallCount int32
+			var capturedError *Error[int]
+
+			plainErr := errors.New("plain error")
+			processor := Apply("plain-fail", func(_ context.Context, _ int) (int, error) {
+				return 0, plainErr
+			})
+
+			errorHandler := Effect("wrapper-handler", func(_ context.Context, err *Error[int]) error {
+				atomic.AddInt32(&handlerCallCount, 1)
+				capturedError = err
+				return errors.New("handler processing error") // Handler error should be ignored
+			})
+
+			handle := NewHandle("wrapper-handle", processor, errorHandler)
+			result, err := handle.Process(context.Background(), 84)
+
+			// Verify original error passes through despite handler error
+			if !errors.Is(err, plainErr) {
+				t.Errorf("expected original error, got %v", err)
+			}
+			if result != 0 {
+				t.Errorf("expected zero result on error, got %d", result)
+			}
+
+			// Verify handler was called (line 93)
+			if atomic.LoadInt32(&handlerCallCount) != 1 {
+				t.Errorf("expected handler to be called once, got %d", handlerCallCount)
+			}
+
+			// Verify wrapped error structure
+			if capturedError == nil {
+				t.Fatal("handler should have received wrapped error")
+			}
+			if capturedError.InputData != 84 {
+				t.Errorf("expected input data 84, got %d", capturedError.InputData)
+			}
+			if !errors.Is(capturedError.Err, plainErr) {
+				t.Error("wrapped error should contain original error")
+			}
+			if len(capturedError.Path) != 2 {
+				t.Errorf("expected path [wrapper-handle, plain-fail], got %v", capturedError.Path)
+			}
+		})
+	})
+
+	t.Run("Concurrent Modification Safety", func(t *testing.T) {
+		t.Run("Concurrent Processor Swap During Processing", func(t *testing.T) {
+			// Test concurrent SetProcessor calls during active Process execution
+			slowProcessor := Apply("slow", func(ctx context.Context, n int) (int, error) {
+				select {
+				case <-time.After(100 * time.Millisecond):
+					return n * 2, nil
+				case <-ctx.Done():
+					return 0, ctx.Err()
+				}
+			})
+
+			fastProcessor := Transform("fast", func(_ context.Context, n int) int {
+				return n * 3
+			})
+
+			errorHandler := Effect("noop", func(_ context.Context, _ *Error[int]) error {
+				return nil
+			})
+
+			handle := NewHandle("concurrent-test", slowProcessor, errorHandler)
+
+			var wg sync.WaitGroup
+			results := make(chan int, 10)
+			errors := make(chan error, 10)
+
+			// Start multiple concurrent Process calls
+			for i := 0; i < 5; i++ {
+				wg.Add(1)
+				go func(input int) {
+					defer wg.Done()
+					result, err := handle.Process(context.Background(), input)
+					results <- result
+					errors <- err
+				}(i + 1)
+			}
+
+			// Concurrently modify the processor
+			time.Sleep(25 * time.Millisecond)
+			handle.SetProcessor(fastProcessor)
+
+			wg.Wait()
+			close(results)
+			close(errors)
+
+			// Verify all operations completed without race conditions
+			var resultCount, errorCount int
+			for result := range results {
+				if result > 0 {
+					resultCount++
+				}
+			}
+			for err := range errors {
+				if err != nil {
+					errorCount++
+				}
+			}
+
+			// Should have 5 results with no data races
+			if resultCount != 5 {
+				t.Errorf("expected 5 results, got %d", resultCount)
+			}
+		})
+
+		t.Run("Concurrent Handler Modification", func(t *testing.T) {
+			// Test concurrent SetErrorHandler during error processing
+			failingProcessor := Apply("fail", func(_ context.Context, _ int) (int, error) {
+				return 0, errors.New("processor error")
+			})
+
+			var handler1Calls, handler2Calls int32
+			handler1 := Effect("handler1", func(_ context.Context, _ *Error[int]) error {
+				atomic.AddInt32(&handler1Calls, 1)
+				time.Sleep(50 * time.Millisecond) // Slow handler
+				return nil
+			})
+
+			handler2 := Effect("handler2", func(_ context.Context, _ *Error[int]) error {
+				atomic.AddInt32(&handler2Calls, 1)
+				return nil
+			})
+
+			handle := NewHandle("handler-swap", failingProcessor, handler1)
+
+			var wg sync.WaitGroup
+
+			// Start processing
+			for i := 0; i < 3; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					_, _ = handle.Process(context.Background(), 42)
+				}()
+			}
+
+			// Swap handler during processing
+			time.Sleep(25 * time.Millisecond)
+			handle.SetErrorHandler(handler2)
+
+			wg.Wait()
+
+			// Both handlers should have been called
+			total := atomic.LoadInt32(&handler1Calls) + atomic.LoadInt32(&handler2Calls)
+			if total != 3 {
+				t.Errorf("expected 3 total handler calls, got %d", total)
+			}
+		})
+	})
+
+	t.Run("Name Concurrent Access", func(t *testing.T) {
+		processor := Transform("noop", func(_ context.Context, n int) int { return n })
+		errorHandler := Effect("noop", func(_ context.Context, _ *Error[int]) error { return nil })
+		handle := NewHandle("concurrent-name-test", processor, errorHandler)
+
+		var wg sync.WaitGroup
+		results := make(chan Name, 100)
+
+		// Concurrent Name() calls
+		for i := 0; i < 50; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				name := handle.Name()
+				results <- name
+			}()
+		}
+
+		// Concurrent processing
+		for i := 0; i < 50; i++ {
+			wg.Add(1)
+			go func(input int) {
+				defer wg.Done()
+				_, _ = handle.Process(context.Background(), input)
+				name := handle.Name() // Name during processing
+				results <- name
+			}(i)
+		}
+
+		wg.Wait()
+		close(results)
+
+		// All Name() calls should return consistent value
+		count := 0
+		for name := range results {
+			if name != "concurrent-name-test" {
+				t.Errorf("expected 'concurrent-name-test', got %q", name)
+			}
+			count++
+		}
+
+		if count != 100 {
+			t.Errorf("expected 100 name results, got %d", count)
+		}
+	})
+
+	t.Run("Non-Pipeline Error Processor Name Access Coverage", func(t *testing.T) {
+		// Test lines 84-86: h.mu.RLock() processorName := h.processor.Name() h.mu.RUnlock()
+		// This path is taken when handling non-pipeline errors
+		plainErr := errors.New("plain error")
+
+		// Create a processor that returns a plain error (not Error[T])
+		fakeProcessor := &plainErrorProcessorHandle[int]{
+			name: "name-access-test",
+			err:  plainErr,
+		}
+
+		var capturedError *Error[int]
+		errorHandler := Effect("capture", func(_ context.Context, err *Error[int]) error {
+			capturedError = err
+			return nil
+		})
+
+		handle := NewHandle("test-handle", fakeProcessor, errorHandler)
+
+		// Process should trigger non-pipeline error path and access processor name
+		result, err := handle.Process(context.Background(), 42)
+
+		if !errors.Is(err, plainErr) {
+			t.Errorf("expected original error, got %v", err)
+		}
+		if result != 0 {
+			t.Errorf("expected zero result, got %d", result)
+		}
+
+		// Verify that processor name was accessed (lines 84-86) and included in path
+		if capturedError == nil {
+			t.Fatal("error handler should have been called")
+		}
+		if len(capturedError.Path) != 2 {
+			t.Errorf("expected path length 2, got %d: %v", len(capturedError.Path), capturedError.Path)
+		}
+		if capturedError.Path[1] != "name-access-test" {
+			t.Errorf("expected processor name in path, got %v", capturedError.Path)
+		}
+	})
+}
+
+// plainErrorProcessorHandle for Handle tests - returns plain errors (not Error[T] types).
+type plainErrorProcessorHandle[T any] struct {
+	name Name
+	err  error
+}
+
+func (p *plainErrorProcessorHandle[T]) Process(_ context.Context, _ T) (T, error) {
+	var zero T
+	return zero, p.err
+}
+
+func (p *plainErrorProcessorHandle[T]) Name() Name {
+	return p.name
 }

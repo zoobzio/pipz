@@ -1,4 +1,4 @@
-.PHONY: test bench bench-all lint coverage clean all help test-examples run-example
+.PHONY: test bench bench-all lint coverage clean all help test-examples run-example test-integration test-benchmarks test-reliability test-all ci
 
 # Default target
 all: test lint
@@ -9,14 +9,19 @@ help:
 	@echo "========================"
 	@echo ""
 	@echo "Testing & Quality:"
-	@echo "  make test         - Run all tests with race detector"
-	@echo "  make test-examples- Run tests for all examples"
-	@echo "  make bench        - Run core library benchmarks"
-	@echo "  make bench-all    - Run all benchmarks (core + examples)"
-	@echo "  make lint         - Run linters"
-	@echo "  make lint-fix     - Run linters with auto-fix"
-	@echo "  make coverage     - Generate coverage report (HTML)"
-	@echo "  make check        - Run tests and lint (quick check)"
+	@echo "  make test            - Run unit tests with race detector"
+	@echo "  make test-examples   - Run tests for all examples"
+	@echo "  make test-integration- Run integration tests with race detector"
+	@echo "  make test-benchmarks - Run performance benchmarks"
+	@echo "  make test-reliability- Run reliability/resilience tests"
+	@echo "  make test-all        - Run all test suites (unit + integration + reliability)"
+	@echo "  make bench           - Run core library benchmarks"
+	@echo "  make bench-all       - Run all benchmarks (core + examples)"
+	@echo "  make lint            - Run linters"
+	@echo "  make lint-fix        - Run linters with auto-fix"
+	@echo "  make coverage        - Generate coverage report (HTML)"
+	@echo "  make check           - Run tests and lint (quick check)"
+	@echo "  make ci              - Full CI simulation (all tests + quality checks)"
 	@echo ""
 	@echo "Other:"
 	@echo "  make run-example EXAMPLE=name - Run an example's main.go"
@@ -110,6 +115,28 @@ install-tools:
 check: test lint
 	@echo "All checks passed!"
 
-# CI simulation - what CI runs
-ci: clean lint test coverage bench
-	@echo "CI simulation complete!"
+# Integration tests - component interaction verification
+test-integration:
+	@echo "Running integration tests..."
+	@go test -v -race -timeout=10m ./testing/integration/...
+
+# Benchmark tests - performance regression detection
+test-benchmarks:
+	@echo "Running all benchmarks..."
+	@go test -v -bench=. -benchmem -benchtime=1s -timeout=10m ./testing/benchmarks/...
+
+# Reliability tests - resilience pattern verification
+test-reliability:
+	@echo "Running reliability tests..."
+	@go test -v -race -timeout=10m -run TestResilience ./testing/integration/...
+	@go test -v -race -timeout=5m -run TestPanicRecovery ./testing/integration/...
+	@go test -v -race -timeout=10m -run TestResourceLeak ./testing/integration/...
+	@go test -v -race -timeout=5m -run TestConcurrentModification ./testing/integration/...
+
+# Comprehensive test suite - all tests with race detection
+test-all: test test-integration test-reliability
+	@echo "All test suites completed!"
+
+# CI simulation - what CI runs locally
+ci: clean lint test test-integration test-benchmarks test-reliability coverage
+	@echo "Full CI simulation complete!"

@@ -3,6 +3,7 @@ package benchmarks
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,11 +14,24 @@ import (
 // BenchmarkProcessors measures the performance of individual processor types.
 func BenchmarkProcessors(b *testing.B) {
 	ctx := context.Background()
-	data := ClonableInt(42)
+	data := ProfileUpdate{
+		UserID:    12345,
+		Field:     "username",
+		OldValue:  "olduser",
+		NewValue:  "newuser",
+		Timestamp: time.Now().Unix(),
+		Priority:  5,
+	}
 
 	b.Run("Transform", func(b *testing.B) {
-		processor := pipz.Transform("transform", func(_ context.Context, n ClonableInt) ClonableInt {
-			return n * 2
+		processor := pipz.Transform("transform", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+			// Simulate field validation and normalization
+			p.Field = strings.ToLower(strings.TrimSpace(p.Field))
+			p.Priority *= 2
+			if p.Priority > 10 {
+				p.Priority = 10
+			}
+			return p
 		})
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -32,8 +46,16 @@ func BenchmarkProcessors(b *testing.B) {
 	})
 
 	b.Run("Apply_Success", func(b *testing.B) {
-		processor := pipz.Apply("apply", func(_ context.Context, n ClonableInt) (ClonableInt, error) {
-			return n * 2, nil
+		processor := pipz.Apply("apply", func(_ context.Context, p ProfileUpdate) (ProfileUpdate, error) {
+			// Simulate validation with potential error
+			if strings.TrimSpace(p.Field) == "" {
+				return p, errors.New("field cannot be empty")
+			}
+			p.Priority *= 2
+			if p.Priority > 10 {
+				p.Priority = 10
+			}
+			return p, nil
 		})
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -48,8 +70,8 @@ func BenchmarkProcessors(b *testing.B) {
 	})
 
 	b.Run("Apply_Error", func(b *testing.B) {
-		processor := pipz.Apply("apply-error", func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
-			return 0, errors.New("test error")
+		processor := pipz.Apply("apply-error", func(_ context.Context, p ProfileUpdate) (ProfileUpdate, error) {
+			return p, errors.New("validation failed: invalid field format")
 		})
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -62,7 +84,12 @@ func BenchmarkProcessors(b *testing.B) {
 	})
 
 	b.Run("Effect", func(b *testing.B) {
-		processor := pipz.Effect("effect", func(_ context.Context, _ ClonableInt) error {
+		processor := pipz.Effect("effect", func(_ context.Context, p ProfileUpdate) error {
+			// Simulate logging or audit effect
+			if p.Priority > 8 {
+				// High priority updates need extra logging
+				_ = strings.ToUpper(p.Field) // Simulate log formatting
+			}
 			return nil
 		})
 		b.ResetTimer()
@@ -78,8 +105,15 @@ func BenchmarkProcessors(b *testing.B) {
 	})
 
 	b.Run("Enrich", func(b *testing.B) {
-		processor := pipz.Enrich("enrich", func(_ context.Context, n ClonableInt) (ClonableInt, error) {
-			return n + 100, nil
+		processor := pipz.Enrich("enrich", func(_ context.Context, p ProfileUpdate) (ProfileUpdate, error) {
+			// Simulate enrichment with additional data
+			if p.Field == "email" {
+				p.Priority += 3 // Email updates are higher priority
+			}
+			if p.Timestamp == 0 {
+				p.Timestamp = time.Now().Unix()
+			}
+			return p, nil
 		})
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -123,14 +157,34 @@ func BenchmarkProcessors(b *testing.B) {
 // BenchmarkConnectors measures the performance of connector types.
 func BenchmarkConnectors(b *testing.B) {
 	ctx := context.Background()
-	data := ClonableInt(42)
+	data := ProfileUpdate{
+		UserID:    12345,
+		Field:     "email",
+		OldValue:  "old@example.com",
+		NewValue:  "new@example.com",
+		Timestamp: 0,
+		Priority:  5,
+	}
 
 	// Create simple processors for composition
-	double := pipz.Transform("double", func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 })
-	add10 := pipz.Transform("add10", func(_ context.Context, n ClonableInt) ClonableInt { return n + 10 })
+	validate := pipz.Transform("validate", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+		if p.Priority < 0 {
+			p.Priority = 0
+		}
+		if p.Priority > 10 {
+			p.Priority = 10
+		}
+		return p
+	})
+	enrich := pipz.Transform("enrich", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+		if p.Timestamp == 0 {
+			p.Timestamp = time.Now().Unix()
+		}
+		return p
+	})
 
 	b.Run("Sequence_Short", func(b *testing.B) {
-		seq := pipz.NewSequence("short", double, add10)
+		seq := pipz.NewSequence("short", validate, enrich)
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -144,9 +198,12 @@ func BenchmarkConnectors(b *testing.B) {
 	})
 
 	b.Run("Sequence_Long", func(b *testing.B) {
-		processors := make([]pipz.Chainable[ClonableInt], 10)
+		processors := make([]pipz.Chainable[ProfileUpdate], 10)
 		for i := 0; i < 10; i++ {
-			processors[i] = pipz.Transform("step", func(_ context.Context, n ClonableInt) ClonableInt { return n + 1 })
+			processors[i] = pipz.Transform("step", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+				p.Priority = (p.Priority + 1) % 11 // Cycle priority 0-10
+				return p
+			})
 		}
 		seq := pipz.NewSequence("long", processors...)
 		b.ResetTimer()
@@ -162,7 +219,7 @@ func BenchmarkConnectors(b *testing.B) {
 	})
 
 	b.Run("Concurrent_Two", func(b *testing.B) {
-		concurrent := pipz.NewConcurrent("concurrent", double, add10)
+		concurrent := pipz.NewConcurrent("concurrent", validate, enrich)
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -176,7 +233,7 @@ func BenchmarkConnectors(b *testing.B) {
 	})
 
 	b.Run("Race_Two", func(b *testing.B) {
-		race := pipz.NewRace("race", double, add10)
+		race := pipz.NewRace("race", validate, enrich)
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -191,8 +248,8 @@ func BenchmarkConnectors(b *testing.B) {
 
 	b.Run("Contest_First_Wins", func(b *testing.B) {
 		contest := pipz.NewContest("contest",
-			func(_ context.Context, n ClonableInt) bool { return n > 0 },
-			double, add10,
+			func(_ context.Context, p ProfileUpdate) bool { return p.Priority > 5 },
+			validate, enrich,
 		)
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -207,7 +264,7 @@ func BenchmarkConnectors(b *testing.B) {
 	})
 
 	b.Run("Fallback_Primary_Success", func(b *testing.B) {
-		fallback := pipz.NewFallback("fallback", double, add10)
+		fallback := pipz.NewFallback("fallback", validate, enrich)
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -221,10 +278,10 @@ func BenchmarkConnectors(b *testing.B) {
 	})
 
 	b.Run("Fallback_Primary_Fails", func(b *testing.B) {
-		failing := pipz.Apply("fail", func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
-			return 0, errors.New("always fails")
+		failing := pipz.Apply("fail", func(_ context.Context, p ProfileUpdate) (ProfileUpdate, error) {
+			return p, errors.New("validation failed")
 		})
-		fallback := pipz.NewFallback("fallback", failing, double)
+		fallback := pipz.NewFallback("fallback", failing, validate)
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -241,9 +298,22 @@ func BenchmarkConnectors(b *testing.B) {
 // BenchmarkStatefulConnectors measures performance of stateful connectors.
 func BenchmarkStatefulConnectors(b *testing.B) {
 	ctx := context.Background()
-	data := ClonableInt(42)
+	data := ProfileUpdate{
+		UserID:    12345,
+		Field:     "email",
+		OldValue:  "old@example.com",
+		NewValue:  "new@example.com",
+		Timestamp: 0,
+		Priority:  5,
+	}
 
-	processor := pipz.Transform("processor", func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 })
+	processor := pipz.Transform("processor", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+		p.Priority *= 2
+		if p.Priority > 10 {
+			p.Priority = 10
+		}
+		return p
+	})
 
 	b.Run("CircuitBreaker_Closed", func(b *testing.B) {
 		cb := pipz.NewCircuitBreaker("cb", processor, 5, time.Minute)
@@ -261,8 +331,8 @@ func BenchmarkStatefulConnectors(b *testing.B) {
 
 	b.Run("CircuitBreaker_Open", func(b *testing.B) {
 		// Create a circuit breaker and force it open
-		failingProcessor := pipz.Apply("fail", func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
-			return 0, errors.New("forced failure")
+		failingProcessor := pipz.Apply("fail", func(_ context.Context, p ProfileUpdate) (ProfileUpdate, error) {
+			return p, errors.New("service unavailable")
 		})
 		cb := pipz.NewCircuitBreaker("cb", failingProcessor, 1, time.Minute)
 
@@ -282,7 +352,7 @@ func BenchmarkStatefulConnectors(b *testing.B) {
 	b.Run("RateLimiter_Within_Limit", func(b *testing.B) {
 		// Create rate-limited sequence
 		limitedPipeline := pipz.NewSequence("rate-limited",
-			pipz.NewRateLimiter[ClonableInt]("limiter", 1000000, 100), // Very high limit
+			pipz.NewRateLimiter[ProfileUpdate]("limiter", 1000000, 100), // Very high limit
 			processor,
 		)
 		b.ResetTimer()
