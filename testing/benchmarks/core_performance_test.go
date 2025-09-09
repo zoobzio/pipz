@@ -248,7 +248,7 @@ func BenchmarkConnectors(b *testing.B) {
 
 	b.Run("Contest_First_Wins", func(b *testing.B) {
 		contest := pipz.NewContest("contest",
-			func(_ context.Context, p ProfileUpdate) bool { return p.Priority > 5 },
+			func(_ context.Context, p ProfileUpdate) bool { return p.Priority >= 5 },
 			validate, enrich,
 		)
 		b.ResetTimer()

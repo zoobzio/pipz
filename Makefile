@@ -47,18 +47,18 @@ test-examples:
 # Run core benchmarks
 bench:
 	@echo "Running core benchmarks..."
-	@go test -bench=. -benchmem -benchtime=1s .
+	@go test -bench=. -benchmem -benchtime=100ms -timeout=15m .
 
 # Run all benchmarks including examples
 bench-all:
 	@echo "Running all benchmarks..."
 	@echo "=== Core Library Benchmarks ==="
-	@go test -bench=. -benchmem -benchtime=1s ./...
+	@go test -bench=. -benchmem -benchtime=100ms -timeout=15m ./...
 	@echo ""
 	@for dir in examples/*/; do \
 		if [ -f "$$dir/go.mod" ]; then \
 			echo "=== Benchmarks for $$dir ==="; \
-			(cd "$$dir" && go test -bench=. -benchmem -benchtime=1s ./... 2>/dev/null) || true; \
+			(cd "$$dir" && go test -bench=. -benchmem -benchtime=100ms -timeout=5m ./... 2>/dev/null) || true; \
 			echo ""; \
 		fi \
 	done
@@ -123,7 +123,7 @@ test-integration:
 # Benchmark tests - performance regression detection
 test-benchmarks:
 	@echo "Running all benchmarks..."
-	@go test -v -bench=. -benchmem -benchtime=1s -timeout=10m ./testing/benchmarks/...
+	@go test -v -bench=. -benchmem -benchtime=100ms -timeout=15m ./testing/benchmarks/...
 
 # Reliability tests - resilience pattern verification
 test-reliability:

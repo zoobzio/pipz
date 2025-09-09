@@ -2,8 +2,6 @@ module github.com/zoobzio/pipz
 
 go 1.23.0
 
-toolchain go1.24.5
-
 retract (
 	v1.0.1 // Not part of the package
 	v1.0.0 // Not part of the package
