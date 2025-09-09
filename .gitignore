@@ -47,3 +47,6 @@ pipz
 
 # Remarks 
 .remarks
+
+# GoReleaser output directory
+.dist/
