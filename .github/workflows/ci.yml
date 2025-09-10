@@ -247,6 +247,9 @@ jobs:
   security:
     name: Security Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
     - uses: actions/checkout@v4
     
@@ -262,8 +265,19 @@ jobs:
         
     - name: Upload SARIF file
       uses: github/codeql-action/upload-sarif@v3
+      if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+      continue-on-error: true
       with:
         sarif_file: gosec-results.sarif
+        wait-for-processing: true
+        
+    - name: Upload security results as artifact
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: gosec-results
+        path: gosec-results.sarif
+        retention-days: 7
 
   # Overall CI status check
   ci-complete:
