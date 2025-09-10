@@ -400,4 +400,4 @@ BenchmarkWithCaching-8           5000000       237 ns/op       0 B/op       0 al
 
 - [Testing Guide](./testing.md) - Performance testing strategies
 - [Best Practices](./best-practices.md) - Production optimization
-- [Error Recovery](../concepts/error-recovery.md) - Performance impact of error handling
+- [Error Recovery](./safety-reliability.md) - Performance impact of error handling

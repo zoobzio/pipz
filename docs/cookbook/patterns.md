@@ -685,5 +685,5 @@ asyncAnalytics := NewAsyncProcessor("async-analytics",
 ## Next Steps
 
 - Explore the [examples](../../examples/) directory for complete implementations
-- Review [performance guide](./performance.md) for optimization tips
-- Check [error handling](../concepts/error-handling.md) for resilience patterns
+- Review [performance guide](../guides/performance.md) for optimization tips
+- Check [Safety and Reliability](../guides/safety-reliability.md) for resilience patterns

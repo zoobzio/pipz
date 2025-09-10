@@ -897,4 +897,4 @@ func configureConnectors(breaker *pipz.CircuitBreaker[Request], limiter *pipz.Ra
 ## Next Steps
 
 - [Performance Guide](./performance.md) - Optimize for production
-- [Error Recovery](./error-recovery.md) - Advanced error patterns
+- [Error Recovery](./safety-reliability.md) - Advanced error patterns

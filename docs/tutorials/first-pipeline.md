@@ -495,6 +495,6 @@ func TestRegistrationPipeline(t *testing.T) {
 
 ## Next Steps
 
-- [Error Recovery Patterns](./error-recovery.md) - Advanced error handling
-- [Testing Pipelines](./testing.md) - Comprehensive testing strategies
-- [Performance Optimization](./performance.md) - Making pipelines fast
+- [Error Recovery Patterns](../guides/safety-reliability.md) - Advanced error handling
+- [Testing Pipelines](../guides/testing.md) - Comprehensive testing strategies
+- [Performance Optimization](../guides/performance.md) - Making pipelines fast

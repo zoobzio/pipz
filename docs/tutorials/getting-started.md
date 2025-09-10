@@ -492,11 +492,11 @@ A: pipz focuses on type safety, simplicity, and composability. It's lighter than
 A: pipz processes one item at a time. For streaming, wrap your stream processing in pipz processors or check the [Event Processing](../cookbook/event-processing.md) recipe.
 
 **Q: How do I handle errors in the middle of a pipeline?**  
-A: Use `Fallback` for recovery, `Handle` for cleanup, or check the [Error Handling](../guides/error-handling.md) guide.
+A: Use `Fallback` for recovery, `Handle` for cleanup, or check the [Safety and Reliability](../guides/safety-reliability.md) guide.
 
 ## Getting Help
 
-- Check the [Troubleshooting](../guides/troubleshooting.md) guide
+- Check the [Troubleshooting](../troubleshooting.md) guide
 - Browse [Examples](https://github.com/zoobzio/pipz/tree/main/examples)
 - Open an [Issue](https://github.com/zoobzio/pipz/issues) on GitHub
 

@@ -257,11 +257,11 @@ if err != nil {
 
 📚 **[Full Documentation](./docs/README.md)**
 
-- [Introduction](./docs/introduction.md) - Why pipz and core philosophy
-- [Quick Start Guide](./docs/quick-start.md) - Build your first pipeline
-- [Concepts](./docs/concepts/processors.md) - Deep dive into processors and connectors
+- [Introduction](./docs/learn/introduction.md) - Why pipz and core philosophy
+- [Quick Start Guide](./docs/tutorials/quickstart.md) - Build your first pipeline
+- [Concepts](./docs/learn/core-concepts.md) - Deep dive into processors and connectors
 - [Examples](./examples/) - Real-world implementations and patterns
-- [API Reference](./docs/api/) - Complete API documentation
+- [API Reference](./docs/reference/) - Complete API documentation
 
 ## Examples
 

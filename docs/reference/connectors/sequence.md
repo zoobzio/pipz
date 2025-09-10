@@ -303,6 +303,6 @@ func (etl *ETLProcessor) Process(ctx context.Context, record Record) (Record, er
 
 ## Next Steps
 
-- [Error Handling](./error-handling.md) - Handle failures in sequences
-- [Connectors](./connectors.md) - Other ways to compose processors
-- [Testing](../guides/testing.md) - Test dynamic sequences
+- [Error Handling](../../guides/safety-reliability.md) - Handle failures in sequences
+- [Connector Selection](../../guides/connector-selection.md) - Choose the right connector for your use case
+- [Testing](../../guides/testing.md) - Test dynamic sequences

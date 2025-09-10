@@ -104,11 +104,10 @@ errorRecovery := pipz.NewSequence[*pipz.Error[Order]](PipelineErrorRecovery,
 robustPipeline := pipz.NewHandle(HandleOrderProcessing, mainPipeline, errorRecovery)
 ```
 
-This pattern enables type-safe, composable, and testable error handling that scales with your application complexity. See [Error Handling](./concepts/error-handling.md) for the full power of this approach.
+This pattern enables type-safe, composable, and testable error handling that scales with your application complexity. See [Safety and Reliability](../guides/safety-reliability.md) for the full power of this approach.
 
 ## Next Steps
 
-- [Quick Start](./quick-start.md) - Build your first pipeline in minutes
-- [Installation](./installation.md) - Get pipz installed
-- [Composition Patterns](./patterns/composition.md) - Learn the core pattern for building composable systems
-- [Concepts](./concepts/processors.md) - Deep dive into pipz concepts
+- [Quick Start](../tutorials/quickstart.md) - Build your first pipeline in minutes
+- [Installation](../tutorials/installation.md) - Get pipz installed
+- [Core Concepts](./core-concepts.md) - Deep dive into pipz concepts and composition patterns
