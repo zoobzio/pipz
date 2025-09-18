@@ -20,6 +20,33 @@ func NewCircuitBreaker[T any](name Name, processor Chainable[T], failureThreshol
 
 Returns a `*CircuitBreaker[T]` that implements `Chainable[T]`.
 
+## Testing Configuration
+
+### WithClock
+
+```go
+func (cb *CircuitBreaker[T]) WithClock(clock clockz.Clock) *CircuitBreaker[T]
+```
+
+Sets a custom clock implementation for testing purposes. This method enables controlled time manipulation in tests using `clockz.FakeClock`.
+
+**Parameters:**
+- `clock` (`clockz.Clock`) - Clock implementation to use
+
+**Returns:**
+Returns the same connector instance for method chaining.
+
+**Example:**
+```go
+// Use fake clock in tests
+fakeClock := clockz.NewFakeClock()
+cb := pipz.NewCircuitBreaker("test", processor, 3, 30*time.Second).
+    WithClock(fakeClock)
+
+// Advance time in test to trigger state transitions
+fakeClock.Advance(31 * time.Second)
+```
+
 ## Behavior
 
 ### Circuit States

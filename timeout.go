@@ -5,6 +5,8 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/zoobzio/clockz"
 )
 
 // Timeout enforces a timeout on the processor's execution.
@@ -35,6 +37,7 @@ import (
 //	)
 type Timeout[T any] struct {
 	processor Chainable[T]
+	clock     clockz.Clock
 	name      Name
 	duration  time.Duration
 	mu        sync.RWMutex
@@ -56,11 +59,12 @@ func (t *Timeout[T]) Process(ctx context.Context, data T) (result T, err error) 
 	t.mu.RLock()
 	processor := t.processor
 	duration := t.duration
+	clock := t.getClock()
 	t.mu.RUnlock()
 
 	// Add this timeout to the processing path
 
-	ctx, cancel := context.WithTimeout(ctx, duration)
+	ctx, cancel := clock.WithTimeout(ctx, duration)
 	defer cancel()
 
 	// Channel to receive the result from the goroutine
@@ -152,4 +156,20 @@ func (t *Timeout[T]) Name() Name {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.name
+}
+
+// WithClock sets a custom clock for testing.
+func (t *Timeout[T]) WithClock(clock clockz.Clock) *Timeout[T] {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.clock = clock
+	return t
+}
+
+// getClock returns the clock to use.
+func (t *Timeout[T]) getClock() clockz.Clock {
+	if t.clock == nil {
+		return clockz.RealClock
+	}
+	return t.clock
 }

@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/zoobzio/clockz"
 )
 
 func TestCircuitBreaker(t *testing.T) {
@@ -138,6 +140,57 @@ func TestCircuitBreaker(t *testing.T) {
 		}
 	})
 
+	t.Run("Deterministic State Transitions with Clock", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+		failureCount := 0
+
+		// Processor that fails first 2 times, then succeeds
+		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+			failureCount++
+			if failureCount <= 2 {
+				return 0, errors.New("still failing")
+			}
+			return n * 2, nil // Success after 2 failures
+		})
+
+		breaker := NewCircuitBreaker("test-breaker", processor, 2, 100*time.Millisecond).WithClock(clock)
+
+		// Trigger circuit open with 2 failures
+		for i := 0; i < 2; i++ {
+			_, err := breaker.Process(context.Background(), i)
+			if err == nil {
+				t.Errorf("expected error on attempt %d", i)
+			}
+		}
+
+		if state := breaker.GetState(); state != "open" {
+			t.Fatalf("expected open state, got %s", state)
+		}
+
+		// Advance clock to simulate reset timeout (need > timeout, not ==)
+		clock.Advance(101 * time.Millisecond)
+		clock.BlockUntilReady()
+
+		// GetState should show half-open potential after clock advance
+		if state := breaker.GetState(); state != "half-open" {
+			t.Errorf("expected half-open state after timeout, got %s", state)
+		}
+
+		// Third attempt should succeed and close circuit (state transition happens during Process)
+		result, err := breaker.Process(context.Background(), 10)
+		if err != nil {
+			t.Fatalf("unexpected error on recovery: %v", err)
+		}
+		if result != 20 {
+			t.Errorf("expected 20, got %d", result)
+		}
+
+		// Circuit should be closed after successful recovery
+		if state := breaker.GetState(); state != "closed" {
+			t.Errorf("expected closed state after recovery, got %s", state)
+		}
+	})
+
 	t.Run("Success Threshold for Recovery", func(t *testing.T) {
 		successes := 0
 		processor := Apply("test", func(_ context.Context, n int) (int, error) {
@@ -176,6 +229,64 @@ func TestCircuitBreaker(t *testing.T) {
 
 		// Third success should close it
 		_, err := breaker.Process(context.Background(), 2)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if state := breaker.GetState(); state != "closed" {
+			t.Errorf("expected closed state after 3 successes, got %s", state)
+		}
+	})
+
+	t.Run("Deterministic Success Threshold with Clock", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+
+		// Simple processor: negative input = error, positive = success
+		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+			if n < 0 {
+				return 0, errors.New("negative input")
+			}
+			return n, nil
+		})
+
+		breaker := NewCircuitBreaker("test-breaker", processor, 2, 100*time.Millisecond).WithClock(clock)
+		breaker.SetSuccessThreshold(3) // Need 3 successes to close
+
+		// Open the circuit with 2 failures
+		for i := 0; i < 2; i++ {
+			_, err := breaker.Process(context.Background(), -1)
+			if err == nil {
+				t.Errorf("expected error on attempt %d", i)
+			}
+		}
+
+		if state := breaker.GetState(); state != "open" {
+			t.Fatalf("expected open state, got %s", state)
+		}
+
+		// Advance clock to simulate reset timeout (need > timeout, not ==)
+		clock.Advance(101 * time.Millisecond)
+		clock.BlockUntilReady()
+
+		// GetState should show half-open potential after clock advance
+		if state := breaker.GetState(); state != "half-open" {
+			t.Errorf("expected half-open state after timeout, got %s", state)
+		}
+
+		// First two successes shouldn't close the circuit (using positive values for success)
+		for i := 1; i <= 2; i++ {
+			_, err := breaker.Process(context.Background(), i)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			// Should still be half-open
+			if state := breaker.GetState(); state != "half-open" {
+				t.Errorf("expected half-open state after %d successes, got %s", i, state)
+			}
+		}
+
+		// Third success should close it
+		_, err := breaker.Process(context.Background(), 3)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -526,6 +637,64 @@ func TestCircuitBreaker(t *testing.T) {
 		}
 	})
 
+	t.Run("Deterministic Generation Race Condition with Clock", func(t *testing.T) {
+		// This test ensures that if the generation changes while a request is being processed,
+		// the result of that request doesn't affect the new generation's state
+		clock := clockz.NewFakeClock()
+		var processingDelay atomic.Bool
+		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+			if processingDelay.Load() {
+				time.Sleep(100 * time.Millisecond) // Real sleep for async processing
+			}
+			if n < 0 {
+				return 0, errors.New("negative input")
+			}
+			return n, nil
+		})
+
+		breaker := NewCircuitBreaker("test-breaker", processor, 2, 50*time.Millisecond).WithClock(clock)
+
+		// Open the circuit
+		for i := 0; i < 2; i++ {
+			_, err := breaker.Process(context.Background(), -1)
+			if err == nil {
+				t.Error("expected error")
+			}
+		}
+
+		if state := breaker.GetState(); state != "open" {
+			t.Fatalf("expected open state, got %s", state)
+		}
+
+		// Advance clock to simulate reset timeout (need > timeout, not ==)
+		clock.Advance(51 * time.Millisecond)
+		clock.BlockUntilReady()
+
+		// Start a slow request in half-open state
+		processingDelay.Store(true)
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = breaker.Process(context.Background(), 1)
+		}()
+
+		// While the slow request is processing, reset the circuit (changes generation)
+		time.Sleep(10 * time.Millisecond) // Real sleep for async processing
+		breaker.Reset()
+
+		// The slow request should complete but not affect the new generation's state
+		wg.Wait()
+
+		// Circuit should still be closed after reset, regardless of slow request outcome
+		if state := breaker.GetState(); state != "closed" {
+			t.Errorf("expected closed state after reset, got %s", state)
+		}
+
+		// Note: slow request might fail due to generation change, which is expected behavior
+		// The important part is that the circuit remains closed after reset
+	})
+
 	t.Run("CircuitBreaker panic recovery", func(t *testing.T) {
 		calls := 0
 		processor := Apply("panic_processor", func(_ context.Context, n int) (int, error) {
@@ -582,6 +751,63 @@ func TestCircuitBreaker(t *testing.T) {
 		}
 	})
 
+	t.Run("Deterministic CircuitBreaker panic recovery with Clock", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+		calls := 0
+		processor := Apply("panic_processor", func(_ context.Context, n int) (int, error) {
+			calls++
+			if calls < 2 {
+				panic("circuit breaker processor panic")
+			}
+			return n * 2, nil
+		})
+
+		breaker := NewCircuitBreaker("panic_breaker", processor, 3, 100*time.Millisecond).WithClock(clock)
+		result, err := breaker.Process(context.Background(), 42)
+
+		// First call should panic and be recovered as error, incrementing failure count
+		// When panic is recovered, the zero value is returned, not original input
+		if result != 0 {
+			t.Errorf("expected zero value 0, got %d", result)
+		}
+
+		var pipzErr *Error[int]
+		if !errors.As(err, &pipzErr) {
+			t.Fatal("expected pipz.Error")
+		}
+
+		if pipzErr.Path[0] != "panic_breaker" {
+			t.Errorf("expected path to start with 'panic_breaker', got %v", pipzErr.Path)
+		}
+
+		if pipzErr.InputData != 42 {
+			t.Errorf("expected input data 42, got %d", pipzErr.InputData)
+		}
+
+		if calls != 1 {
+			t.Errorf("expected 1 call (panic recovered), got %d", calls)
+		}
+
+		// Circuit should still be closed (1 failure < 3 threshold)
+		if state := breaker.GetState(); state != "closed" {
+			t.Errorf("expected closed state after single panic, got %s", state)
+		}
+
+		// Second call should succeed
+		result2, err2 := breaker.Process(context.Background(), 42)
+		if err2 != nil {
+			t.Fatalf("unexpected error on second call: %v", err2)
+		}
+
+		if result2 != 84 {
+			t.Errorf("expected 84 on second call, got %d", result2)
+		}
+
+		if calls != 2 {
+			t.Errorf("expected 2 calls total, got %d", calls)
+		}
+	})
+
 	t.Run("CircuitBreaker opens on repeated panics", func(t *testing.T) {
 		calls := 0
 		processor := Apply("panic_processor", func(_ context.Context, _ int) (int, error) {
@@ -590,6 +816,54 @@ func TestCircuitBreaker(t *testing.T) {
 		})
 
 		breaker := NewCircuitBreaker("panic_breaker", processor, 3, 100*time.Millisecond)
+
+		// Make 3 calls to open the circuit
+		for i := 0; i < 3; i++ {
+			result, err := breaker.Process(context.Background(), 42)
+			if result != 0 {
+				t.Errorf("expected zero value 0 on call %d, got %d", i+1, result)
+			}
+			if err == nil {
+				t.Errorf("expected error on call %d", i+1)
+			}
+		}
+
+		if calls != 3 {
+			t.Errorf("expected 3 calls before circuit opens, got %d", calls)
+		}
+
+		// Circuit should now be open
+		if state := breaker.GetState(); state != "open" {
+			t.Errorf("expected open state after 3 panics, got %s", state)
+		}
+
+		// Fourth call should be rejected without calling processor
+		result, err := breaker.Process(context.Background(), 42)
+		if result != 42 {
+			t.Errorf("expected original input 42 (circuit open), got %d", result)
+		}
+		if err == nil {
+			t.Fatal("expected circuit open error")
+		}
+		if !strings.Contains(err.Error(), "circuit breaker is open") {
+			t.Errorf("expected circuit open error, got: %v", err)
+		}
+
+		// Processor should not have been called again
+		if calls != 3 {
+			t.Errorf("expected calls to remain at 3 after circuit open, got %d", calls)
+		}
+	})
+
+	t.Run("Deterministic CircuitBreaker opens on repeated panics with Clock", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+		calls := 0
+		processor := Apply("panic_processor", func(_ context.Context, _ int) (int, error) {
+			calls++
+			panic("circuit breaker processor panic")
+		})
+
+		breaker := NewCircuitBreaker("panic_breaker", processor, 3, 100*time.Millisecond).WithClock(clock)
 
 		// Make 3 calls to open the circuit
 		for i := 0; i < 3; i++ {
@@ -688,6 +962,32 @@ func BenchmarkCircuitBreaker(b *testing.B) {
 			// Occasionally wait for reset timeout
 			if i%100 == 0 {
 				time.Sleep(60 * time.Millisecond)
+			}
+		}
+	})
+
+	b.Run("State Transitions with Clock", func(b *testing.B) {
+		clock := clockz.NewFakeClock()
+		var shouldFail atomic.Bool
+		processor := Apply("bench", func(_ context.Context, n int) (int, error) {
+			if shouldFail.Load() {
+				return 0, errors.New("failure")
+			}
+			return n, nil
+		})
+		breaker := NewCircuitBreaker("bench-breaker", processor, 2, 50*time.Millisecond).WithClock(clock)
+		ctx := context.Background()
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Alternate between success and failure patterns
+			shouldFail.Store(i%10 < 3)
+			_, err := breaker.Process(ctx, i)
+			_ = err // Intentionally ignore error in benchmark
+
+			// Occasionally advance clock instead of sleeping
+			if i%100 == 0 {
+				clock.Advance(60 * time.Millisecond)
 			}
 		}
 	})

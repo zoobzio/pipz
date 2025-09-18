@@ -27,6 +27,33 @@ func NewWorkerPool[T Cloner[T]](name Name, workers int, processors ...Chainable[
 
 Returns a `*WorkerPool[T]` that implements `Chainable[T]`.
 
+## Testing Configuration
+
+### WithClock
+
+```go
+func (w *WorkerPool[T]) WithClock(clock clockz.Clock) *WorkerPool[T]
+```
+
+Sets a custom clock implementation for testing purposes. This method enables controlled time manipulation in tests using `clockz.FakeClock`.
+
+**Parameters:**
+- `clock` (`clockz.Clock`) - Clock implementation to use
+
+**Returns:**
+Returns the same connector instance for method chaining.
+
+**Example:**
+```go
+// Use fake clock in tests
+fakeClock := clockz.NewFakeClock()
+pool := pipz.NewWorkerPool("test", 3, processor1, processor2).
+    WithClock(fakeClock)
+
+// Advance time in test for timeout testing
+fakeClock.Advance(5 * time.Second)
+```
+
 ## Behavior
 
 - **Bounded parallelism** - Limits concurrent execution to worker count

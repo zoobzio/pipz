@@ -7,6 +7,7 @@ Comprehensive guide to testing pipelines with the pipz testing utilities, best p
 - [MockProcessor - Testing Pipeline Behavior](#mockprocessor---testing-pipeline-behavior)
 - [ChaosProcessor - Resilience Testing](#chaosprocessor---resilience-testing)
 - [Assertion Helpers](#assertion-helpers)
+- [Testing Time-Dependent Components](#testing-time-dependent-components)
 - [Test Organization Strategy](#test-organization-strategy)
 - [Testing Best Practices](#testing-best-practices)
 - [Common Testing Patterns](#common-testing-patterns)
@@ -464,6 +465,29 @@ func TestProcessorPerformance(t *testing.T) {
     assert.GreaterOrEqual(t, duration, 10*time.Millisecond)
 }
 ```
+
+## Testing Time-Dependent Components
+
+For connectors that depend on time (Timeout, Backoff, CircuitBreaker, RateLimiter, WorkerPool), use clockz for deterministic testing:
+
+```go
+func TestTimeoutWithFakeClock(t *testing.T) {
+    clock := clockz.NewFakeClock()
+    
+    timeout := pipz.NewTimeout("test", processor, 5*time.Second).
+        WithClock(clock)
+    
+    // Start processing in background
+    go timeout.Process(ctx, data)
+    
+    // Advance clock to trigger timeout
+    clock.Advance(6 * time.Second)
+    
+    // Verify timeout behavior
+}
+```
+
+For detailed clockz usage, see: https://github.com/zoobzio/clockz
 
 ## Test Organization Strategy
 

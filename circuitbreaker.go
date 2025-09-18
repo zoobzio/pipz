@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/zoobzio/clockz"
 )
 
 const (
@@ -96,15 +98,16 @@ const (
 type CircuitBreaker[T any] struct {
 	lastFailTime     time.Time
 	processor        Chainable[T]
+	clock            clockz.Clock
 	name             Name
 	state            string
+	mu               sync.Mutex
 	resetTimeout     time.Duration
 	generation       uint64
 	failureThreshold int
 	successThreshold int
 	failures         int
 	successes        int
-	mu               sync.Mutex
 }
 
 // NewCircuitBreaker creates a new CircuitBreaker connector.
@@ -131,7 +134,8 @@ func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err
 	cb.mu.Lock()
 
 	// Check if we should transition from open to half-open
-	if cb.state == stateOpen && time.Since(cb.lastFailTime) > cb.resetTimeout {
+	clock := cb.getClock()
+	if cb.state == stateOpen && clock.Since(cb.lastFailTime) > cb.resetTimeout {
 		cb.state = stateHalfOpen
 		cb.failures = 0
 		cb.successes = 0
@@ -149,7 +153,7 @@ func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err
 			Err:       fmt.Errorf("circuit breaker is open"),
 			InputData: data,
 			Path:      []Name{cb.name},
-			Timestamp: time.Now(),
+			Timestamp: cb.getClock().Now(),
 		}
 	}
 
@@ -180,7 +184,7 @@ func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err
 			Err:       err,
 			InputData: data,
 			Path:      []Name{cb.name},
-			Timestamp: time.Now(),
+			Timestamp: cb.getClock().Now(),
 		}
 	}
 
@@ -207,7 +211,7 @@ func (cb *CircuitBreaker[T]) onSuccess() {
 
 // onFailure handles failed request.
 func (cb *CircuitBreaker[T]) onFailure() {
-	cb.lastFailTime = time.Now()
+	cb.lastFailTime = cb.getClock().Now()
 
 	switch cb.state {
 	case stateClosed:
@@ -260,7 +264,7 @@ func (cb *CircuitBreaker[T]) GetState() string {
 	defer cb.mu.Unlock()
 
 	// Check for automatic transition to half-open
-	if cb.state == stateOpen && time.Since(cb.lastFailTime) > cb.resetTimeout {
+	if cb.state == stateOpen && cb.getClock().Since(cb.lastFailTime) > cb.resetTimeout {
 		return stateHalfOpen
 	}
 
@@ -297,6 +301,22 @@ func (cb *CircuitBreaker[T]) Reset() *CircuitBreaker[T] {
 	cb.successes = 0
 	cb.generation++
 	return cb
+}
+
+// WithClock sets a custom clock for testing.
+func (cb *CircuitBreaker[T]) WithClock(clock clockz.Clock) *CircuitBreaker[T] {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	cb.clock = clock
+	return cb
+}
+
+// getClock returns the clock to use.
+func (cb *CircuitBreaker[T]) getClock() clockz.Clock {
+	if cb.clock == nil {
+		return clockz.RealClock
+	}
+	return cb.clock
 }
 
 // Name returns the name of this connector.

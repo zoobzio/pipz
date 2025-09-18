@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/zoobzio/clockz"
 )
 
 func TestRetry(t *testing.T) {
@@ -120,6 +122,7 @@ func TestRetry(t *testing.T) {
 		if retry.GetMaxAttempts() != 1 {
 			t.Errorf("expected 1 (minimum), got %d", retry.GetMaxAttempts())
 		}
+
 	})
 
 	t.Run("Name Method", func(t *testing.T) {
@@ -268,7 +271,60 @@ func TestBackoff(t *testing.T) {
 		}
 	})
 
-	t.Run("Backoff Timing", func(t *testing.T) {
+	t.Run("Backoff Timing With Clock", func(t *testing.T) {
+		var calls int32
+		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+			atomic.AddInt32(&calls, 1)
+			if atomic.LoadInt32(&calls) < 3 {
+				return 0, errors.New("temporary error")
+			}
+			return n * 2, nil
+		})
+
+		clock := clockz.NewFakeClock()
+		backoff := NewBackoff("test-backoff", processor, 3, 50*time.Millisecond).WithClock(clock)
+
+		// Run in goroutine so we can advance the clock
+		done := make(chan struct{})
+		var result int
+		var err error
+		go func() {
+			result, err = backoff.Process(context.Background(), 5)
+			close(done)
+		}()
+
+		// Allow goroutine to start
+		time.Sleep(10 * time.Millisecond)
+
+		// First retry delay: 50ms
+		clock.Advance(50 * time.Millisecond)
+		clock.BlockUntilReady()
+		time.Sleep(10 * time.Millisecond) // Let goroutine process timer
+
+		// Second retry delay: 100ms (exponential backoff)
+		clock.Advance(100 * time.Millisecond)
+		clock.BlockUntilReady()
+		time.Sleep(10 * time.Millisecond) // Let goroutine process timer
+
+		// Wait for completion with timeout
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("test timed out")
+		}
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result != 10 {
+			t.Errorf("expected 10, got %d", result)
+		}
+		if atomic.LoadInt32(&calls) != 3 {
+			t.Errorf("expected 3 calls, got %d", atomic.LoadInt32(&calls))
+		}
+	})
+
+	t.Run("Backoff Timing Without Clock", func(t *testing.T) {
 		var calls int32
 		processor := Apply("test", func(_ context.Context, n int) (int, error) {
 			atomic.AddInt32(&calls, 1)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/zoobzio/clockz"
 )
 
 // WorkerPool provides bounded parallel execution with a fixed number of workers.
@@ -29,6 +31,7 @@ type WorkerPool[T Cloner[T]] struct {
 	mu         sync.RWMutex  // Thread safety
 	timeout    time.Duration // Optional per-task timeout
 	queueSize  int           // Optional queue size (unused but kept for future)
+	clock      clockz.Clock  // Clock for time operations
 }
 
 // NewWorkerPool creates a WorkerPool with specified worker count.
@@ -44,6 +47,7 @@ func NewWorkerPool[T Cloner[T]](name Name, workers int, processors ...Chainable[
 		name:       name,
 		timeout:    0, // Default no timeout
 		queueSize:  0, // Default no buffering
+		clock:      clockz.RealClock,
 	}
 	copy(wp.processors, processors) // Defensive copy
 	return wp
@@ -63,6 +67,7 @@ func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err err
 	processors := make([]Chainable[T], len(w.processors))
 	copy(processors, w.processors)
 	timeout := w.timeout
+	clock := w.getClock()
 	w.mu.RUnlock()
 
 	if len(processors) == 0 {
@@ -90,7 +95,7 @@ func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err err
 			taskCtx := ctx
 			var cancel context.CancelFunc
 			if timeout > 0 {
-				taskCtx, cancel = context.WithTimeout(ctx, timeout)
+				taskCtx, cancel = clock.WithTimeout(ctx, timeout)
 				defer cancel()
 			}
 
@@ -113,7 +118,7 @@ func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err err
 				Err:       err,
 				InputData: input,
 				Path:      []Name{w.name},
-				Timestamp: time.Now(),
+				Timestamp: clock.Now(),
 				Duration:  0, // Duration not tracked at connector level
 			}
 		}
@@ -201,4 +206,20 @@ func (w *WorkerPool[T]) GetActiveWorkers() int {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return len(w.sem)
+}
+
+// WithClock sets a custom clock for testing.
+func (w *WorkerPool[T]) WithClock(clock clockz.Clock) *WorkerPool[T] {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.clock = clock
+	return w
+}
+
+// getClock returns the clock to use.
+func (w *WorkerPool[T]) getClock() clockz.Clock {
+	if w.clock == nil {
+		return clockz.RealClock
+	}
+	return w.clock
 }

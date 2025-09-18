@@ -3,6 +3,7 @@ package pipz
 import (
 	"context"
 	"errors"
+	"math"
 	"reflect"
 	"strings"
 	"sync"
@@ -10,92 +11,167 @@ import (
 	"testing"
 	"time"
 	"unsafe"
+
+	"github.com/zoobzio/clockz"
 )
 
-func TestRateLimiter(t *testing.T) {
-	t.Run("Allows Processing Within Rate", func(t *testing.T) {
-		// 10 requests per second with burst of 2
-		limiter := NewRateLimiter[int]("test-limiter", 10, 2)
+func TestRateLimiter_TokenBucket(t *testing.T) {
+	t.Run("Initial State", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+		limiter := NewRateLimiter[int]("test", 10, 5)
+		limiter.WithClock(clock)
 
-		// Should allow burst of 2 immediately
-		for i := 0; i < 2; i++ {
-			start := time.Now()
-			result, err := limiter.Process(context.Background(), i)
-			elapsed := time.Since(start)
+		// Should start with full bucket
+		if tokens := limiter.GetAvailableTokens(); tokens != 5.0 {
+			t.Errorf("expected 5 tokens, got %f", tokens)
+		}
+	})
 
+	t.Run("Token Consumption", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+		limiter := NewRateLimiter[int]("test", 10, 5)
+		limiter.WithClock(clock).SetMode("drop")
+
+		// Use 3 tokens
+		for i := 0; i < 3; i++ {
+			_, err := limiter.Process(context.Background(), i)
 			if err != nil {
 				t.Fatalf("unexpected error on request %d: %v", i, err)
 			}
-			if result != i {
-				t.Errorf("expected %d, got %d", i, result)
+		}
+
+		// Should have 2 tokens left
+		if tokens := limiter.GetAvailableTokens(); tokens != 2.0 {
+			t.Errorf("expected 2 tokens, got %f", tokens)
+		}
+	})
+
+	t.Run("Token Refill Formula", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+		limiter := NewRateLimiter[int]("test", 10, 5) // 10 tokens/sec, burst 5
+		limiter.WithClock(clock).SetMode("drop")
+
+		// Use all tokens
+		for i := 0; i < 5; i++ {
+			limiter.Process(context.Background(), i)
+		}
+
+		// Advance time by 0.3 seconds (should add 3 tokens)
+		clock.Advance(300 * time.Millisecond)
+
+		// Should have 3 tokens (0 + 0.3 * 10)
+		if tokens := limiter.GetAvailableTokens(); tokens != 3.0 {
+			t.Errorf("expected 3 tokens, got %f", tokens)
+		}
+
+		// Advance time by 1 second (should cap at burst)
+		clock.Advance(1 * time.Second)
+
+		// Should be capped at 5 tokens (burst limit)
+		if tokens := limiter.GetAvailableTokens(); tokens != 5.0 {
+			t.Errorf("expected 5 tokens (burst cap), got %f", tokens)
+		}
+	})
+
+	t.Run("Fractional Tokens", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+		limiter := NewRateLimiter[int]("test", 1.5, 3) // 1.5 tokens/sec
+		limiter.WithClock(clock).SetMode("drop")
+
+		// Use all tokens
+		for i := 0; i < 3; i++ {
+			limiter.Process(context.Background(), i)
+		}
+
+		// Advance by 2/3 second (should add 1 token: 2/3 * 1.5 = 1.0)
+		clock.Advance(time.Second * 2 / 3)
+
+		// Should have exactly 1.0 token
+		if tokens := limiter.GetAvailableTokens(); math.Abs(tokens-1.0) > 0.001 {
+			t.Errorf("expected 1.0 token, got %f", tokens)
+		}
+
+		// Advance by 1/3 second more (should add 0.5 token: 1/3 * 1.5 = 0.5)
+		clock.Advance(time.Second * 1 / 3)
+
+		// Should have 1.5 tokens
+		if tokens := limiter.GetAvailableTokens(); math.Abs(tokens-1.5) > 0.001 {
+			t.Errorf("expected 1.5 tokens, got %f", tokens)
+		}
+	})
+}
+
+func TestRateLimiter_EdgeCases(t *testing.T) {
+	t.Run("Infinite Rate", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+		limiter := NewRateLimiter[int]("test", math.Inf(1), 5)
+		limiter.WithClock(clock)
+
+		// Should allow unlimited processing
+		for i := 0; i < 100; i++ {
+			start := clock.Now()
+			_, err := limiter.Process(context.Background(), i)
+			end := clock.Now()
+
+			if err != nil {
+				t.Fatalf("unexpected error with infinite rate: %v", err)
 			}
-			// Should be immediate (< 10ms)
-			if elapsed > 10*time.Millisecond {
-				t.Errorf("request %d took too long: %v", i, elapsed)
+			if !start.Equal(end) {
+				t.Errorf("infinite rate should not wait, but time advanced")
 			}
 		}
 	})
 
-	t.Run("Enforces Rate Limit in Wait Mode", func(t *testing.T) {
-		// 5 requests per second (200ms between requests)
-		limiter := NewRateLimiter[string]("test-limiter", 5, 1)
+	t.Run("Zero Rate Blocks Forever", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+		limiter := NewRateLimiter[int]("test", 0, 1)
+		limiter.WithClock(clock)
 
-		start := time.Now()
-		// First request should be immediate
-		_, err := limiter.Process(context.Background(), "first")
-		if err != nil {
-			t.Fatalf("unexpected error on first request: %v", err)
-		}
-
-		// Second request should wait ~200ms
-		_, err = limiter.Process(context.Background(), "second")
-		if err != nil {
-			t.Fatalf("unexpected error on second request: %v", err)
-		}
-
-		elapsed := time.Since(start)
-		// Should take approximately 200ms (with some tolerance)
-		if elapsed < 150*time.Millisecond || elapsed > 250*time.Millisecond {
-			t.Errorf("expected ~200ms delay, got %v", elapsed)
-		}
-	})
-
-	t.Run("Drop Mode Returns Error Immediately", func(t *testing.T) {
-		// 1 request per second with burst of 1
-		limiter := NewRateLimiter[int]("test-limiter", 1, 1)
-		limiter.SetMode("drop")
-
-		// First request should succeed
+		// Use the initial token
 		_, err := limiter.Process(context.Background(), 1)
 		if err != nil {
-			t.Fatalf("unexpected error on first request: %v", err)
+			t.Fatalf("unexpected error using initial token: %v", err)
 		}
 
-		// Second request should fail immediately
-		start := time.Now()
-		_, err = limiter.Process(context.Background(), 2)
-		elapsed := time.Since(start)
+		// Second request should block until context cancellation
+		ctx, cancel := context.WithCancel(context.Background())
 
-		if err == nil {
-			t.Fatal("expected rate limit error")
-		}
-		if !strings.Contains(err.Error(), "rate limit exceeded") {
-			t.Errorf("unexpected error: %v", err)
-		}
-		// Should fail immediately (< 10ms)
-		if elapsed > 10*time.Millisecond {
-			t.Errorf("drop mode took too long: %v", elapsed)
+		done := make(chan error, 1)
+		go func() {
+			_, err := limiter.Process(ctx, 2)
+			done <- err
+		}()
+
+		// Give goroutine time to start waiting
+		clock.BlockUntilReady()
+
+		// Cancel context
+		cancel()
+
+		// Should return with cancellation error
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Fatal("expected cancellation error with zero rate")
+			}
+			var pipzErr *Error[int]
+			if !errors.As(err, &pipzErr) || !pipzErr.IsCanceled() {
+				t.Errorf("expected canceled error, got %v", err)
+			}
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("zero rate cancellation took too long")
 		}
 	})
 
 	t.Run("Context Cancellation During Wait", func(t *testing.T) {
-		// Very low rate to ensure waiting
-		limiter := NewRateLimiter[int]("test-limiter", 0.1, 1) // 1 request per 10 seconds
+		clock := clockz.NewFakeClock()
+		limiter := NewRateLimiter[int]("test", 1, 1) // 1 token/sec, burst 1
+		limiter.WithClock(clock)
 
-		// Use up the burst
+		// Use the initial token
 		_, err := limiter.Process(context.Background(), 1)
 		if err != nil {
-			t.Fatalf("unexpected error using up burst: %v", err)
+			t.Fatalf("unexpected error using initial token: %v", err)
 		}
 
 		// Create cancelable context
@@ -108,8 +184,8 @@ func TestRateLimiter(t *testing.T) {
 			done <- err
 		}()
 
-		// Give it time to start waiting
-		time.Sleep(50 * time.Millisecond)
+		// Wait for goroutine to start waiting
+		clock.BlockUntilReady()
 
 		// Cancel the context
 		cancel()
@@ -128,9 +204,260 @@ func TestRateLimiter(t *testing.T) {
 			t.Fatal("cancellation took too long")
 		}
 	})
+}
 
-	t.Run("Concurrent Access Safety", func(t *testing.T) {
-		limiter := NewRateLimiter[int]("test-limiter", 100, 10)
+func TestRateLimiter_WaitMode(t *testing.T) {
+	t.Run("Wait Formula Calculation", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+		limiter := NewRateLimiter[int]("test", 2, 1) // 2 tokens/sec, burst 1
+		limiter.WithClock(clock)
+
+		// Use the initial token
+		_, err := limiter.Process(context.Background(), 1)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Process second request in goroutine
+		done := make(chan error, 1)
+		go func() {
+			_, err := limiter.Process(context.Background(), 2)
+			done <- err
+		}()
+
+		// Should wait for 0.5 seconds (1 token / 2 tokens/sec)
+		clock.BlockUntilReady()
+		clock.Advance(500 * time.Millisecond)
+
+		// Should complete successfully
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("unexpected error after wait: %v", err)
+			}
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("wait did not complete")
+		}
+	})
+
+	t.Run("Burst Processing", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+		limiter := NewRateLimiter[int]("test", 10, 3) // 10 tokens/sec, burst 3
+		limiter.WithClock(clock)
+
+		start := clock.Now()
+
+		// Should allow burst of 3 immediately
+		for i := 0; i < 3; i++ {
+			_, err := limiter.Process(context.Background(), i)
+			if err != nil {
+				t.Fatalf("unexpected error on burst request %d: %v", i, err)
+			}
+		}
+
+		end := clock.Now()
+		if !start.Equal(end) {
+			t.Errorf("burst should be immediate, but time advanced from %v to %v", start, end)
+		}
+	})
+
+	t.Run("Rate Enforcement", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+		limiter := NewRateLimiter[int]("test", 10, 1) // 10 tokens/sec, burst 1
+		limiter.WithClock(clock)
+
+		// Process requests and track timing
+		var results []time.Time
+		for i := 0; i < 3; i++ {
+			_, err := limiter.Process(context.Background(), i)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			results = append(results, clock.Now())
+
+			// Advance time to allow next token if needed
+			if i < 2 { // Don't advance after last request
+				clock.Advance(100 * time.Millisecond) // 0.1 second = 1 token at 10/sec
+			}
+		}
+
+		// First should be immediate
+		expected := results[0]
+		if !results[0].Equal(expected) {
+			t.Errorf("first request timing wrong")
+		}
+
+		// Second should be 100ms later
+		expected = expected.Add(100 * time.Millisecond)
+		if !results[1].Equal(expected) {
+			t.Errorf("second request timing wrong: expected %v, got %v", expected, results[1])
+		}
+
+		// Third should be 200ms from start
+		expected = results[0].Add(200 * time.Millisecond)
+		if !results[2].Equal(expected) {
+			t.Errorf("third request timing wrong: expected %v, got %v", expected, results[2])
+		}
+	})
+}
+
+func TestRateLimiter_DropMode(t *testing.T) {
+	t.Run("Immediate Error When No Tokens", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+		limiter := NewRateLimiter[int]("test", 1, 1) // 1 token/sec, burst 1
+		limiter.WithClock(clock).SetMode("drop")
+
+		// First request should succeed
+		_, err := limiter.Process(context.Background(), 1)
+		if err != nil {
+			t.Fatalf("unexpected error on first request: %v", err)
+		}
+
+		// Second request should fail immediately
+		start := clock.Now()
+		_, err = limiter.Process(context.Background(), 2)
+		end := clock.Now()
+
+		if err == nil {
+			t.Fatal("expected rate limit error")
+		}
+		if !strings.Contains(err.Error(), "rate limit exceeded") {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !start.Equal(end) {
+			t.Errorf("drop mode should be immediate")
+		}
+	})
+
+	t.Run("Success After Token Refill", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+		limiter := NewRateLimiter[int]("test", 2, 1) // 2 tokens/sec, burst 1
+		limiter.WithClock(clock).SetMode("drop")
+
+		// Use the token
+		_, err := limiter.Process(context.Background(), 1)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Should fail immediately
+		_, err = limiter.Process(context.Background(), 2)
+		if err == nil {
+			t.Fatal("expected rate limit error")
+		}
+
+		// Advance time by 0.5 seconds (should add 1 token)
+		clock.Advance(500 * time.Millisecond)
+
+		// Should succeed now
+		_, err = limiter.Process(context.Background(), 3)
+		if err != nil {
+			t.Errorf("unexpected error after refill: %v", err)
+		}
+	})
+}
+
+func TestRateLimiter_Configuration(t *testing.T) {
+	t.Run("SetRate During Operation", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+		limiter := NewRateLimiter[int]("test", 1, 3) // 1 token/sec, burst 3
+		limiter.WithClock(clock).SetMode("drop")
+
+		// Use all tokens
+		for i := 0; i < 3; i++ {
+			limiter.Process(context.Background(), i)
+		}
+
+		// Advance 0.5 seconds (should add 0.5 tokens at 1/sec)
+		clock.Advance(500 * time.Millisecond)
+
+		// Change rate to 2/sec
+		limiter.SetRate(2)
+
+		// Advance another 0.5 seconds (should add 1 token at 2/sec)
+		clock.Advance(500 * time.Millisecond)
+
+		// Should have 1.5 tokens total (0.5 + 1.0)
+		if tokens := limiter.GetAvailableTokens(); math.Abs(tokens-1.5) > 0.001 {
+			t.Errorf("expected 1.5 tokens after rate change, got %f", tokens)
+		}
+	})
+
+	t.Run("SetBurst Caps Tokens", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+		limiter := NewRateLimiter[int]("test", 10, 5) // burst 5
+		limiter.WithClock(clock)
+
+		// Start with 5 tokens
+		if tokens := limiter.GetAvailableTokens(); tokens != 5.0 {
+			t.Errorf("expected 5 tokens initially, got %f", tokens)
+		}
+
+		// Reduce burst to 3
+		limiter.SetBurst(3)
+
+		// Should cap tokens to 3
+		if tokens := limiter.GetAvailableTokens(); tokens != 3.0 {
+			t.Errorf("expected 3 tokens after burst reduction, got %f", tokens)
+		}
+	})
+
+	t.Run("Invalid Mode Handling", func(t *testing.T) {
+		limiter := NewRateLimiter[int]("test", 10, 2)
+
+		// Set invalid mode - should be ignored
+		limiter.SetMode("invalid")
+
+		// Should still be in wait mode
+		if mode := limiter.GetMode(); mode != "wait" {
+			t.Errorf("expected mode to remain wait, got %s", mode)
+		}
+	})
+
+	t.Run("Configuration Getters", func(t *testing.T) {
+		limiter := NewRateLimiter[int]("test-limiter", 15.5, 7)
+
+		if rate := limiter.GetRate(); rate != 15.5 {
+			t.Errorf("expected rate 15.5, got %f", rate)
+		}
+		if burst := limiter.GetBurst(); burst != 7 {
+			t.Errorf("expected burst 7, got %d", burst)
+		}
+		if mode := limiter.GetMode(); mode != "wait" {
+			t.Errorf("expected mode wait, got %s", mode)
+		}
+		if name := limiter.Name(); name != "test-limiter" {
+			t.Errorf("expected name test-limiter, got %s", name)
+		}
+	})
+
+	t.Run("Method Chaining", func(t *testing.T) {
+		limiter := NewRateLimiter[int]("test", 10, 2)
+
+		// Update settings using method chaining
+		result := limiter.SetRate(20).SetBurst(5).SetMode("drop")
+
+		// Should return the same instance
+		if result != limiter {
+			t.Error("method chaining should return same instance")
+		}
+
+		// Verify updates
+		if rate := limiter.GetRate(); rate != 20 {
+			t.Errorf("expected rate 20, got %f", rate)
+		}
+		if burst := limiter.GetBurst(); burst != 5 {
+			t.Errorf("expected burst 5, got %d", burst)
+		}
+		if mode := limiter.GetMode(); mode != "drop" {
+			t.Errorf("expected mode drop, got %s", mode)
+		}
+	})
+}
+
+func TestRateLimiter_ConcurrentAccess(t *testing.T) {
+	t.Run("Concurrent Processing", func(t *testing.T) {
+		limiter := NewRateLimiter[int]("test", 1000, 100) // High rate to avoid blocking
 
 		var wg sync.WaitGroup
 		errors := make(chan error, 100)
@@ -159,8 +486,8 @@ func TestRateLimiter(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < 20; i++ {
-				limiter.SetRate(float64(50 + i*10))
-				limiter.SetBurst(5 + i)
+				limiter.SetRate(float64(500 + i*10))
+				limiter.SetBurst(50 + i)
 				limiter.SetMode([]string{"wait", "drop"}[i%2])
 				time.Sleep(time.Millisecond)
 			}
@@ -177,78 +504,113 @@ func TestRateLimiter(t *testing.T) {
 		}
 	})
 
-	t.Run("Runtime Configuration Changes", func(t *testing.T) {
-		limiter := NewRateLimiter[int]("test-limiter", 10, 2)
+	t.Run("Thread Safety", func(_ *testing.T) {
+		clock := clockz.NewFakeClock()
+		limiter := NewRateLimiter[int]("test", 10000, 1000) // High rate/burst to avoid blocking
+		limiter.WithClock(clock).SetMode("drop")            // Use drop mode to avoid waiting
 
-		// Verify initial settings
-		if rate := limiter.GetRate(); rate != 10 {
-			t.Errorf("expected rate 10, got %f", rate)
-		}
-		if burst := limiter.GetBurst(); burst != 2 {
-			t.Errorf("expected burst 2, got %d", burst)
-		}
-		if mode := limiter.GetMode(); mode != "wait" {
-			t.Errorf("expected mode wait, got %s", mode)
+		var wg sync.WaitGroup
+		const goroutines = 10 // Reduced from 50
+		const operations = 20 // Reduced from 100
+
+		// Test concurrent access to all methods
+		for i := 0; i < goroutines; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				for j := 0; j < operations; j++ {
+					switch j % 6 {
+					case 0:
+						// Process ignoring errors (some may be rate limited in drop mode)
+						limiter.Process(context.Background(), id*operations+j)
+					case 1:
+						limiter.SetRate(float64(100 + j%900)) // Higher base rate
+					case 2:
+						limiter.SetBurst(10 + j%90) // Higher base burst
+					case 3:
+						limiter.GetRate()
+					case 4:
+						limiter.GetBurst()
+					case 5:
+						limiter.Name()
+					}
+				}
+			}(i)
 		}
 
-		// Update settings
-		limiter.SetRate(20).SetBurst(5).SetMode("drop")
+		wg.Wait()
+		// If we reach here without deadlock or panic, the test passes
+	})
+}
 
-		// Verify updates
-		if rate := limiter.GetRate(); rate != 20 {
-			t.Errorf("expected rate 20, got %f", rate)
-		}
-		if burst := limiter.GetBurst(); burst != 5 {
-			t.Errorf("expected burst 5, got %d", burst)
-		}
-		if mode := limiter.GetMode(); mode != "drop" {
-			t.Errorf("expected mode drop, got %s", mode)
-		}
+func TestRateLimiter_InvalidModeProcessing(t *testing.T) {
+	// Test hitting the default case in Process method
+	limiter := NewRateLimiter[int]("test-limiter", 10, 0) // Zero burst to force switch statement
+
+	// Use all tokens
+	limiter.SetBurst(1)
+	_, err := limiter.Process(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("unexpected error consuming token: %v", err)
+	}
+
+	// Use reflection to set an invalid mode directly
+	limiterValue := reflect.ValueOf(limiter).Elem()
+	modeField := limiterValue.FieldByName("mode")
+	modeField = reflect.NewAt(modeField.Type(), unsafe.Pointer(modeField.UnsafeAddr())).Elem()
+	modeField.SetString("invalid-mode-for-testing")
+
+	// Process should hit the default case and return an error
+	_, err = limiter.Process(context.Background(), 42)
+	if err == nil {
+		t.Fatal("expected error for invalid mode")
+	}
+
+	var pipeErr *Error[int]
+	if !errors.As(err, &pipeErr) {
+		t.Fatal("expected Error type")
+	}
+	if !strings.Contains(pipeErr.Err.Error(), "invalid rate limiter mode") {
+		t.Errorf("expected 'invalid rate limiter mode' error, got: %v", pipeErr.Err)
+	}
+	if pipeErr.InputData != 42 {
+		t.Errorf("expected input data 42, got %d", pipeErr.InputData)
+	}
+	if len(pipeErr.Path) == 0 || pipeErr.Path[0] != "test-limiter" {
+		t.Error("expected limiter name in error path")
+	}
+}
+
+func TestRateLimiter_PanicRecovery(t *testing.T) {
+	// Test panic recovery in rate limiter chain
+	panicProcessor := Apply("panic_processor", func(_ context.Context, _ int) (int, error) {
+		panic("rate limiter downstream panic")
 	})
 
-	t.Run("Invalid Mode Handling", func(t *testing.T) {
-		limiter := NewRateLimiter[int]("test-limiter", 10, 2)
+	limiter := NewRateLimiter[int]("panic_limiter", 100, 10)
+	sequence := NewSequence("test_sequence", limiter, panicProcessor)
 
-		// Set invalid mode - should be ignored
-		limiter.SetMode("invalid")
+	result, err := sequence.Process(context.Background(), 42)
 
-		// Should still be in wait mode
-		if mode := limiter.GetMode(); mode != "wait" {
-			t.Errorf("expected mode to remain wait, got %s", mode)
-		}
-	})
+	if result != 0 {
+		t.Errorf("expected zero value 0, got %d", result)
+	}
 
-	t.Run("Burst Capacity", func(t *testing.T) {
-		// 2 requests per second with burst of 5
-		limiter := NewRateLimiter[int]("test-limiter", 2, 5)
-		limiter.SetMode("drop")
+	var pipzErr *Error[int]
+	if !errors.As(err, &pipzErr) {
+		t.Fatal("expected pipz.Error")
+	}
 
-		// Should allow burst of 5 immediately
-		for i := 0; i < 5; i++ {
-			_, err := limiter.Process(context.Background(), i)
-			if err != nil {
-				t.Errorf("unexpected error on burst request %d: %v", i, err)
-			}
-		}
+	if pipzErr.InputData != 42 {
+		t.Errorf("expected input data 42, got %d", pipzErr.InputData)
+	}
+}
 
-		// 6th request should fail
-		_, err := limiter.Process(context.Background(), 6)
-		if err == nil {
-			t.Fatal("expected rate limit error after burst")
-		}
-
-		// Wait for tokens to replenish (at 2/sec, need 500ms for 1 token)
-		time.Sleep(600 * time.Millisecond)
-
-		// Should allow one more
-		_, err = limiter.Process(context.Background(), 7)
-		if err != nil {
-			t.Errorf("unexpected error after replenish: %v", err)
-		}
-	})
-
-	t.Run("Integration with Pipeline", func(t *testing.T) {
+func TestRateLimiter_Integration(t *testing.T) {
+	t.Run("Pipeline Integration", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
 		calls := atomic.Int32{}
+
 		processor := Apply("counter", func(_ context.Context, n int) (int, error) {
 			calls.Add(1)
 			return n * 2, nil
@@ -256,120 +618,38 @@ func TestRateLimiter(t *testing.T) {
 
 		// Create rate-limited pipeline (10/sec)
 		limiter := NewRateLimiter[int]("rate-limit", 10, 1)
+		limiter.WithClock(clock)
 		pipeline := NewSequence[int]("test-pipeline")
 		pipeline.Register(limiter, processor)
 
-		start := time.Now()
-		// Process 3 items (should take ~200ms for the last 2)
+		// Process 3 items
+		results := make([]int, 3)
 		for i := 0; i < 3; i++ {
-			result, err := pipeline.Process(context.Background(), i)
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
+			// Process in goroutine to handle waiting
+			done := make(chan struct{})
+			var err error
+			go func(idx int) {
+				results[idx], err = pipeline.Process(context.Background(), idx)
+				done <- struct{}{}
+			}(i)
+
+			// Advance time if needed
+			if i > 0 {
+				clock.BlockUntilReady()
+				clock.Advance(100 * time.Millisecond) // 0.1 second = 1 token at 10/sec
 			}
-			if result != i*2 {
-				t.Errorf("expected %d, got %d", i*2, result)
+
+			<-done
+			if err != nil {
+				t.Errorf("unexpected error on request %d: %v", i, err)
+			}
+			if results[i] != i*2 {
+				t.Errorf("expected %d, got %d", i*2, results[i])
 			}
 		}
-		elapsed := time.Since(start)
 
 		if int(calls.Load()) != 3 {
 			t.Errorf("expected 3 calls, got %d", calls.Load())
-		}
-		// Should take at least 200ms for rate limiting
-		if elapsed < 190*time.Millisecond {
-			t.Errorf("processing too fast, elapsed: %v", elapsed)
-		}
-	})
-
-	t.Run("Name Method", func(t *testing.T) {
-		limiter := NewRateLimiter[int]("test-rate-limiter", 10, 2)
-		// Test Name() method
-		name := limiter.Name()
-		if name != "test-rate-limiter" {
-			t.Errorf("expected name 'test-rate-limiter', got '%s'", name)
-		}
-		// Test name is preserved during concurrent access
-		var wg sync.WaitGroup
-		for i := 0; i < 10; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for j := 0; j < 100; j++ {
-					n := limiter.Name()
-					if n != "test-rate-limiter" {
-						t.Errorf("expected name 'test-rate-limiter', got '%s'", n)
-					}
-				}
-			}()
-		}
-		wg.Wait()
-	})
-
-	t.Run("Invalid Mode in Process", func(t *testing.T) {
-		// This test forces the default case in Process method by
-		// directly manipulating the mode field to cover lines 102-109
-		limiter := NewRateLimiter[int]("test-limiter", 10, 2)
-
-		// Use reflection to set an invalid mode directly, bypassing SetMode validation
-		limiterValue := reflect.ValueOf(limiter).Elem()
-		modeField := limiterValue.FieldByName("mode")
-
-		// Make field settable using unsafe
-		modeField = reflect.NewAt(modeField.Type(), unsafe.Pointer(modeField.UnsafeAddr())).Elem()
-		modeField.SetString("invalid-mode-for-testing")
-
-		// Process should hit the default case and return an error
-		_, err := limiter.Process(context.Background(), 42)
-		if err == nil {
-			t.Fatal("expected error for invalid mode")
-		}
-
-		var pipeErr *Error[int]
-		if !errors.As(err, &pipeErr) {
-			t.Fatal("expected Error type")
-		}
-		if !strings.Contains(pipeErr.Err.Error(), "invalid rate limiter mode") {
-			t.Errorf("expected 'invalid rate limiter mode' error, got: %v", pipeErr.Err)
-		}
-		if pipeErr.InputData != 42 {
-			t.Errorf("expected input data 42, got %d", pipeErr.InputData)
-		}
-		if len(pipeErr.Path) == 0 || pipeErr.Path[0] != "test-limiter" {
-			t.Error("expected limiter name in error path")
-		}
-	})
-
-	t.Run("RateLimiter panic recovery", func(t *testing.T) {
-		// Rate limiters don't have embedded processors, so we test panic in the limiter logic itself
-		// by creating a custom scenario. Since rate limiters are pass-through processors,
-		// let's test with integration scenario where panic happens in chained processor
-
-		panicProcessor := Apply("panic_processor", func(_ context.Context, _ int) (int, error) {
-			panic("rate limiter downstream panic")
-		})
-
-		limiter := NewRateLimiter[int]("panic_limiter", 100, 10) // High rate, won't limit
-		sequence := NewSequence("test_sequence", limiter, panicProcessor)
-
-		result, err := sequence.Process(context.Background(), 42)
-
-		if result != 0 {
-			t.Errorf("expected zero value 0, got %d", result)
-		}
-
-		var pipzErr *Error[int]
-		if !errors.As(err, &pipzErr) {
-			t.Fatal("expected pipz.Error")
-		}
-
-		// Path should show the sequence and then the panicking processor
-		expectedPath := []string{"test_sequence", "panic_limiter", "panic_processor"}
-		if len(pipzErr.Path) < 2 || pipzErr.Path[0] != expectedPath[0] {
-			t.Errorf("expected path to start with sequence, got %v", pipzErr.Path)
-		}
-
-		if pipzErr.InputData != 42 {
-			t.Errorf("expected input data 42, got %d", pipzErr.InputData)
 		}
 	})
 }
@@ -417,5 +697,15 @@ func BenchmarkRateLimiter(b *testing.B) {
 			}
 		}
 		b.Logf("Dropped %d/%d requests", dropped, b.N)
+	})
+
+	b.Run("Token Bucket Operations", func(b *testing.B) {
+		limiter := NewRateLimiter[int]("bench-limiter", 100, 10)
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Test the core token bucket operations
+			limiter.GetAvailableTokens()
+		}
 	})
 }

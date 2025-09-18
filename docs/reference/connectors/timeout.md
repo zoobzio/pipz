@@ -22,6 +22,33 @@ func NewTimeout[T any](
 
 Returns a `*Timeout[T]` that implements `Chainable[T]`.
 
+## Testing Configuration
+
+### WithClock
+
+```go
+func (t *Timeout[T]) WithClock(clock clockz.Clock) *Timeout[T]
+```
+
+Sets a custom clock implementation for testing purposes. This method enables controlled time manipulation in tests using `clockz.FakeClock`.
+
+**Parameters:**
+- `clock` (`clockz.Clock`) - Clock implementation to use
+
+**Returns:**
+Returns the same connector instance for method chaining.
+
+**Example:**
+```go
+// Use fake clock in tests
+fakeClock := clockz.NewFakeClock()
+timeout := pipz.NewTimeout("test", processor, 5*time.Second).
+    WithClock(fakeClock)
+
+// Advance time in test
+fakeClock.Advance(6 * time.Second)
+```
+
 ## Behavior
 
 - **Time enforcement** - Cancels operation after duration

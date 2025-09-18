@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/zoobzio/clockz"
 )
 
 func TestWorkerPool(t *testing.T) {
@@ -534,6 +536,65 @@ func TestWorkerPool(t *testing.T) {
 
 		wg.Wait()
 		// If we get here without race conditions, the test passes
+	})
+
+	t.Run("Deterministic Timeout with Fake Clock", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+		var executed int32
+
+		// Processor that waits for fake clock advancement
+		slowProcessor := Effect("slow", func(ctx context.Context, _ TestData) error {
+			atomic.AddInt32(&executed, 1)
+			select {
+			case <-clock.After(100 * time.Millisecond):
+				return nil // Would complete after 100ms
+			case <-ctx.Done():
+				return ctx.Err() // Canceled by timeout
+			}
+		})
+
+		pool := NewWorkerPool("timeout-test", 2, slowProcessor, slowProcessor).
+			WithTimeout(50 * time.Millisecond).
+			WithClock(clock)
+
+		// Run in goroutine so we can advance the clock
+		done := make(chan struct{})
+		var result TestData
+		var err error
+		go func() {
+			result, err = pool.Process(context.Background(), TestData{Value: 1})
+			close(done)
+		}()
+
+		// Allow goroutines to start
+		time.Sleep(10 * time.Millisecond)
+
+		// Advance the fake clock past the timeout duration
+		clock.Advance(60 * time.Millisecond)
+		clock.BlockUntilReady()
+
+		// Wait for completion with timeout
+		select {
+		case <-done:
+			// Expected to complete due to timeout
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("test timed out waiting for worker pool")
+		}
+
+		// Should timeout and return error
+		if err == nil {
+			t.Fatal("expected timeout error, got nil")
+		}
+
+		// Should return original input on error
+		if result.Value != 1 {
+			t.Errorf("expected original value 1 on timeout, got %d", result.Value)
+		}
+
+		// Processors should have started but been canceled
+		if count := atomic.LoadInt32(&executed); count == 0 {
+			t.Error("expected processors to start before timeout")
+		}
 	})
 
 	t.Run("WorkerPool panic recovery", func(t *testing.T) {

@@ -19,6 +19,33 @@ func NewRateLimiter[T any](name Name, ratePerSecond float64, burst int) *RateLim
 
 Returns a `*RateLimiter[T]` that implements `Chainable[T]`.
 
+## Testing Configuration
+
+### WithClock
+
+```go
+func (r *RateLimiter[T]) WithClock(clock clockz.Clock) *RateLimiter[T]
+```
+
+Sets a custom clock implementation for testing purposes. This method enables controlled time manipulation in tests using `clockz.FakeClock`.
+
+**Parameters:**
+- `clock` (`clockz.Clock`) - Clock implementation to use
+
+**Returns:**
+Returns the same connector instance for method chaining.
+
+**Example:**
+```go
+// Use fake clock in tests
+fakeClock := clockz.NewFakeClock()
+rateLimiter := pipz.NewRateLimiter[string]("test", 10.0, 5).
+    WithClock(fakeClock)
+
+// Advance time in test to replenish tokens
+fakeClock.Advance(1 * time.Second)
+```
+
 ## Behavior
 
 ### Rate Limiting Algorithm

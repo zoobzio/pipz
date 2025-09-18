@@ -23,6 +23,33 @@ func NewBackoff[T any](name Name, processor Chainable[T], maxAttempts int, baseD
 
 Returns a `*Retry[T]` that implements `Chainable[T]`.
 
+## Testing Configuration
+
+### WithClock
+
+```go
+func (b *Backoff[T]) WithClock(clock clockz.Clock) *Backoff[T]
+```
+
+Sets a custom clock implementation for testing purposes. This method enables controlled time manipulation in tests using `clockz.FakeClock`. Available only on Backoff (created with `NewBackoff`), not on simple Retry.
+
+**Parameters:**
+- `clock` (`clockz.Clock`) - Clock implementation to use
+
+**Returns:**
+Returns the same connector instance for method chaining.
+
+**Example:**
+```go
+// Use fake clock in tests
+fakeClock := clockz.NewFakeClock()
+backoff := pipz.NewBackoff("test", processor, 3, 100*time.Millisecond).
+    WithClock(fakeClock)
+
+// Advance time in test to trigger delays
+fakeClock.Advance(200 * time.Millisecond)
+```
+
 ## Behavior
 
 ### NewRetry

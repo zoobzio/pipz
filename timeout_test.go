@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/zoobzio/clockz"
 )
 
 func TestTimeout(t *testing.T) {
@@ -295,6 +297,77 @@ func TestTimeout(t *testing.T) {
 
 		if pipzErr.InputData != 42 {
 			t.Errorf("expected input data 42, got %d", pipzErr.InputData)
+		}
+	})
+
+	t.Run("Deterministic Timeout With Fake Clock", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+
+		// Processor that waits for context cancellation
+		processor := Apply("wait-for-timeout", func(ctx context.Context, n int) (int, error) {
+			select {
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			case <-time.After(1 * time.Second):
+				// This should never happen with fake clock
+				return n * 2, nil
+			}
+		})
+
+		timeout := NewTimeout("fake-timeout", processor, 100*time.Millisecond).WithClock(clock)
+
+		// Run timeout processing in goroutine
+		done := make(chan struct{})
+		var result int
+		var err error
+		go func() {
+			defer close(done)
+			result, err = timeout.Process(context.Background(), 42)
+		}()
+
+		// Allow the goroutine to start
+		time.Sleep(10 * time.Millisecond)
+
+		// Advance the fake clock past the timeout duration
+		clock.Advance(100 * time.Millisecond)
+		clock.BlockUntilReady()
+
+		// Give time for the timeout to be processed
+		time.Sleep(10 * time.Millisecond)
+
+		// Wait for completion
+		<-done
+
+		// Verify timeout occurred
+		if err == nil {
+			t.Fatal("expected timeout error")
+		}
+
+		var pipeErr *Error[int]
+		if !errors.As(err, &pipeErr) {
+			t.Fatalf("expected *Error[int], got %T", err)
+		}
+
+		if !pipeErr.IsTimeout() {
+			t.Errorf("expected timeout error, got: %v", err)
+		}
+
+		// Timeout should return original input
+		if result != 42 {
+			t.Errorf("expected original input 42, got %d", result)
+		}
+	})
+
+	t.Run("WithClock Method", func(t *testing.T) {
+		processor := Transform("test", func(_ context.Context, n int) int { return n })
+		timeout := NewTimeout("test", processor, 100*time.Millisecond)
+
+		clock := clockz.NewFakeClock()
+		timeout2 := timeout.WithClock(clock)
+
+		// Should return same instance for chaining
+		if timeout2 != timeout {
+			t.Error("WithClock should return same instance for chaining")
 		}
 	})
 }

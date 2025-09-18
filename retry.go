@@ -5,6 +5,8 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/zoobzio/clockz"
 )
 
 // Retry attempts the processor up to maxAttempts times.
@@ -159,10 +161,11 @@ func (r *Retry[T]) Name() Name {
 //	)
 type Backoff[T any] struct {
 	processor   Chainable[T]
+	clock       clockz.Clock
 	name        Name
-	maxAttempts int
 	baseDelay   time.Duration
 	mu          sync.RWMutex
+	maxAttempts int
 }
 
 // NewBackoff creates a new Backoff connector.
@@ -185,6 +188,7 @@ func (b *Backoff[T]) Process(ctx context.Context, data T) (result T, err error) 
 	processor := b.processor
 	maxAttempts := b.maxAttempts
 	baseDelay := b.baseDelay
+	clock := b.getClock()
 	b.mu.RUnlock()
 
 	var lastErr error
@@ -200,7 +204,7 @@ func (b *Backoff[T]) Process(ctx context.Context, data T) (result T, err error) 
 		// Don't sleep after the last attempt
 		if i < maxAttempts-1 {
 			select {
-			case <-time.After(delay):
+			case <-clock.After(delay):
 				delay *= 2 // Exponential backoff
 			case <-ctx.Done():
 				// Context canceled/timed out - create appropriate error
@@ -272,4 +276,20 @@ func (b *Backoff[T]) Name() Name {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return b.name
+}
+
+// WithClock sets a custom clock for testing.
+func (b *Backoff[T]) WithClock(clock clockz.Clock) *Backoff[T] {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.clock = clock
+	return b
+}
+
+// getClock returns the clock to use.
+func (b *Backoff[T]) getClock() clockz.Clock {
+	if b.clock == nil {
+		return clockz.RealClock
+	}
+	return b.clock
 }
