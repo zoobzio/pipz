@@ -254,6 +254,73 @@ Use direct processor composition when:
 - Maximum performance is critical
 - Simplicity is preferred
 
+## Observability
+
+Sequence provides comprehensive observability through metrics, tracing, and hook events.
+
+### Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `sequence.processed.total` | Counter | Total sequence operations |
+| `sequence.successes.total` | Counter | Successful sequence completions |
+| `sequence.failures.total` | Counter | Failed sequence operations |
+| `sequence.steps.total` | Counter | Total steps executed across all sequences |
+| `sequence.duration.ms` | Gauge | Total sequence duration |
+
+### Traces
+
+| Span | Description |
+|------|-------------|
+| `sequence.process` | Parent span for entire sequence |
+| `sequence.step` | Child span for each processor |
+
+**Span Tags:**
+- `sequence.processor_count` - Number of processors in sequence
+- `sequence.step_index` - Index of current step
+- `sequence.processor_name` - Name of current processor
+- `sequence.success` - Whether sequence completed successfully
+- `sequence.failed_at` - Name of processor that failed (if any)
+
+### Hook Events
+
+| Event | Key | Description |
+|-------|-----|-------------|
+| Step Started | `sequence.step_started` | Fired before each processor |
+| Step Complete | `sequence.step_complete` | Fired after each processor |
+| Sequence Complete | `sequence.complete` | Fired when sequence finishes |
+
+### Event Handlers
+
+```go
+// Monitor step execution
+seq.OnStepStarted(func(ctx context.Context, event SequenceEvent) error {
+    log.Debug("Starting step %d: %s", event.StepIndex, event.ProcessorName)
+    return nil
+})
+
+// Track step completions
+seq.OnStepComplete(func(ctx context.Context, event SequenceEvent) error {
+    if event.Error != nil {
+        log.Error("Step %s failed: %v", event.ProcessorName, event.Error)
+    } else {
+        log.Info("Step %s completed in %v", event.ProcessorName, event.Duration)
+    }
+    return nil
+})
+
+// Monitor overall completion
+seq.OnSequenceComplete(func(ctx context.Context, event SequenceEvent) error {
+    if event.Success {
+        log.Info("Sequence completed: %d steps in %v", 
+            event.TotalSteps, event.TotalDuration)
+    } else {
+        log.Error("Sequence failed at step %s", event.FailedAt)
+    }
+    return nil
+})
+```
+
 ## Example: Dynamic ETL Pipeline
 
 ```go

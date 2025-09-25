@@ -156,6 +156,77 @@ workers := pool.GetWorkerCount()     // Maximum workers
 active := pool.GetActiveWorkers()    // Currently active
 ```
 
+## Observability
+
+WorkerPool provides comprehensive observability through metrics, tracing, and hook events.
+
+### Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `workerpool.processed.total` | Counter | Total workerpool operations |
+| `workerpool.successes.total` | Counter | Successful completions |
+| `workerpool.tasks.total` | Counter | Total tasks queued |
+| `workerpool.workers.max` | Gauge | Maximum worker count |
+| `workerpool.workers.active` | Gauge | Currently active workers |
+| `workerpool.queue.wait.ms` | Gauge | Time tasks wait for workers |
+| `workerpool.duration.ms` | Gauge | Total operation duration |
+
+### Traces
+
+| Span | Description |
+|------|-------------|
+| `workerpool.process` | Parent span for entire workerpool operation |
+| `workerpool.task` | Child span for each individual task |
+
+**Span Tags:**
+- `workerpool.processor_count` - Number of processors
+- `workerpool.worker_count` - Maximum worker count
+- `workerpool.processor_name` - Name of task processor
+- `workerpool.success` - Whether all tasks completed
+
+### Hook Events
+
+| Event | Key | Description |
+|-------|-----|-------------|
+| Task Queued | `workerpool.task_queued` | Fired when task is queued |
+| Task Started | `workerpool.task_started` | Fired when task acquires worker |
+| Task Complete | `workerpool.task_complete` | Fired when task finishes |
+| All Complete | `workerpool.all_complete` | Fired when all tasks done |
+
+### Event Handlers
+
+```go
+// Monitor queue wait times
+pool.OnTaskStarted(func(ctx context.Context, event WorkerPoolEvent) error {
+    if event.QueueWaitTime > time.Second {
+        log.Warn("Task %s waited %v for worker",
+            event.ProcessorName, event.QueueWaitTime)
+    }
+    return nil
+})
+
+// Track individual task completion
+pool.OnTaskComplete(func(ctx context.Context, event WorkerPoolEvent) error {
+    if event.Error != nil {
+        log.Error("Task %s failed: %v", event.ProcessorName, event.Error)
+    } else {
+        log.Info("Task %s completed in %v", event.ProcessorName, event.Duration)
+    }
+    return nil
+})
+
+// Monitor batch completion
+pool.OnAllComplete(func(ctx context.Context, event WorkerPoolEvent) error {
+    log.Info("Batch complete: %d/%d succeeded in %v",
+        event.SuccessfulTasks, event.TotalTasks, event.TotalDuration)
+    if event.FailedTasks > 0 {
+        alert.Warn("%d tasks failed in batch", event.FailedTasks)
+    }
+    return nil
+})
+```
+
 ## Performance Characteristics
 
 - Creates one goroutine per processor (up to worker limit)

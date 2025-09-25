@@ -2,8 +2,42 @@ package pipz
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"time"
+
+	"github.com/zoobzio/hookz"
+	"github.com/zoobzio/metricz"
+	"github.com/zoobzio/tracez"
 )
+
+// Observability constants for the Scaffold connector.
+const (
+	// Metrics.
+	ScaffoldProcessedTotal = metricz.Key("scaffold.processed.total")
+	ScaffoldLaunchedTotal  = metricz.Key("scaffold.launched.total")
+
+	// Spans.
+	ScaffoldProcessSpan = tracez.Key("scaffold.process")
+
+	// Tags.
+	ScaffoldTagProcessorCount = tracez.Tag("scaffold.processor_count")
+
+	// Hook event keys.
+	ScaffoldEventLaunched    = hookz.Key("scaffold.launched")
+	ScaffoldEventAllLaunched = hookz.Key("scaffold.all_launched")
+)
+
+// ScaffoldEvent represents a scaffold launch event.
+// This is emitted via hookz when background processors are launched,
+// providing visibility into fire-and-forget operations.
+type ScaffoldEvent struct {
+	Name           Name      // Connector name
+	ProcessorName  Name      // Name of the processor being launched
+	ProcessorCount int       // Total number of processors
+	ProcessorIndex int       // Index of this processor (for launched event)
+	Timestamp      time.Time // When the event occurred
+}
 
 // Scaffold runs all processors in parallel with context isolation for true fire-and-forget behavior.
 // Unlike Concurrent, Scaffold uses context.WithoutCancel to ensure processors continue
@@ -46,27 +80,84 @@ import (
 //
 //	// Returns immediately, processors run in background
 //	result, err := scaffold.Process(ctx, order)
+//
+// # Observability
+//
+// Scaffold provides comprehensive observability through metrics, tracing, and events:
+//
+// Metrics:
+//   - scaffold.processed.total: Counter of scaffold operations
+//   - scaffold.launched.total: Counter of processors launched
+//
+// Traces:
+//   - scaffold.process: Span for scaffold operation (completes immediately)
+//
+// Events (via hooks):
+//   - scaffold.launched: Fired as each processor is launched
+//   - scaffold.all_launched: Fired after all processors are launched
+//
+// Example with hooks:
+//
+//	scaffold := pipz.NewScaffold("background",
+//	    auditLogger,
+//	    metricsCollector,
+//	    cacheWarmer,
+//	)
+//
+//	// Track background operations
+//	scaffold.OnLaunched(func(ctx context.Context, event ScaffoldEvent) error {
+//	    log.Debug("Launched background task: %s", event.ProcessorName)
+//	    metrics.Inc("background.tasks.launched", event.ProcessorName)
+//	    return nil
+//	})
+//
+//	// Monitor total launches
+//	scaffold.OnAllLaunched(func(ctx context.Context, event ScaffoldEvent) error {
+//	    log.Info("Launched %d background tasks", event.ProcessorCount)
+//	    return nil
+//	})
 type Scaffold[T Cloner[T]] struct {
 	name       Name
 	processors []Chainable[T]
 	mu         sync.RWMutex
+	metrics    *metricz.Registry
+	tracer     *tracez.Tracer
+	hooks      *hookz.Hooks[ScaffoldEvent]
 }
 
 // NewScaffold creates a new Scaffold connector.
 func NewScaffold[T Cloner[T]](name Name, processors ...Chainable[T]) *Scaffold[T] {
+	// Initialize observability
+	metrics := metricz.New()
+	metrics.Counter(ScaffoldProcessedTotal)
+	metrics.Counter(ScaffoldLaunchedTotal)
+
 	return &Scaffold[T]{
 		name:       name,
 		processors: processors,
+		metrics:    metrics,
+		tracer:     tracez.New(),
+		hooks:      hookz.New[ScaffoldEvent](),
 	}
 }
 
 // Process implements the Chainable interface.
 func (s *Scaffold[T]) Process(ctx context.Context, input T) (result T, err error) {
 	defer recoverFromPanic(&result, &err, s.name, input)
+
+	// Track metrics
+	s.metrics.Counter(ScaffoldProcessedTotal).Inc()
+
+	// Start span
+	ctx, span := s.tracer.StartSpan(ctx, ScaffoldProcessSpan)
+	defer span.Finish()
+
 	s.mu.RLock()
 	processors := make([]Chainable[T], len(s.processors))
 	copy(processors, s.processors)
 	s.mu.RUnlock()
+
+	span.SetTag(ScaffoldTagProcessorCount, fmt.Sprintf("%d", len(processors)))
 
 	if len(processors) == 0 {
 		return input, nil
@@ -77,7 +168,18 @@ func (s *Scaffold[T]) Process(ctx context.Context, input T) (result T, err error
 	bgCtx := context.WithoutCancel(ctx)
 
 	// Launch all processors in background without waiting
-	for _, processor := range processors {
+	for i, processor := range processors {
+		s.metrics.Counter(ScaffoldLaunchedTotal).Inc()
+
+		// Emit launched event for each processor
+		_ = s.hooks.Emit(ctx, ScaffoldEventLaunched, ScaffoldEvent{ //nolint:errcheck
+			Name:           s.name,
+			ProcessorName:  processor.Name(),
+			ProcessorCount: len(processors),
+			ProcessorIndex: i,
+			Timestamp:      time.Now(),
+		})
+
 		go func(p Chainable[T]) {
 			// Create an isolated copy using the Clone method
 			inputCopy := input.Clone()
@@ -89,6 +191,13 @@ func (s *Scaffold[T]) Process(ctx context.Context, input T) (result T, err error
 			}
 		}(processor)
 	}
+
+	// Emit all launched event
+	_ = s.hooks.Emit(ctx, ScaffoldEventAllLaunched, ScaffoldEvent{ //nolint:errcheck
+		Name:           s.name,
+		ProcessorCount: len(processors),
+		Timestamp:      time.Now(),
+	})
 
 	// Return immediately without waiting
 	return input, nil
@@ -144,4 +253,39 @@ func (s *Scaffold[T]) Name() Name {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.name
+}
+
+// Metrics returns the metrics registry for this connector.
+func (s *Scaffold[T]) Metrics() *metricz.Registry {
+	return s.metrics
+}
+
+// Tracer returns the tracer for this connector.
+func (s *Scaffold[T]) Tracer() *tracez.Tracer {
+	return s.tracer
+}
+
+// Close gracefully shuts down observability components.
+func (s *Scaffold[T]) Close() error {
+	if s.tracer != nil {
+		s.tracer.Close()
+	}
+	s.hooks.Close()
+	return nil
+}
+
+// OnLaunched registers a handler for when a processor is launched.
+// The handler is called synchronously as each processor is launched in the background.
+// This provides visibility into which background operations have been started.
+func (s *Scaffold[T]) OnLaunched(handler func(context.Context, ScaffoldEvent) error) error {
+	_, err := s.hooks.Hook(ScaffoldEventLaunched, handler)
+	return err
+}
+
+// OnAllLaunched registers a handler for when all processors have been launched.
+// The handler is called synchronously after all background processors have been started.
+// Note: This does not mean the processors have completed, only that they've been launched.
+func (s *Scaffold[T]) OnAllLaunched(handler func(context.Context, ScaffoldEvent) error) error {
+	_, err := s.hooks.Hook(ScaffoldEventAllLaunched, handler)
+	return err
 }

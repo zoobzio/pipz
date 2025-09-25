@@ -134,6 +134,68 @@ Returns the name of this connector.
 func (b *Backoff[T]) Name() Name
 ```
 
+## Observability
+
+Backoff provides comprehensive observability through metrics, tracing, and hook events.
+
+### Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `backoff.attempts.total` | Counter | Total number of retry attempts |
+| `backoff.successes.total` | Counter | Successfully completed operations |
+| `backoff.failures.total` | Counter | Operations that exhausted all attempts |
+| `backoff.attempt.current` | Gauge | Current attempt number during execution |
+| `backoff.delay.total.ms` | Gauge | Total milliseconds spent waiting between attempts |
+
+### Traces
+
+| Span | Description |
+|------|-------------|
+| `backoff.process` | Parent span for entire backoff operation |
+| `backoff.attempt` | Child span for each individual retry attempt |
+
+**Span Tags:**
+- `backoff.max_attempts` - Maximum attempts configured
+- `backoff.base_delay` - Base delay duration
+- `backoff.attempt_num` - Current attempt number
+- `backoff.success` - Whether operation succeeded
+- `backoff.exhausted` - Whether all attempts were exhausted
+- `backoff.attempts_used` - Total attempts used for success
+
+### Hook Events
+
+| Event | Key | Description |
+|-------|-----|-------------|
+| Attempt | `backoff.attempt` | Fired before each retry attempt (not first) |
+| Success | `backoff.success` | Fired when operation succeeds |
+| Exhausted | `backoff.exhausted` | Fired when all attempts fail |
+
+### Event Handlers
+
+```go
+// Monitor retry patterns
+backoff.OnAttempt(func(ctx context.Context, event BackoffEvent) error {
+    log.Printf("Retry attempt %d/%d after %v delay",
+        event.AttemptNum, event.MaxAttempts, event.Delay)
+    return nil
+})
+
+// Alert on exhaustion
+backoff.OnExhausted(func(ctx context.Context, event BackoffEvent) error {
+    alert.Send("All %d attempts failed after %v total delay",
+        event.MaxAttempts, event.TotalDelay)
+    return nil
+})
+
+// Track success patterns
+backoff.OnSuccess(func(ctx context.Context, event BackoffEvent) error {
+    metrics.Record("backoff.success.attempts", event.AttemptNum)
+    metrics.Record("backoff.success.delay_ms", event.TotalDelay.Milliseconds())
+    return nil
+})
+```
+
 ## Basic Usage
 
 ```go

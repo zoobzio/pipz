@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/zoobzio/tracez"
 )
 
 func TestContest(t *testing.T) {
@@ -457,5 +460,443 @@ func TestContest(t *testing.T) {
 		if result.Value != 100 {
 			t.Errorf("expected normal processor result 100, got %d", result.Value)
 		}
+	})
+
+	t.Run("Observability", func(t *testing.T) {
+		t.Run("Metrics and Spans - Winner Found", func(t *testing.T) {
+			// Condition: value must be > 150
+			condition := func(_ context.Context, d TestData) bool {
+				return d.Value > 150
+			}
+
+			// Create processors with different results and speeds
+			slow := Apply("slow", func(_ context.Context, d TestData) (TestData, error) {
+				time.Sleep(50 * time.Millisecond)
+				d.Value = 100 // Doesn't meet condition
+				return d, nil
+			})
+			fast := Apply("fast", func(_ context.Context, d TestData) (TestData, error) {
+				time.Sleep(10 * time.Millisecond)
+				d.Value = 200 // Meets condition
+				return d, nil
+			})
+			verySlow := Apply("very-slow", func(_ context.Context, d TestData) (TestData, error) {
+				time.Sleep(100 * time.Millisecond)
+				d.Value = 300 // Also meets condition but too slow
+				return d, nil
+			})
+
+			contest := NewContest("test-contest", condition, slow, fast, verySlow)
+			defer contest.Close()
+
+			// Verify observability components are initialized
+			if contest.Metrics() == nil {
+				t.Error("expected metrics registry to be initialized")
+			}
+			if contest.Tracer() == nil {
+				t.Error("expected tracer to be initialized")
+			}
+
+			// Capture spans using the callback API
+			var spans []tracez.Span
+			var spanMu sync.Mutex
+			contest.Tracer().OnSpanComplete(func(span tracez.Span) {
+				spanMu.Lock()
+				spans = append(spans, span)
+				spanMu.Unlock()
+			})
+
+			// Process - fast should win
+			testData := TestData{Value: 42}
+			result, err := contest.Process(context.Background(), testData)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if result.Value != 200 {
+				t.Errorf("expected fast processor result (200), got %d", result.Value)
+			}
+
+			// Wait for spans to be collected
+			time.Sleep(120 * time.Millisecond)
+
+			// Verify metrics
+			processedTotal := contest.Metrics().Counter(ContestProcessedTotal).Value()
+			if processedTotal != 1 {
+				t.Errorf("expected 1 processed item, got %f", processedTotal)
+			}
+
+			successesTotal := contest.Metrics().Counter(ContestSuccessesTotal).Value()
+			if successesTotal != 1 {
+				t.Errorf("expected 1 success, got %f", successesTotal)
+			}
+
+			winsTotal := contest.Metrics().Counter(ContestWinsTotal).Value()
+			if winsTotal != 1 {
+				t.Errorf("expected 1 win, got %f", winsTotal)
+			}
+
+			processorCount := contest.Metrics().Gauge(ContestProcessorCount).Value()
+			if processorCount != 3 {
+				t.Errorf("expected processor count 3, got %f", processorCount)
+			}
+
+			// Check duration was recorded
+			duration := contest.Metrics().Gauge(ContestDurationMs).Value()
+			if duration < 10 { // Should be at least 10ms (fast processor time)
+				t.Errorf("expected duration >= 10ms, got %f", duration)
+			}
+
+			// Verify spans were captured (at minimum 1 main span and winner processor span)
+			spanMu.Lock()
+			spanCount := len(spans)
+			spanMu.Unlock()
+
+			if spanCount < 2 {
+				t.Errorf("expected at least 2 spans (1 main + winner processor), got %d", spanCount)
+			}
+
+			// Check span details
+			spanMu.Lock()
+			for _, span := range spans {
+				if span.Name == ContestProcessSpan {
+					// Main span should have processor count and winner
+					if _, ok := span.Tags[ContestTagProcessorCount]; !ok {
+						t.Error("main span missing processor_count tag")
+					}
+					if _, ok := span.Tags[ContestTagWinner]; !ok {
+						t.Error("main span missing winner tag")
+					}
+					if _, ok := span.Tags[ContestTagConditionMet]; !ok {
+						t.Error("main span missing condition_met tag")
+					}
+				} else if span.Name == ContestProcessorSpan {
+					// Processor spans should have processor name
+					if _, ok := span.Tags[ContestTagProcessorName]; !ok {
+						t.Error("processor span missing processor_name tag")
+					}
+				}
+			}
+			spanMu.Unlock()
+		})
+
+		t.Run("Metrics and Spans - No Condition Met", func(t *testing.T) {
+			// Condition: value must be > 1000 (none will meet this)
+			condition := func(_ context.Context, d TestData) bool {
+				return d.Value > 1000
+			}
+
+			proc1 := Apply("proc1", func(_ context.Context, d TestData) (TestData, error) {
+				d.Value = 100
+				return d, nil
+			})
+			proc2 := Apply("proc2", func(_ context.Context, d TestData) (TestData, error) {
+				d.Value = 200
+				return d, nil
+			})
+			proc3 := Apply("proc3", func(_ context.Context, d TestData) (TestData, error) {
+				d.Value = 300
+				return d, nil
+			})
+
+			contest := NewContest("test-contest-no-meet", condition, proc1, proc2, proc3)
+			defer contest.Close()
+
+			testData := TestData{Value: 42}
+			_, err := contest.Process(context.Background(), testData)
+			if err == nil {
+				t.Fatal("expected error when no results meet condition")
+			}
+
+			// Check metrics for no condition met case
+			processedTotal := contest.Metrics().Counter(ContestProcessedTotal).Value()
+			if processedTotal != 1 {
+				t.Errorf("expected 1 processed item, got %f", processedTotal)
+			}
+
+			successesTotal := contest.Metrics().Counter(ContestSuccessesTotal).Value()
+			if successesTotal != 0 {
+				t.Errorf("expected 0 successes, got %f", successesTotal)
+			}
+
+			noConditionMet := contest.Metrics().Counter(ContestNoConditionMet).Value()
+			if noConditionMet != 1 {
+				t.Errorf("expected 1 no_condition_met count, got %f", noConditionMet)
+			}
+
+			winsTotal := contest.Metrics().Counter(ContestWinsTotal).Value()
+			if winsTotal != 0 {
+				t.Errorf("expected 0 wins when no condition met, got %f", winsTotal)
+			}
+		})
+
+		t.Run("Metrics and Spans - All Failed", func(t *testing.T) {
+			condition := func(_ context.Context, d TestData) bool {
+				return d.Value > 50
+			}
+
+			fail1 := Apply("fail1", func(_ context.Context, _ TestData) (TestData, error) {
+				time.Sleep(10 * time.Millisecond)
+				return TestData{}, errors.New("error 1")
+			})
+			fail2 := Apply("fail2", func(_ context.Context, _ TestData) (TestData, error) {
+				time.Sleep(20 * time.Millisecond)
+				return TestData{}, errors.New("error 2")
+			})
+			fail3 := Apply("fail3", func(_ context.Context, _ TestData) (TestData, error) {
+				time.Sleep(30 * time.Millisecond)
+				return TestData{}, errors.New("error 3")
+			})
+
+			contest := NewContest("test-contest-fail", condition, fail1, fail2, fail3)
+			defer contest.Close()
+
+			testData := TestData{Value: 42}
+			_, err := contest.Process(context.Background(), testData)
+			if err == nil {
+				t.Fatal("expected error when all processors fail")
+			}
+
+			// Check metrics for all failed case
+			processedTotal := contest.Metrics().Counter(ContestProcessedTotal).Value()
+			if processedTotal != 1 {
+				t.Errorf("expected 1 processed item, got %f", processedTotal)
+			}
+
+			successesTotal := contest.Metrics().Counter(ContestSuccessesTotal).Value()
+			if successesTotal != 0 {
+				t.Errorf("expected 0 successes, got %f", successesTotal)
+			}
+
+			allFailedTotal := contest.Metrics().Counter(ContestAllFailedTotal).Value()
+			if allFailedTotal != 1 {
+				t.Errorf("expected 1 all_failed count, got %f", allFailedTotal)
+			}
+
+			winsTotal := contest.Metrics().Counter(ContestWinsTotal).Value()
+			if winsTotal != 0 {
+				t.Errorf("expected 0 wins when all fail, got %f", winsTotal)
+			}
+		})
+
+		t.Run("Empty Processors Metrics", func(t *testing.T) {
+			condition := func(_ context.Context, d TestData) bool {
+				return d.Value > 50
+			}
+
+			contest := NewContest[TestData]("empty-contest", condition)
+			defer contest.Close()
+
+			testData := TestData{Value: 10}
+			_, err := contest.Process(context.Background(), testData)
+			if err == nil {
+				t.Error("expected error for empty processor list")
+			}
+
+			// Check metrics for empty processor list
+			processedTotal := contest.Metrics().Counter(ContestProcessedTotal).Value()
+			if processedTotal != 1 {
+				t.Errorf("expected 1 processed item, got %f", processedTotal)
+			}
+
+			processorCount := contest.Metrics().Gauge(ContestProcessorCount).Value()
+			if processorCount != 0 {
+				t.Errorf("expected processor count 0, got %f", processorCount)
+			}
+		})
+
+		t.Run("Hooks fire on contest events", func(t *testing.T) {
+			// Test winner event
+			condition := func(_ context.Context, d TestData) bool {
+				return d.Value > 150
+			}
+
+			fast := Apply("fast", func(_ context.Context, d TestData) (TestData, error) {
+				time.Sleep(5 * time.Millisecond)
+				d.Value = 200 // Meets condition
+				return d, nil
+			})
+			slow := Apply("slow", func(_ context.Context, d TestData) (TestData, error) {
+				time.Sleep(20 * time.Millisecond)
+				d.Value = 300 // Also meets but slower
+				return d, nil
+			})
+
+			contest := NewContest("test-hooks", condition, fast, slow)
+			defer contest.Close()
+
+			var winnerEvents []ContestEvent
+			var mu sync.Mutex
+			contest.OnWinner(func(_ context.Context, event ContestEvent) error {
+				mu.Lock()
+				winnerEvents = append(winnerEvents, event)
+				mu.Unlock()
+				return nil
+			})
+
+			data := TestData{Value: 1}
+			result, err := contest.Process(context.Background(), data)
+			if err != nil {
+				t.Errorf("expected success, got error: %v", err)
+			}
+			if result.Value != 200 {
+				t.Errorf("expected fast processor to win with 200, got %d", result.Value)
+			}
+
+			// Wait for async hook
+			time.Sleep(10 * time.Millisecond)
+
+			mu.Lock()
+			winnerCount := len(winnerEvents)
+			var winner Name
+			var conditionMet bool
+			var processorCount int
+			if len(winnerEvents) > 0 {
+				event := winnerEvents[0]
+				winner = event.Winner
+				conditionMet = event.ConditionMet
+				processorCount = event.ProcessorCount
+			}
+			mu.Unlock()
+
+			if winnerCount != 1 {
+				t.Errorf("expected 1 winner event, got %d", winnerCount)
+			}
+
+			if winnerCount > 0 {
+				if winner != "fast" {
+					t.Errorf("expected winner 'fast', got %s", winner)
+				}
+				if !conditionMet {
+					t.Error("expected ConditionMet=true")
+				}
+				if processorCount != 2 {
+					t.Errorf("expected 2 processors, got %d", processorCount)
+				}
+			}
+		})
+
+		t.Run("No condition met hook fires", func(t *testing.T) {
+			// Impossible condition
+			condition := func(_ context.Context, d TestData) bool {
+				return d.Value > 1000
+			}
+
+			proc1 := Apply("proc1", func(_ context.Context, d TestData) (TestData, error) {
+				d.Value = 100
+				return d, nil
+			})
+			proc2 := Apply("proc2", func(_ context.Context, d TestData) (TestData, error) {
+				d.Value = 200
+				return d, nil
+			})
+
+			contest := NewContest("test-no-condition", condition, proc1, proc2)
+			defer contest.Close()
+
+			var noConditionEvents []ContestEvent
+			var mu sync.Mutex
+			contest.OnNoCondition(func(_ context.Context, event ContestEvent) error {
+				mu.Lock()
+				noConditionEvents = append(noConditionEvents, event)
+				mu.Unlock()
+				return nil
+			})
+
+			data := TestData{Value: 1}
+			_, err := contest.Process(context.Background(), data)
+			if err == nil {
+				t.Error("expected error when no condition met")
+			}
+
+			// Wait for async hook
+			time.Sleep(10 * time.Millisecond)
+
+			mu.Lock()
+			noConditionCount := len(noConditionEvents)
+			var conditionMet bool
+			var processorCount int
+			if len(noConditionEvents) > 0 {
+				event := noConditionEvents[0]
+				conditionMet = event.ConditionMet
+				processorCount = event.ProcessorCount
+			}
+			mu.Unlock()
+
+			if noConditionCount != 1 {
+				t.Errorf("expected 1 no-condition event, got %d", noConditionCount)
+			}
+
+			if noConditionCount > 0 {
+				if conditionMet {
+					t.Error("expected ConditionMet=false")
+				}
+				if processorCount != 2 {
+					t.Errorf("expected 2 processors, got %d", processorCount)
+				}
+			}
+		})
+
+		t.Run("All failed hook fires", func(t *testing.T) {
+			condition := func(_ context.Context, d TestData) bool {
+				return d.Value > 100
+			}
+
+			fail1 := Apply("fail1", func(_ context.Context, d TestData) (TestData, error) {
+				return d, errors.New("error 1")
+			})
+			fail2 := Apply("fail2", func(_ context.Context, d TestData) (TestData, error) {
+				return d, errors.New("error 2")
+			})
+
+			contest := NewContest("test-all-failed", condition, fail1, fail2)
+			defer contest.Close()
+
+			var allFailedEvents []ContestEvent
+			var mu sync.Mutex
+			contest.OnAllFailed(func(_ context.Context, event ContestEvent) error {
+				mu.Lock()
+				allFailedEvents = append(allFailedEvents, event)
+				mu.Unlock()
+				return nil
+			})
+
+			data := TestData{Value: 1}
+			_, err := contest.Process(context.Background(), data)
+			if err == nil {
+				t.Error("expected error when all processors fail")
+			}
+
+			// Wait for async hook
+			time.Sleep(10 * time.Millisecond)
+
+			mu.Lock()
+			allFailedCount := len(allFailedEvents)
+			var allFailed bool
+			var hasError bool
+			var processorCount int
+			if len(allFailedEvents) > 0 {
+				event := allFailedEvents[0]
+				allFailed = event.AllFailed
+				hasError = event.Error != nil
+				processorCount = event.ProcessorCount
+			}
+			mu.Unlock()
+
+			if allFailedCount != 1 {
+				t.Errorf("expected 1 all-failed event, got %d", allFailedCount)
+			}
+
+			if allFailedCount > 0 {
+				if !allFailed {
+					t.Error("expected AllFailed=true")
+				}
+				if !hasError {
+					t.Error("expected Error to be set")
+				}
+				if processorCount != 2 {
+					t.Errorf("expected 2 processors, got %d", processorCount)
+				}
+			}
+		})
 	})
 }

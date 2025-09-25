@@ -300,7 +300,12 @@
 // For more examples, see the examples directory.
 package pipz
 
-import "context"
+import (
+	"context"
+
+	"github.com/zoobzio/metricz"
+	"github.com/zoobzio/tracez"
+)
 
 // Chainable defines the interface for any component that can process
 // values of type T. This interface enables composition of different
@@ -320,6 +325,12 @@ import "context"
 type Chainable[T any] interface {
 	Process(context.Context, T) (T, error)
 	Name() Name
+
+	// Observability methods - all connectors and processors must implement these.
+	// Simple processors can return nil for unused observability components.
+	Metrics() *metricz.Registry
+	Tracer() *tracez.Tracer
+	Close() error
 }
 
 // Name is a type alias for processor and connector names.
@@ -337,6 +348,15 @@ type Chainable[T any] interface {
 //	validateOrder := pipz.Apply(ValidateOrderName, validateFunc)
 //	enrichCustomer := pipz.Transform(EnrichCustomerName, enrichFunc)
 type Name = string
+
+// Observability constants for processors.
+const (
+	ProcessorCallsTotal  = metricz.Key("processor.calls.total")
+	ProcessorErrorsTotal = metricz.Key("processor.errors.total")
+	ProcessorSpan        = tracez.Key("processor")
+	ProcessorTagName     = tracez.Tag("processor.name")
+	ProcessorTagSuccess  = tracez.Tag("processor.success")
+)
 
 // Processor defines a named processing stage that transforms a value of type T.
 // It contains a descriptive name for debugging and a private function that processes the value.
@@ -356,8 +376,10 @@ type Name = string
 //   - Use consistent naming conventions across your application
 //   - Names appear in Error[T].Path for debugging (e.g., ["pipeline", "validate_email"])
 type Processor[T any] struct {
-	fn   func(context.Context, T) (T, error)
-	name Name
+	fn      func(context.Context, T) (T, error)
+	name    Name
+	metrics *metricz.Registry
+	tracer  *tracez.Tracer
 }
 
 // Process implements the Chainable interface, allowing individual processors
@@ -373,12 +395,54 @@ type Processor[T any] struct {
 //	    Register(validator, transformer).Link()
 func (p Processor[T]) Process(ctx context.Context, data T) (result T, err error) {
 	defer recoverFromPanic(&result, &err, p.name, data)
+
+	// Track metrics
+	if p.metrics != nil {
+		p.metrics.Counter(ProcessorCallsTotal).Inc()
+	}
+
+	// Create span if tracer exists
+	var span *tracez.ActiveSpan
+	if p.tracer != nil {
+		ctx, span = p.tracer.StartSpan(ctx, ProcessorSpan)
+		span.SetTag(ProcessorTagName, p.name)
+		defer func() {
+			if err != nil {
+				span.SetTag(ProcessorTagSuccess, "false")
+				if p.metrics != nil {
+					p.metrics.Counter(ProcessorErrorsTotal).Inc()
+				}
+			} else {
+				span.SetTag(ProcessorTagSuccess, "true")
+			}
+			span.Finish()
+		}()
+	}
+
 	return p.fn(ctx, data)
 }
 
 // Name returns the name of the processor for debugging and error reporting.
 func (p Processor[T]) Name() Name {
 	return p.name
+}
+
+// Metrics returns the metrics registry for this processor.
+func (p Processor[T]) Metrics() *metricz.Registry {
+	return p.metrics
+}
+
+// Tracer returns the tracer for this processor.
+func (p Processor[T]) Tracer() *tracez.Tracer {
+	return p.tracer
+}
+
+// Close gracefully shuts down observability components.
+func (p Processor[T]) Close() error {
+	if p.tracer != nil {
+		p.tracer.Close()
+	}
+	return nil
 }
 
 // Cloner is an interface for types that can create deep copies of themselves.

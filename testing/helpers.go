@@ -29,7 +29,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zoobzio/metricz"
 	"github.com/zoobzio/pipz"
+	"github.com/zoobzio/tracez"
 )
 
 // MockProcessor provides a configurable mock implementation of pipz.Chainable[T].
@@ -112,6 +114,21 @@ func (m *MockProcessor[T]) WithHistorySize(size int) *MockProcessor[T] {
 // Name returns the name of the mock processor.
 func (m *MockProcessor[T]) Name() pipz.Name {
 	return m.name
+}
+
+// Metrics returns nil for mock processors.
+func (*MockProcessor[T]) Metrics() *metricz.Registry {
+	return nil
+}
+
+// Tracer returns nil for mock processors.
+func (*MockProcessor[T]) Tracer() *tracez.Tracer {
+	return nil
+}
+
+// Close returns nil for mock processors.
+func (*MockProcessor[T]) Close() error {
+	return nil
 }
 
 // Process implements pipz.Chainable[T]. It records the call and returns
@@ -295,6 +312,21 @@ func NewChaosProcessor[T any](name string, wrapped pipz.Chainable[T], config Cha
 // Name returns the name of the chaos processor.
 func (c *ChaosProcessor[T]) Name() pipz.Name {
 	return c.name
+}
+
+// Metrics returns nil for chaos processors.
+func (*ChaosProcessor[T]) Metrics() *metricz.Registry {
+	return nil
+}
+
+// Tracer returns nil for chaos processors.
+func (*ChaosProcessor[T]) Tracer() *tracez.Tracer {
+	return nil
+}
+
+// Close returns nil for chaos processors.
+func (*ChaosProcessor[T]) Close() error {
+	return nil
 }
 
 // Process implements pipz.Chainable[T] with chaos injection.

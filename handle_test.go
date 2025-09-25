@@ -7,6 +7,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/zoobzio/metricz"
+	"github.com/zoobzio/tracez"
 )
 
 func TestHandle(t *testing.T) {
@@ -689,4 +692,16 @@ func (p *plainErrorProcessorHandle[T]) Process(_ context.Context, _ T) (T, error
 
 func (p *plainErrorProcessorHandle[T]) Name() Name {
 	return p.name
+}
+
+func (*plainErrorProcessorHandle[T]) Metrics() *metricz.Registry {
+	return nil
+}
+
+func (*plainErrorProcessorHandle[T]) Tracer() *tracez.Tracer {
+	return nil
+}
+
+func (*plainErrorProcessorHandle[T]) Close() error {
+	return nil
 }

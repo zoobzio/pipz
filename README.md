@@ -9,7 +9,7 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/zoobzio/pipz)](go.mod)
 [![Release](https://img.shields.io/github/v/release/zoobzio/pipz)](https://github.com/zoobzio/pipz/releases)
 
-Type-safe, composable data pipelines for Go with zero dependencies.
+Type-safe, composable data pipelines for Go with minimal dependencies.
 
 Build robust data processing pipelines that are easy to test, reason about, and maintain.
 

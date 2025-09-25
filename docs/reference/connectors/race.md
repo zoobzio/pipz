@@ -111,6 +111,77 @@ if err != nil {
 - Cancels losers (saves resources)
 - Winner's speed determines total time
 
+## Observability
+
+Race provides comprehensive observability through metrics, tracing, and hook events.
+
+### Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `race.processed.total` | Counter | Total race operations |
+| `race.winners.total` | Counter | Races that found a winner |
+| `race.no_winners.total` | Counter | Races where all processors failed |
+| `race.winner.latency.ms` | Gauge | Time to first success in milliseconds |
+| `race.duration.ms` | Gauge | Total operation duration |
+
+### Traces
+
+| Span | Description |
+|------|-------------|
+| `race.process` | Parent span for entire race operation |
+| `race.task` | Child span for each racing processor |
+
+**Span Tags:**
+- `race.processor_count` - Number of racing processors
+- `race.processor_name` - Name of individual processor (on task spans)
+- `race.winner` - Name of winning processor (if any)
+- `race.found_winner` - Whether a winner was found
+- `race.error` - Error if all processors failed
+
+### Hook Events
+
+| Event | Key | Description |
+|-------|-----|-------------|
+| Task Started | `race.task_started` | Fired when a processor starts |
+| Task Complete | `race.task_complete` | Fired when a processor finishes |
+| Winner Found | `race.winner_found` | Fired when first success occurs |
+| No Winner | `race.no_winner` | Fired when all processors fail |
+
+### Event Handlers
+
+```go
+// Monitor race starts
+race.OnTaskStarted(func(ctx context.Context, event RaceEvent) error {
+    log.Debug("Processor %s entered race", event.ProcessorName)
+    return nil
+})
+
+// Track individual completions
+race.OnTaskComplete(func(ctx context.Context, event RaceEvent) error {
+    if event.Error != nil {
+        log.Debug("Processor %s failed: %v", event.ProcessorName, event.Error)
+    } else {
+        log.Info("Processor %s finished in %v", event.ProcessorName, event.Duration)
+    }
+    return nil
+})
+
+// Celebrate winners
+race.OnWinnerFound(func(ctx context.Context, event RaceEvent) error {
+    log.Info("Winner: %s (latency: %v)", event.WinnerName, event.WinnerLatency)
+    metrics.Record("race.winner", event.WinnerName, event.WinnerLatency.Milliseconds())
+    return nil
+})
+
+// Handle no-winner scenarios
+race.OnNoWinner(func(ctx context.Context, event RaceEvent) error {
+    log.Error("All %d processors failed in race", event.TotalTasks)
+    alert.Critical("No processor succeeded in race %s", event.Name)
+    return nil
+})
+```
+
 ## Common Patterns
 
 ```go

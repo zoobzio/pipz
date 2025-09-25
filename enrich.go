@@ -1,6 +1,11 @@
 package pipz
 
-import "context"
+import (
+	"context"
+
+	"github.com/zoobzio/metricz"
+	"github.com/zoobzio/tracez"
+)
 
 // Enrich creates a Processor that attempts to enhance data with additional information.
 // Enrich is unique among processors - if the enrichment fails, it returns the original
@@ -33,8 +38,15 @@ import "context"
 //	    return order, nil
 //	})
 func Enrich[T any](name Name, fn func(context.Context, T) (T, error)) Processor[T] {
+	// Initialize observability
+	metrics := metricz.New()
+	metrics.Counter(ProcessorCallsTotal)
+	metrics.Counter(ProcessorErrorsTotal)
+
 	return Processor[T]{
-		name: name,
+		name:    name,
+		metrics: metrics,
+		tracer:  tracez.New(),
 		fn: func(ctx context.Context, value T) (result T, err error) {
 			defer recoverFromPanic(&result, &err, name, value)
 			enriched, enrichErr := fn(ctx, value)

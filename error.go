@@ -22,6 +22,8 @@ type Error[T any] struct {
 	Canceled  bool
 }
 
+const unknownPath = "unknown"
+
 // Error implements the error interface, providing a detailed error message.
 func (e *Error[T]) Error() string {
 	if e == nil {
@@ -29,7 +31,7 @@ func (e *Error[T]) Error() string {
 	}
 	path := strings.Join(e.Path, " -> ")
 	if path == "" {
-		path = "unknown"
+		path = unknownPath
 	}
 
 	if e.Timeout {

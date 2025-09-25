@@ -123,6 +123,68 @@ Don't use `Retry` when:
 - Different approach needed on failure (use `Fallback`)
 - Error indicates a bug (null pointer, index out of bounds)
 
+## Observability
+
+Retry provides comprehensive observability through metrics, tracing, and hook events.
+
+### Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `retry.attempts.total` | Counter | Total retry attempts across all operations |
+| `retry.successes.total` | Counter | Operations that eventually succeeded |
+| `retry.exhausted.total` | Counter | Operations that failed after all attempts |
+| `retry.attempt.current` | Gauge | Current attempt number during execution |
+| `retry.duration.ms` | Gauge | Total operation duration including retries |
+
+### Traces
+
+| Span | Description |
+|------|-------------|
+| `retry.process` | Parent span for entire retry operation |
+| `retry.attempt` | Child span for each individual attempt |
+
+**Span Tags:**
+- `retry.max_attempts` - Maximum attempts configured
+- `retry.attempt_num` - Current attempt number
+- `retry.success` - Whether operation succeeded
+- `retry.exhausted` - Whether all attempts were exhausted
+- `retry.attempts_used` - Total attempts used
+
+### Hook Events
+
+| Event | Key | Description |
+|-------|-----|-------------|
+| Attempt | `retry.attempt` | Fired before each retry attempt |
+| Success | `retry.success` | Fired when operation succeeds |
+| Exhausted | `retry.exhausted` | Fired when all attempts fail |
+
+### Event Handlers
+
+```go
+// Monitor retry attempts
+retry.OnAttempt(func(ctx context.Context, event RetryEvent) error {
+    log.Debug("Retry attempt %d/%d for %s",
+        event.AttemptNum, event.MaxAttempts, event.Name)
+    return nil
+})
+
+// Track success patterns
+retry.OnSuccess(func(ctx context.Context, event RetryEvent) error {
+    log.Info("Succeeded after %d attempts", event.AttemptNum)
+    metrics.Record("retry.attempts_to_success", event.AttemptNum)
+    return nil
+})
+
+// Alert on exhaustion
+retry.OnExhausted(func(ctx context.Context, event RetryEvent) error {
+    log.Error("All %d attempts failed: %v",
+        event.MaxAttempts, event.LastError)
+    alert.Error("Retry exhausted for %s", event.Name)
+    return nil
+})
+```
+
 ## Gotchas
 
 ### ❌ Don't retry non-idempotent operations
@@ -278,32 +340,69 @@ intelligentRetry := pipz.NewHandle("intelligent",
 )
 ```
 
+## Observability
+
+### Metrics
+
+The Retry connector tracks the following metrics using `metricz`:
+
+- `retry.attempts.total` - Counter of total retry attempts
+- `retry.successes.total` - Counter of successful retries
+- `retry.failures.total` - Counter of exhausted retries (all attempts failed)
+- `retry.attempt.current` - Gauge showing current attempt number during processing
+
+### Tracing
+
+The Retry connector creates spans using `tracez`:
+
+- `retry.process` - Parent span for the entire retry operation
+- `retry.attempt` - Child span for each individual attempt
+
+Span tags:
+- `retry.connector` - Name of the retry connector
+- `retry.max_attempts` - Maximum attempts configured
+- `retry.attempt` - Current attempt number (on attempt spans)
+- `retry.attempts_used` - Total attempts used (on process span)
+- `retry.success` - Whether the operation succeeded
+- `retry.exhausted` - Whether all attempts were exhausted
+- `retry.error` - Error message (on failed attempts)
+- `retry.canceled` - Whether operation was canceled
+
+### Example Usage
+
+```go
+// Create retry with observability
+retry := pipz.NewRetry("api-retry", processor, 3)
+defer retry.Close() // Clean up observability resources
+
+// Access metrics
+metrics := retry.Metrics()
+attempts := metrics.Counter(pipz.RetryAttemptsTotal).Value()
+successes := metrics.Counter(pipz.RetrySuccessesTotal).Value()
+failures := metrics.Counter(pipz.RetryFailuresTotal).Value()
+
+// Process with automatic observability
+result, err := retry.Process(ctx, data)
+```
+
 ## Monitoring Retries
 
 ```go
-// Track retry metrics
-monitoredRetry := pipz.NewRetry("monitored",
-    pipz.Apply("operation", func(ctx context.Context, data Data) (Data, error) {
-        result, err := operation(ctx, data)
-        if err != nil {
-            metrics.Increment("retry.needed", "operation", "myop")
-        } else {
-            metrics.Increment("retry.success", "operation", "myop")
-        }
-        return result, err
-    }),
-    3,
-)
+// Access built-in metrics for monitoring
+monitoredRetry := pipz.NewRetry("monitored", processor, 3)
 
-// Log retry attempts
-loggedRetry := pipz.NewHandle("logged-retry",
-    pipz.NewRetry("operation", processor, 3),
-    pipz.Effect("log", func(ctx context.Context, err *pipz.Error[Data]) error {
-        log.Printf("Retry failed at attempt %d: %v", 
-            extractAttemptNumber(err.Err.Error()), err.Err)
-        return nil
-    }),
-)
+// Export metrics to external systems
+stats := map[string]float64{
+    "attempts": monitoredRetry.Metrics().Counter(pipz.RetryAttemptsTotal).Value(),
+    "successes": monitoredRetry.Metrics().Counter(pipz.RetrySuccessesTotal).Value(),
+    "failures": monitoredRetry.Metrics().Counter(pipz.RetryFailuresTotal).Value(),
+    "current_attempt": monitoredRetry.Metrics().Gauge(pipz.RetryAttemptCurrent).Value(),
+}
+
+// Send to Prometheus, DataDog, etc.
+for name, value := range stats {
+    prometheus.Gauge(name).Set(value)
+}
 ```
 
 ## See Also

@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/zoobzio/metricz"
+	"github.com/zoobzio/tracez"
 )
 
 // Effect creates a Processor that performs side effects without modifying the data.
@@ -33,8 +36,15 @@ import (
 //	    })
 //	})
 func Effect[T any](name Name, fn func(context.Context, T) error) Processor[T] {
+	// Initialize observability
+	metrics := metricz.New()
+	metrics.Counter(ProcessorCallsTotal)
+	metrics.Counter(ProcessorErrorsTotal)
+
 	return Processor[T]{
-		name: name,
+		name:    name,
+		metrics: metrics,
+		tracer:  tracez.New(),
 		fn: func(ctx context.Context, value T) (result T, err error) {
 			defer recoverFromPanic(&result, &err, name, value)
 			start := time.Now()

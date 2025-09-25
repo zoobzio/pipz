@@ -73,6 +73,77 @@ Don't use `Fallback` when:
 - Failure reasons matter for routing (use `Switch` with error handling)
 - Primary failure should stop everything (no fallback needed)
 
+## Observability
+
+Fallback provides comprehensive observability through metrics, tracing, and hook events.
+
+### Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `fallback.processed.total` | Counter | Total fallback operations |
+| `fallback.primary.successes.total` | Counter | Primary processor successes |
+| `fallback.fallback.used.total` | Counter | Times fallback was triggered |
+| `fallback.fallback.successes.total` | Counter | Successful fallback operations |
+| `fallback.all.failed.total` | Counter | Both processors failed |
+| `fallback.duration.ms` | Gauge | Total operation duration |
+
+### Traces
+
+| Span | Description |
+|------|-------------|
+| `fallback.process` | Parent span for fallback operation |
+| `fallback.primary` | Span for primary processor attempt |
+| `fallback.fallback` | Span for fallback processor attempt |
+
+**Span Tags:**
+- `fallback.used` - Whether fallback was triggered
+- `fallback.success` - Whether operation succeeded
+- `fallback.primary_error` - Error from primary processor
+- `fallback.fallback_error` - Error from fallback processor
+
+### Hook Events
+
+| Event | Key | Description |
+|-------|-----|-------------|
+| Primary Failed | `fallback.primary_failed` | Fired when primary processor fails |
+| Fallback Used | `fallback.used` | Fired when fallback is triggered |
+| Fallback Succeeded | `fallback.succeeded` | Fired when fallback succeeds |
+| All Failed | `fallback.all_failed` | Fired when both processors fail |
+
+### Event Handlers
+
+```go
+// Monitor primary failures
+fallback.OnPrimaryFailed(func(ctx context.Context, event FallbackEvent) error {
+    log.Warn("Primary processor failed: %v", event.PrimaryError)
+    metrics.Inc("primary.failures", event.Name)
+    return nil
+})
+
+// Track fallback usage
+fallback.OnFallbackUsed(func(ctx context.Context, event FallbackEvent) error {
+    log.Info("Switching to fallback after primary failure")
+    alert.Info("Service %s using fallback", event.Name)
+    return nil
+})
+
+// Celebrate fallback saves
+fallback.OnFallbackSucceeded(func(ctx context.Context, event FallbackEvent) error {
+    log.Info("Fallback saved the day! Duration: %v", event.FallbackDuration)
+    metrics.Inc("fallback.saves")
+    return nil
+})
+
+// Alert on total failures
+fallback.OnAllFailed(func(ctx context.Context, event FallbackEvent) error {
+    alert.Critical("Both primary and fallback failed for %s", event.Name)
+    log.Error("Complete failure - Primary: %v, Fallback: %v",
+        event.PrimaryError, event.FallbackError)
+    return nil
+})
+```
+
 ## Error Handling
 
 Fallback returns the fallback's error if both fail:

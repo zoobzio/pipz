@@ -159,6 +159,65 @@ if err != nil {
 }
 ```
 
+## Observability
+
+RateLimiter provides comprehensive observability through metrics, tracing, and hook events.
+
+### Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `ratelimiter.allowed.total` | Counter | Requests that were allowed |
+| `ratelimiter.throttled.total` | Counter | Requests that were rate-limited |
+| `ratelimiter.wait.time.ms` | Gauge | Time spent waiting for tokens |
+| `ratelimiter.tokens.available` | Gauge | Current available tokens |
+| `ratelimiter.tokens.used` | Counter | Total tokens consumed |
+
+### Traces
+
+| Span | Description |
+|------|-------------|
+| `ratelimiter.process` | Span for rate-limited operation |
+
+**Span Tags:**
+- `ratelimiter.rate` - Configured rate per second
+- `ratelimiter.burst` - Configured burst capacity
+- `ratelimiter.wait_time` - Time spent waiting
+- `ratelimiter.throttled` - Whether request was throttled
+
+### Hook Events
+
+| Event | Key | Description |
+|-------|-----|-------------|
+| Allowed | `ratelimiter.allowed` | Fired when request proceeds |
+| Throttled | `ratelimiter.throttled` | Fired when rate limit hit |
+| Waiting | `ratelimiter.waiting` | Fired when waiting for tokens |
+
+### Event Handlers
+
+```go
+// Monitor rate limiting
+limiter.OnThrottled(func(ctx context.Context, event RateLimiterEvent) error {
+    log.Warn("Rate limit reached, waiting %v", event.WaitTime)
+    metrics.Inc("api.throttled")
+    return nil
+})
+
+// Track wait times
+limiter.OnWaiting(func(ctx context.Context, event RateLimiterEvent) error {
+    if event.WaitTime > 100*time.Millisecond {
+        log.Warn("Long wait for rate limit: %v", event.WaitTime)
+    }
+    return nil
+})
+
+// Monitor token usage
+limiter.OnAllowed(func(ctx context.Context, event RateLimiterEvent) error {
+    metrics.Record("tokens.available", event.TokensAvailable)
+    return nil
+})
+```
+
 ## Common Patterns
 
 ```go

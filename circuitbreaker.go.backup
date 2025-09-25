@@ -34,7 +34,7 @@ const (
 	CircuitBreakerTagStateChange = tracez.Tag("circuitbreaker.state_change")
 	CircuitBreakerTagError       = tracez.Tag("circuitbreaker.error")
 
-	// State constants.
+	// State constants
 	stateClosed   = "closed"
 	stateOpen     = "open"
 	stateHalfOpen = "half-open"
@@ -265,7 +265,7 @@ func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err
 		span.SetTag(CircuitBreakerTagStateChange, fmt.Sprintf("%s->%s", oldState, cb.state))
 
 		// Emit hook event
-		_ = cb.hooks.Emit(ctx, CircuitBreakerEventHalfOpen, CircuitBreakerStateChange{ //nolint:errcheck
+		_ = cb.hooks.Emit(ctx, CircuitBreakerEventHalfOpen, CircuitBreakerStateChange{
 			Name:                cb.name,
 			OldState:            oldState,
 			NewState:            stateHalfOpen,
@@ -286,7 +286,7 @@ func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err
 		span.SetTag(CircuitBreakerTagAllowed, "false")
 
 		// Emit hook event for rejection
-		_ = cb.hooks.Emit(ctx, CircuitBreakerEventRejected, CircuitBreakerStateChange{ //nolint:errcheck
+		cb.hooks.Emit(ctx, //nolint:errcheck CircuitBreakerEventRejected, CircuitBreakerStateChange{
 			Name:                cb.name,
 			OldState:            state,
 			NewState:            state,
@@ -362,7 +362,7 @@ func (cb *CircuitBreaker[T]) onSuccess(ctx context.Context) {
 			cb.metrics.Gauge(CircuitBreakerConsecutiveFails).Set(0)
 
 			// Emit hook event
-			_ = cb.hooks.Emit(ctx, CircuitBreakerEventClosed, CircuitBreakerStateChange{ //nolint:errcheck
+			cb.hooks.Emit(ctx, //nolint:errcheck CircuitBreakerEventClosed, CircuitBreakerStateChange{
 				Name:                cb.name,
 				OldState:            oldState,
 				NewState:            stateClosed,
@@ -392,7 +392,7 @@ func (cb *CircuitBreaker[T]) onFailure(ctx context.Context) {
 			cb.metrics.Gauge(CircuitBreakerCurrentState).Set(1) // open = 1
 
 			// Emit hook event
-			_ = cb.hooks.Emit(ctx, CircuitBreakerEventOpened, CircuitBreakerStateChange{ //nolint:errcheck
+			cb.hooks.Emit(ctx, //nolint:errcheck CircuitBreakerEventOpened, CircuitBreakerStateChange{
 				Name:                cb.name,
 				OldState:            oldState,
 				NewState:            stateOpen,
@@ -412,7 +412,7 @@ func (cb *CircuitBreaker[T]) onFailure(ctx context.Context) {
 		cb.metrics.Gauge(CircuitBreakerCurrentState).Set(1) // open = 1
 
 		// Emit hook event
-		_ = cb.hooks.Emit(ctx, CircuitBreakerEventOpened, CircuitBreakerStateChange{ //nolint:errcheck
+		cb.hooks.Emit(ctx, //nolint:errcheck CircuitBreakerEventOpened, CircuitBreakerStateChange{
 			Name:                cb.name,
 			OldState:            oldState,
 			NewState:            stateOpen,

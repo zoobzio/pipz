@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/zoobzio/metricz"
+	"github.com/zoobzio/tracez"
 )
 
 // Apply creates a Processor from a function that transforms data and may return an error.
@@ -34,8 +37,15 @@ import (
 //	    return data, nil
 //	})
 func Apply[T any](name Name, fn func(context.Context, T) (T, error)) Processor[T] {
+	// Initialize observability
+	metrics := metricz.New()
+	metrics.Counter(ProcessorCallsTotal)
+	metrics.Counter(ProcessorErrorsTotal)
+
 	return Processor[T]{
-		name: name,
+		name:    name,
+		metrics: metrics,
+		tracer:  tracez.New(),
 		fn: func(ctx context.Context, value T) (result T, err error) {
 			defer recoverFromPanic(&result, &err, name, value)
 			start := time.Now()

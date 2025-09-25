@@ -4,14 +4,195 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/zoobzio/clockz"
+	"github.com/zoobzio/tracez"
 )
 
 func TestRetry(t *testing.T) {
+	t.Run("Hooks fire on retry events", func(t *testing.T) {
+		var attemptEvents []RetryEvent
+		var successEvents []RetryEvent
+		var mu sync.Mutex
+
+		calls := 0
+		processor := Apply("flaky", func(_ context.Context, n int) (int, error) {
+			calls++
+			if calls < 3 {
+				return 0, errors.New("temporary error")
+			}
+			return n * 2, nil
+		})
+
+		retry := NewRetry("test-retry", processor, 5)
+		defer retry.Close()
+
+		// Register hooks
+		retry.OnAttempt(func(_ context.Context, event RetryEvent) error {
+			mu.Lock()
+			attemptEvents = append(attemptEvents, event)
+			mu.Unlock()
+			return nil
+		})
+
+		retry.OnSuccess(func(_ context.Context, event RetryEvent) error {
+			mu.Lock()
+			successEvents = append(successEvents, event)
+			mu.Unlock()
+			return nil
+		})
+
+		// Trigger retry logic
+		result, err := retry.Process(context.Background(), 5)
+
+		// Verify success
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result != 10 {
+			t.Errorf("expected 10, got %d", result)
+		}
+
+		// Wait for async hooks
+		time.Sleep(50 * time.Millisecond)
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		// Check attempt events
+		if len(attemptEvents) != 3 {
+			t.Errorf("expected 3 attempt events, got %d", len(attemptEvents))
+		}
+
+		// Sort events by attempt number since hooks are async
+		attemptNumbers := make([]int, len(attemptEvents))
+		for i, event := range attemptEvents {
+			attemptNumbers[i] = event.AttemptNumber
+		}
+
+		// Verify we have the right attempt numbers
+		expectedAttempts := []int{1, 2, 3}
+		for _, expected := range expectedAttempts {
+			found := false
+			for _, actual := range attemptNumbers {
+				if actual == expected {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("missing attempt number %d in events", expected)
+			}
+		}
+
+		for i, event := range attemptEvents {
+			if event.Name != "test-retry" {
+				t.Errorf("event %d: expected name 'test-retry', got %s", i, event.Name)
+			}
+			if event.ProcessorName != "flaky" {
+				t.Errorf("event %d: expected processor name 'flaky', got %s", i, event.ProcessorName)
+			}
+			if event.MaxAttempts != 5 {
+				t.Errorf("event %d: expected max attempts 5, got %d", i, event.MaxAttempts)
+			}
+			// Check success based on attempt number, not order in slice
+			if event.AttemptNumber < 3 && event.Success {
+				t.Errorf("attempt %d: expected failure, got success", event.AttemptNumber)
+			}
+			if event.AttemptNumber == 3 && !event.Success {
+				t.Errorf("attempt %d: expected success, got failure", event.AttemptNumber)
+			}
+			if event.Duration <= 0 {
+				t.Errorf("event %d: expected positive duration", i)
+			}
+		}
+
+		// Check success event
+		if len(successEvents) != 1 {
+			t.Errorf("expected 1 success event, got %d", len(successEvents))
+		}
+		if len(successEvents) > 0 {
+			event := successEvents[0]
+			if !event.Success {
+				t.Error("expected success=true for success event")
+			}
+			if event.AttemptsUsed != 3 {
+				t.Errorf("expected 3 attempts used, got %d", event.AttemptsUsed)
+			}
+			if event.TotalDuration <= 0 {
+				t.Error("expected positive total duration")
+			}
+		}
+	})
+
+	t.Run("Hook fires on exhausted event", func(t *testing.T) {
+		var exhaustedEvents []RetryEvent
+		var attemptEvents []RetryEvent
+		var mu sync.Mutex
+
+		processor := Apply("always-fail", func(_ context.Context, _ int) (int, error) {
+			return 0, errors.New("permanent error")
+		})
+
+		retry := NewRetry("test-retry", processor, 2)
+		defer retry.Close()
+
+		retry.OnAttempt(func(_ context.Context, event RetryEvent) error {
+			mu.Lock()
+			attemptEvents = append(attemptEvents, event)
+			mu.Unlock()
+			return nil
+		})
+
+		retry.OnExhausted(func(_ context.Context, event RetryEvent) error {
+			mu.Lock()
+			exhaustedEvents = append(exhaustedEvents, event)
+			mu.Unlock()
+			return nil
+		})
+
+		// Trigger exhaustion
+		_, err := retry.Process(context.Background(), 5)
+
+		// Verify failure
+		if err == nil {
+			t.Fatal("expected error after exhausting retries")
+		}
+
+		// Wait for async hooks
+		time.Sleep(50 * time.Millisecond)
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		// Check attempt events
+		if len(attemptEvents) != 2 {
+			t.Errorf("expected 2 attempt events, got %d", len(attemptEvents))
+		}
+
+		// Check exhausted event
+		if len(exhaustedEvents) != 1 {
+			t.Errorf("expected 1 exhausted event, got %d", len(exhaustedEvents))
+		}
+		if len(exhaustedEvents) > 0 {
+			event := exhaustedEvents[0]
+			if event.Success {
+				t.Error("expected success=false for exhausted event")
+			}
+			if event.AttemptsUsed != 2 {
+				t.Errorf("expected 2 attempts used, got %d", event.AttemptsUsed)
+			}
+			if event.Error == nil {
+				t.Error("expected error in exhausted event")
+			}
+			if event.TotalDuration <= 0 {
+				t.Error("expected positive total duration")
+			}
+		}
+	})
 	t.Run("Success On First Try", func(t *testing.T) {
 		calls := 0
 		processor := Apply("test", func(_ context.Context, n int) (int, error) {
@@ -133,6 +314,86 @@ func TestRetry(t *testing.T) {
 		}
 	})
 
+	t.Run("Observability Components", func(t *testing.T) {
+		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+			if n < 3 {
+				return 0, errors.New("temp error")
+			}
+			return n * 2, nil
+		})
+
+		retry := NewRetry("test-retry", processor, 3)
+		defer retry.Close()
+
+		// Verify observability components are initialized
+		if retry.Metrics() == nil {
+			t.Error("expected metrics registry to be initialized")
+		}
+		if retry.Tracer() == nil {
+			t.Error("expected tracer to be initialized")
+		}
+
+		// Capture spans using the callback API
+		var spans []tracez.Span
+		retry.Tracer().OnSpanComplete(func(span tracez.Span) {
+			spans = append(spans, span)
+		})
+
+		// Process with retries to test metrics
+		_, err := retry.Process(context.Background(), 1)
+		if err == nil {
+			t.Error("expected error on first attempt with n=1")
+		}
+
+		// Try again with success
+		result, err := retry.Process(context.Background(), 3)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result != 6 {
+			t.Errorf("expected 6, got %d", result)
+		}
+
+		// Verify metrics were incremented
+		attemptsTotal := retry.Metrics().Counter(RetryAttemptsTotal).Value()
+		if attemptsTotal == 0 {
+			t.Error("expected attempts counter to be incremented")
+		}
+
+		successesTotal := retry.Metrics().Counter(RetrySuccessesTotal).Value()
+		if successesTotal != 1 {
+			t.Errorf("expected 1 success, got %d", int(successesTotal))
+		}
+
+		failuresTotal := retry.Metrics().Counter(RetryFailuresTotal).Value()
+		if failuresTotal != 1 {
+			t.Errorf("expected 1 failure (exhausted retries), got %d", int(failuresTotal))
+		}
+
+		// Verify spans were captured
+		if len(spans) == 0 {
+			t.Error("expected spans to be captured")
+		}
+
+		// Check we have both process and attempt spans
+		var processSpans, attemptSpans int
+		for _, span := range spans {
+			if span.Name == RetryProcessSpan {
+				processSpans++
+			}
+			if span.Name == RetryAttemptSpan {
+				attemptSpans++
+			}
+		}
+
+		if processSpans != 2 { // One for each Process() call
+			t.Errorf("expected 2 process spans, got %d", processSpans)
+		}
+		if attemptSpans < 3 { // At least 3 attempts
+			t.Errorf("expected at least 3 attempt spans, got %d", attemptSpans)
+		}
+	})
+
 	t.Run("Constructor With Invalid MaxAttempts", func(t *testing.T) {
 		processor := Transform("test", func(_ context.Context, n int) int { return n })
 
@@ -249,224 +510,7 @@ func TestRetry(t *testing.T) {
 	})
 }
 
-func TestBackoff(t *testing.T) {
-	t.Run("Success On First Try", func(t *testing.T) {
-		calls := 0
-		processor := Apply("test", func(_ context.Context, n int) (int, error) {
-			calls++
-			return n * 2, nil
-		})
-
-		backoff := NewBackoff("test-backoff", processor, 3, 10*time.Millisecond)
-		result, err := backoff.Process(context.Background(), 5)
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if result != 10 {
-			t.Errorf("expected 10, got %d", result)
-		}
-		if calls != 1 {
-			t.Errorf("expected 1 call, got %d", calls)
-		}
-	})
-
-	t.Run("Backoff Timing With Clock", func(t *testing.T) {
-		var calls int32
-		processor := Apply("test", func(_ context.Context, n int) (int, error) {
-			atomic.AddInt32(&calls, 1)
-			if atomic.LoadInt32(&calls) < 3 {
-				return 0, errors.New("temporary error")
-			}
-			return n * 2, nil
-		})
-
-		clock := clockz.NewFakeClock()
-		backoff := NewBackoff("test-backoff", processor, 3, 50*time.Millisecond).WithClock(clock)
-
-		// Run in goroutine so we can advance the clock
-		done := make(chan struct{})
-		var result int
-		var err error
-		go func() {
-			result, err = backoff.Process(context.Background(), 5)
-			close(done)
-		}()
-
-		// Allow goroutine to start
-		time.Sleep(10 * time.Millisecond)
-
-		// First retry delay: 50ms
-		clock.Advance(50 * time.Millisecond)
-		clock.BlockUntilReady()
-		time.Sleep(10 * time.Millisecond) // Let goroutine process timer
-
-		// Second retry delay: 100ms (exponential backoff)
-		clock.Advance(100 * time.Millisecond)
-		clock.BlockUntilReady()
-		time.Sleep(10 * time.Millisecond) // Let goroutine process timer
-
-		// Wait for completion with timeout
-		select {
-		case <-done:
-		case <-time.After(time.Second):
-			t.Fatal("test timed out")
-		}
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if result != 10 {
-			t.Errorf("expected 10, got %d", result)
-		}
-		if atomic.LoadInt32(&calls) != 3 {
-			t.Errorf("expected 3 calls, got %d", atomic.LoadInt32(&calls))
-		}
-	})
-
-	t.Run("Backoff Timing Without Clock", func(t *testing.T) {
-		var calls int32
-		processor := Apply("test", func(_ context.Context, n int) (int, error) {
-			atomic.AddInt32(&calls, 1)
-			if atomic.LoadInt32(&calls) < 3 {
-				return 0, errors.New("temporary error")
-			}
-			return n * 2, nil
-		})
-
-		backoff := NewBackoff("test-backoff", processor, 3, 50*time.Millisecond)
-
-		start := time.Now()
-		result, err := backoff.Process(context.Background(), 5)
-		duration := time.Since(start)
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if result != 10 {
-			t.Errorf("expected 10, got %d", result)
-		}
-		// First retry: 50ms, Second retry: 100ms, Total: ~150ms
-		if duration < 150*time.Millisecond {
-			t.Errorf("expected at least 150ms, got %v", duration)
-		}
-	})
-
-	t.Run("Configuration Methods", func(t *testing.T) {
-		processor := Transform("test", func(_ context.Context, n int) int { return n })
-		backoff := NewBackoff("test", processor, 3, 100*time.Millisecond)
-
-		if backoff.GetMaxAttempts() != 3 {
-			t.Errorf("expected 3, got %d", backoff.GetMaxAttempts())
-		}
-		if backoff.GetBaseDelay() != 100*time.Millisecond {
-			t.Errorf("expected 100ms, got %v", backoff.GetBaseDelay())
-		}
-
-		backoff.SetMaxAttempts(5)
-		backoff.SetBaseDelay(200 * time.Millisecond)
-
-		if backoff.GetMaxAttempts() != 5 {
-			t.Errorf("expected 5, got %d", backoff.GetMaxAttempts())
-		}
-		if backoff.GetBaseDelay() != 200*time.Millisecond {
-			t.Errorf("expected 200ms, got %v", backoff.GetBaseDelay())
-		}
-	})
-
-	t.Run("Name Method", func(t *testing.T) {
-		processor := Transform("noop", func(_ context.Context, n int) int { return n })
-		backoff := NewBackoff("my-backoff", processor, 3, time.Second)
-		if backoff.Name() != "my-backoff" {
-			t.Errorf("expected 'my-backoff', got %q", backoff.Name())
-		}
-	})
-
-	t.Run("Context Cancellation During Delay", func(t *testing.T) {
-		calls := 0
-		processor := Apply("test", func(_ context.Context, n int) (int, error) {
-			calls++
-			if calls == 1 {
-				return 0, errors.New("first attempt error")
-			}
-			// Should not reach here if context is canceled during delay
-			return n * 2, nil
-		})
-
-		backoff := NewBackoff("test", processor, 3, 100*time.Millisecond)
-
-		// Cancel context after 50ms (during first backoff delay)
-		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-		defer cancel()
-
-		_, err := backoff.Process(ctx, 5)
-
-		// Should get context error
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Errorf("expected context.DeadlineExceeded, got %v", err)
-		}
-
-		// Should have only tried once
-		if calls != 1 {
-			t.Errorf("expected 1 call before context cancellation, got %d", calls)
-		}
-	})
-
-	t.Run("Constructor With Invalid MaxAttempts", func(t *testing.T) {
-		processor := Transform("test", func(_ context.Context, n int) int { return n })
-
-		// Test with 0 attempts - should be clamped to 1
-		backoff := NewBackoff("test", processor, 0, time.Millisecond)
-		if backoff.GetMaxAttempts() != 1 {
-			t.Errorf("expected maxAttempts to be clamped to 1, got %d", backoff.GetMaxAttempts())
-		}
-
-		// Test with negative attempts - should be clamped to 1
-		backoff = NewBackoff("test", processor, -5, time.Millisecond)
-		if backoff.GetMaxAttempts() != 1 {
-			t.Errorf("expected maxAttempts to be clamped to 1, got %d", backoff.GetMaxAttempts())
-		}
-	})
-
-	t.Run("SetMaxAttempts With Invalid Value", func(t *testing.T) {
-		processor := Transform("test", func(_ context.Context, n int) int { return n })
-		backoff := NewBackoff("test", processor, 3, time.Millisecond)
-
-		// Set to 0 - should be clamped to 1
-		backoff.SetMaxAttempts(0)
-		if backoff.GetMaxAttempts() != 1 {
-			t.Errorf("expected maxAttempts to be clamped to 1, got %d", backoff.GetMaxAttempts())
-		}
-
-		// Set to negative - should be clamped to 1
-		backoff.SetMaxAttempts(-10)
-		if backoff.GetMaxAttempts() != 1 {
-			t.Errorf("expected maxAttempts to be clamped to 1, got %d", backoff.GetMaxAttempts())
-		}
-	})
-
-	t.Run("Exhausts Retries Returns Data", func(t *testing.T) {
-		calls := 0
-		processor := Apply("test", func(_ context.Context, _ int) (int, error) {
-			calls++
-			return 0, errors.New("persistent error")
-		})
-
-		backoff := NewBackoff("test-backoff", processor, 2, 10*time.Millisecond)
-		result, err := backoff.Process(context.Background(), 42)
-
-		if err == nil {
-			t.Fatal("expected error after exhausting retries")
-		}
-		// Should return the original data value on failure
-		if result != 42 {
-			t.Errorf("expected original data 42 to be returned on failure, got %d", result)
-		}
-		if calls != 2 {
-			t.Errorf("expected 2 calls, got %d", calls)
-		}
-	})
-
+func TestRetryContextCancellationBetweenAttempts(t *testing.T) {
 	t.Run("Context Cancellation Between Retry Attempts", func(t *testing.T) {
 		// This test covers lines 74-84 in retry.go where context is checked between attempts
 		attemptCount := atomic.Int32{}
@@ -522,7 +566,9 @@ func TestBackoff(t *testing.T) {
 			t.Errorf("expected at least 1 attempt, got %d", attempts)
 		}
 	})
+}
 
+func TestRetryBackoffContextTimeout(t *testing.T) {
 	t.Run("Backoff Context Timeout During Wait", func(t *testing.T) {
 		// This test covers BackoffRetry when context times out during backoff wait
 		attempts := atomic.Int32{}

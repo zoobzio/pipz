@@ -109,6 +109,62 @@ Don't use `Timeout` when:
 - Timeout would leave inconsistent state
 - Operations can't be cancelled (use monitoring instead)
 
+## Observability
+
+Timeout provides comprehensive observability through metrics, tracing, and hook events.
+
+### Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `timeout.processed.total` | Counter | Total timeout operations |
+| `timeout.successes.total` | Counter | Operations that completed in time |
+| `timeout.timeouts.total` | Counter | Operations that exceeded timeout |
+| `timeout.cancellations.total` | Counter | Operations canceled by upstream |
+| `timeout.duration.ms` | Gauge | Actual operation duration |
+
+### Traces
+
+| Span | Description |
+|------|-------------|
+| `timeout.process` | Span for timeout-wrapped operation |
+
+**Span Tags:**
+- `timeout.duration` - Configured timeout duration
+- `timeout.elapsed` - Actual time taken
+- `timeout.success` - Whether operation completed in time
+- `timeout.timed_out` - Whether timeout was exceeded
+- `timeout.canceled` - Whether canceled by upstream
+
+### Hook Events
+
+| Event | Key | Description |
+|-------|-----|-------------|
+| Timeout | `timeout.timeout` | Fired when operation times out |
+| Near Timeout | `timeout.near_timeout` | Fired when >80% of timeout used |
+
+### Event Handlers
+
+```go
+// Alert on timeouts
+timeout.OnTimeout(func(ctx context.Context, event TimeoutEvent) error {
+    log.Error("Operation timed out after %v", event.Elapsed)
+    alert.Critical("Timeout in %s", event.Name)
+    metrics.Inc("timeouts", event.Name)
+    return nil
+})
+
+// Warn on slow operations
+timeout.OnNearTimeout(func(ctx context.Context, event TimeoutEvent) error {
+    log.Warn("Operation used %.0f%% of timeout (%v/%v)",
+        event.PercentUsed, event.Elapsed, event.Duration)
+    if event.PercentUsed > 90 {
+        alert.Warning("Operation %s critically slow", event.Name)
+    }
+    return nil
+})
+```
+
 ## Error Details
 
 Timeout errors are marked specially:

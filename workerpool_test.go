@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zoobzio/clockz"
+	"github.com/zoobzio/tracez"
 )
 
 func TestWorkerPool(t *testing.T) {
@@ -638,6 +639,488 @@ func TestWorkerPool(t *testing.T) {
 		if finalCount != 0 && finalCount != 10 && finalCount != 20 {
 			t.Errorf("expected counter to be 0, 10, or 20, got %d", finalCount)
 		}
+	})
+
+	t.Run("Observability", func(t *testing.T) {
+		t.Run("Metrics and Spans", func(t *testing.T) {
+			// Create processors that track execution
+			counter := int32(0)
+
+			proc1 := Effect("effect1", func(_ context.Context, _ TestData) error {
+				atomic.AddInt32(&counter, 1)
+				time.Sleep(20 * time.Millisecond)
+				return nil
+			})
+
+			proc2 := Effect("effect2", func(_ context.Context, _ TestData) error {
+				atomic.AddInt32(&counter, 1)
+				time.Sleep(20 * time.Millisecond)
+				return nil
+			})
+
+			proc3 := Effect("effect3", func(_ context.Context, _ TestData) error {
+				atomic.AddInt32(&counter, 1)
+				time.Sleep(20 * time.Millisecond)
+				return nil
+			})
+
+			// Create worker pool with 2 workers
+			pool := NewWorkerPool("test-pool", 2, proc1, proc2, proc3)
+			defer pool.Close()
+
+			// Verify observability components are initialized
+			if pool.Metrics() == nil {
+				t.Error("expected metrics registry to be initialized")
+			}
+			if pool.Tracer() == nil {
+				t.Error("expected tracer to be initialized")
+			}
+
+			// Capture spans using the callback API
+			var spans []tracez.Span
+			var spanMu sync.Mutex
+			pool.Tracer().OnSpanComplete(func(span tracez.Span) {
+				spanMu.Lock()
+				spans = append(spans, span)
+				spanMu.Unlock()
+			})
+
+			// Process
+			testData := TestData{Value: 42}
+			result, err := pool.Process(context.Background(), testData)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if result.Value != 42 {
+				t.Errorf("expected value 42, got %d", result.Value)
+			}
+
+			// Verify all processors ran
+			if atomic.LoadInt32(&counter) != 3 {
+				t.Errorf("expected 3 processors to run, got %d", atomic.LoadInt32(&counter))
+			}
+
+			// Verify metrics
+			processedTotal := pool.Metrics().Counter(WorkerPoolProcessedTotal).Value()
+			if processedTotal != 1 {
+				t.Errorf("expected 1 processed item, got %f", processedTotal)
+			}
+
+			successesTotal := pool.Metrics().Counter(WorkerPoolSuccessesTotal).Value()
+			if successesTotal != 1 {
+				t.Errorf("expected 1 success, got %f", successesTotal)
+			}
+
+			tasksTotal := pool.Metrics().Counter(WorkerPoolTasksTotal).Value()
+			if tasksTotal != 3 {
+				t.Errorf("expected 3 tasks, got %f", tasksTotal)
+			}
+
+			workersMax := pool.Metrics().Gauge(WorkerPoolWorkersMax).Value()
+			if workersMax != 2 {
+				t.Errorf("expected max 2 workers, got %f", workersMax)
+			}
+
+			// Check duration was recorded
+			duration := pool.Metrics().Gauge(WorkerPoolDurationMs).Value()
+			if duration < 20 { // Should be at least 20ms (with 2 workers and 3 tasks)
+				t.Errorf("expected duration >= 20ms, got %f", duration)
+			}
+
+			// Wait a bit for spans to be collected
+			time.Sleep(10 * time.Millisecond)
+
+			// Verify spans were captured (1 main + 3 task spans)
+			spanMu.Lock()
+			spanCount := len(spans)
+			spanMu.Unlock()
+
+			if spanCount < 4 {
+				t.Errorf("expected at least 4 spans (1 main + 3 tasks), got %d", spanCount)
+			}
+
+			// Check span details
+			spanMu.Lock()
+			for _, span := range spans {
+				if span.Name == WorkerPoolProcessSpan {
+					// Main span should have processor and worker counts
+					if _, ok := span.Tags[WorkerPoolTagProcessorCount]; !ok {
+						t.Error("main span missing processor_count tag")
+					}
+					if _, ok := span.Tags[WorkerPoolTagWorkerCount]; !ok {
+						t.Error("main span missing worker_count tag")
+					}
+				} else if span.Name == WorkerPoolTaskSpan {
+					// Task spans should have processor name
+					if _, ok := span.Tags[WorkerPoolTagProcessorName]; !ok {
+						t.Error("task span missing processor_name tag")
+					}
+				}
+			}
+			spanMu.Unlock()
+		})
+
+		t.Run("Empty Processors Metrics", func(t *testing.T) {
+			pool := NewWorkerPool[TestData]("empty-pool", 3)
+			defer pool.Close()
+
+			testData := TestData{Value: 10}
+			_, err := pool.Process(context.Background(), testData)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+
+			// Check metrics for empty processor list
+			processedTotal := pool.Metrics().Counter(WorkerPoolProcessedTotal).Value()
+			if processedTotal != 1 {
+				t.Errorf("expected 1 processed item, got %f", processedTotal)
+			}
+
+			tasksTotal := pool.Metrics().Counter(WorkerPoolTasksTotal).Value()
+			if tasksTotal != 0 {
+				t.Errorf("expected 0 tasks (no processors), got %f", tasksTotal)
+			}
+
+			workersMax := pool.Metrics().Gauge(WorkerPoolWorkersMax).Value()
+			if workersMax != 3 {
+				t.Errorf("expected max 3 workers, got %f", workersMax)
+			}
+		})
+
+		t.Run("Error Metrics", func(t *testing.T) {
+			// Create processors where one fails
+			proc1 := Effect("success", func(_ context.Context, _ TestData) error {
+				time.Sleep(10 * time.Millisecond)
+				return nil
+			})
+
+			proc2 := Effect("failure", func(_ context.Context, _ TestData) error {
+				time.Sleep(10 * time.Millisecond)
+				return errors.New("processor failed")
+			})
+
+			pool := NewWorkerPool("error-pool", 2, proc1, proc2)
+			defer pool.Close()
+
+			testData := TestData{Value: 5}
+			_, err := pool.Process(context.Background(), testData)
+			if err == nil {
+				t.Fatal("expected error from failing processor")
+			}
+
+			// Check metrics for error case
+			processedTotal := pool.Metrics().Counter(WorkerPoolProcessedTotal).Value()
+			if processedTotal != 1 {
+				t.Errorf("expected 1 processed item, got %f", processedTotal)
+			}
+
+			successesTotal := pool.Metrics().Counter(WorkerPoolSuccessesTotal).Value()
+			if successesTotal != 0 {
+				t.Errorf("expected 0 successes, got %f", successesTotal)
+			}
+
+			tasksTotal := pool.Metrics().Counter(WorkerPoolTasksTotal).Value()
+			if tasksTotal != 2 {
+				t.Errorf("expected 2 tasks, got %f", tasksTotal)
+			}
+		})
+
+		t.Run("Worker Count Update", func(t *testing.T) {
+			pool := NewWorkerPool[TestData]("test-pool", 5)
+			defer pool.Close()
+
+			// Check initial worker count
+			workersMax := pool.Metrics().Gauge(WorkerPoolWorkersMax).Value()
+			if workersMax != 5 {
+				t.Errorf("expected initial max 5 workers, got %f", workersMax)
+			}
+
+			// Update worker count
+			pool.SetWorkerCount(10)
+
+			// Check updated worker count
+			workersMax = pool.Metrics().Gauge(WorkerPoolWorkersMax).Value()
+			if workersMax != 10 {
+				t.Errorf("expected updated max 10 workers, got %f", workersMax)
+			}
+		})
+
+		t.Run("Hooks fire on task lifecycle events", func(t *testing.T) {
+			// Create processors with varying speeds
+			proc1 := Apply("fast", func(_ context.Context, d TestData) (TestData, error) {
+				time.Sleep(10 * time.Millisecond)
+				d.Value = 100
+				return d, nil
+			})
+			proc2 := Apply("medium", func(_ context.Context, d TestData) (TestData, error) {
+				time.Sleep(30 * time.Millisecond)
+				d.Value = 200
+				return d, nil
+			})
+			proc3 := Apply("slow", func(_ context.Context, d TestData) (TestData, error) {
+				time.Sleep(50 * time.Millisecond)
+				d.Value = 300
+				return d, nil
+			})
+
+			// Create pool with 2 workers (to force queueing)
+			pool := NewWorkerPool("test-hooks", 2, proc1, proc2, proc3)
+			defer pool.Close()
+
+			var queuedEvents []WorkerPoolEvent
+			var startedEvents []WorkerPoolEvent
+			var completeEvents []WorkerPoolEvent
+			var allCompleteEvents []WorkerPoolEvent
+			var mu sync.Mutex
+
+			// Register hooks
+			pool.OnTaskQueued(func(_ context.Context, event WorkerPoolEvent) error {
+				mu.Lock()
+				queuedEvents = append(queuedEvents, event)
+				mu.Unlock()
+				return nil
+			})
+
+			pool.OnTaskStarted(func(_ context.Context, event WorkerPoolEvent) error {
+				mu.Lock()
+				startedEvents = append(startedEvents, event)
+				mu.Unlock()
+				return nil
+			})
+
+			pool.OnTaskComplete(func(_ context.Context, event WorkerPoolEvent) error {
+				mu.Lock()
+				completeEvents = append(completeEvents, event)
+				mu.Unlock()
+				return nil
+			})
+
+			pool.OnAllComplete(func(_ context.Context, event WorkerPoolEvent) error {
+				mu.Lock()
+				allCompleteEvents = append(allCompleteEvents, event)
+				mu.Unlock()
+				return nil
+			})
+
+			// Process
+			data := TestData{Value: 1}
+			result, err := pool.Process(context.Background(), data)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			// Result should be original input (pool doesn't modify)
+			if result.Value != 1 {
+				t.Errorf("expected original value 1, got %d", result.Value)
+			}
+
+			// Wait for async hooks
+			time.Sleep(100 * time.Millisecond)
+
+			mu.Lock()
+			queuedCount := len(queuedEvents)
+			startedCount := len(startedEvents)
+			completeCount := len(completeEvents)
+			allCompleteCount := len(allCompleteEvents)
+
+			// Check queued events
+			if queuedCount != 3 {
+				t.Errorf("expected 3 queued events, got %d", queuedCount)
+			}
+
+			// Check started events
+			if startedCount != 3 {
+				t.Errorf("expected 3 started events, got %d", startedCount)
+			}
+
+			// At least one task should have waited (3 tasks, 2 workers)
+			var hadQueueWait bool
+			for _, event := range startedEvents {
+				if event.QueueWaitTime > 0 {
+					hadQueueWait = true
+					break
+				}
+			}
+			if !hadQueueWait {
+				t.Error("expected at least one task to have queue wait time")
+			}
+
+			// Check complete events
+			if completeCount != 3 {
+				t.Errorf("expected 3 complete events, got %d", completeCount)
+			}
+
+			// All tasks should succeed
+			var successCount int
+			for _, event := range completeEvents {
+				if event.Success {
+					successCount++
+				}
+				if event.Duration <= 0 {
+					t.Error("expected positive duration for completed task")
+				}
+			}
+			if successCount != 3 {
+				t.Errorf("expected 3 successful tasks, got %d", successCount)
+			}
+
+			// Check all complete event
+			if allCompleteCount != 1 {
+				t.Errorf("expected 1 all complete event, got %d", allCompleteCount)
+			}
+
+			if allCompleteCount > 0 {
+				event := allCompleteEvents[0]
+				if event.TotalTasks != 3 {
+					t.Errorf("expected 3 total tasks, got %d", event.TotalTasks)
+				}
+				if event.CompletedTasks != 3 {
+					t.Errorf("expected 3 completed tasks, got %d", event.CompletedTasks)
+				}
+				if event.SuccessfulTasks != 3 {
+					t.Errorf("expected 3 successful tasks, got %d", event.SuccessfulTasks)
+				}
+				if event.FailedTasks != 0 {
+					t.Errorf("expected 0 failed tasks, got %d", event.FailedTasks)
+				}
+				if event.TotalDuration < 50*time.Millisecond {
+					t.Error("expected total duration >= 50ms (slowest task)")
+				}
+			}
+			mu.Unlock()
+		})
+
+		t.Run("Hooks fire on task failures", func(t *testing.T) {
+			// Create processors where one fails
+			proc1 := Apply("success1", func(_ context.Context, d TestData) (TestData, error) {
+				time.Sleep(10 * time.Millisecond)
+				return d, nil
+			})
+			proc2 := Apply("failure", func(_ context.Context, d TestData) (TestData, error) {
+				time.Sleep(20 * time.Millisecond)
+				return d, errors.New("task error")
+			})
+			proc3 := Apply("success2", func(_ context.Context, d TestData) (TestData, error) {
+				time.Sleep(15 * time.Millisecond)
+				return d, nil
+			})
+
+			pool := NewWorkerPool("test-failure", 3, proc1, proc2, proc3)
+			defer pool.Close()
+
+			var completeEvents []WorkerPoolEvent
+			var allCompleteEvents []WorkerPoolEvent
+			var mu sync.Mutex
+
+			pool.OnTaskComplete(func(_ context.Context, event WorkerPoolEvent) error {
+				mu.Lock()
+				completeEvents = append(completeEvents, event)
+				mu.Unlock()
+				return nil
+			})
+
+			pool.OnAllComplete(func(_ context.Context, event WorkerPoolEvent) error {
+				mu.Lock()
+				allCompleteEvents = append(allCompleteEvents, event)
+				mu.Unlock()
+				return nil
+			})
+
+			// Process - should fail due to proc2
+			data := TestData{Value: 1}
+			_, err := pool.Process(context.Background(), data)
+			if err == nil {
+				t.Error("expected error from failing processor")
+			}
+
+			// Wait for async hooks
+			time.Sleep(50 * time.Millisecond)
+
+			mu.Lock()
+			completeCount := len(completeEvents)
+			allCompleteCount := len(allCompleteEvents)
+
+			// All tasks should complete (pool doesn't stop on first error)
+			if completeCount != 3 {
+				t.Errorf("expected 3 complete events, got %d", completeCount)
+			}
+
+			// Count successes and failures
+			var successCount, failureCount int
+			var hasFailureEvent bool
+			for _, event := range completeEvents {
+				if event.Success {
+					successCount++
+				} else {
+					failureCount++
+					if event.Error != nil && event.ProcessorName == "failure" {
+						hasFailureEvent = true
+					}
+				}
+			}
+
+			if successCount != 2 {
+				t.Errorf("expected 2 successful tasks, got %d", successCount)
+			}
+			if failureCount != 1 {
+				t.Errorf("expected 1 failed task, got %d", failureCount)
+			}
+			if !hasFailureEvent {
+				t.Error("expected failure event with error for 'failure' processor")
+			}
+
+			// Check all complete event
+			if allCompleteCount != 1 {
+				t.Errorf("expected 1 all complete event, got %d", allCompleteCount)
+			}
+
+			if allCompleteCount > 0 {
+				event := allCompleteEvents[0]
+				if event.SuccessfulTasks != 2 {
+					t.Errorf("expected 2 successful tasks in all complete, got %d", event.SuccessfulTasks)
+				}
+				if event.FailedTasks != 1 {
+					t.Errorf("expected 1 failed task in all complete, got %d", event.FailedTasks)
+				}
+			}
+			mu.Unlock()
+		})
+
+		t.Run("Empty pool hooks", func(t *testing.T) {
+			pool := NewWorkerPool[TestData]("empty-hooks", 2)
+			defer pool.Close()
+
+			var allCompleteEvents []WorkerPoolEvent
+			var mu sync.Mutex
+
+			pool.OnAllComplete(func(_ context.Context, event WorkerPoolEvent) error {
+				mu.Lock()
+				allCompleteEvents = append(allCompleteEvents, event)
+				mu.Unlock()
+				return nil
+			})
+
+			// Process empty pool
+			data := TestData{Value: 42}
+			result, err := pool.Process(context.Background(), data)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if result.Value != 42 {
+				t.Errorf("expected 42, got %d", result.Value)
+			}
+
+			// Wait for async hooks
+			time.Sleep(50 * time.Millisecond)
+
+			mu.Lock()
+			allCompleteCount := len(allCompleteEvents)
+			mu.Unlock()
+
+			// Should still get all complete event for empty pool
+			if allCompleteCount != 1 {
+				t.Errorf("expected 1 all complete event for empty pool, got %d", allCompleteCount)
+			}
+		})
 	})
 }
 

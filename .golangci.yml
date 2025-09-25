@@ -53,12 +53,15 @@ linters-settings:
   
   govet:
     enable-all: true
+    disable:
+      - fieldalignment  # Performance optimization, not critical for correctness
   
   errcheck:
     check-type-assertions: true
     check-blank: true
     exclude-functions:
       - (io.Closer).Close  # Handled by bodyclose
+      - (github.com/zoobzio/hookz.Hooks).Emit  # Fire-and-forget pattern
   
   gocritic:
     enabled-checks:

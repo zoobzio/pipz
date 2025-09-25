@@ -1,6 +1,11 @@
 package pipz
 
-import "context"
+import (
+	"context"
+
+	"github.com/zoobzio/metricz"
+	"github.com/zoobzio/tracez"
+)
 
 // Mutate creates a Processor that conditionally transforms data based on a predicate.
 // Mutate combines a condition check with a transformation, applying the transformer
@@ -30,8 +35,15 @@ import "context"
 //	    },
 //	)
 func Mutate[T any](name Name, transformer func(context.Context, T) T, condition func(context.Context, T) bool) Processor[T] {
+	// Initialize observability
+	metrics := metricz.New()
+	metrics.Counter(ProcessorCallsTotal)
+	metrics.Counter(ProcessorErrorsTotal)
+
 	return Processor[T]{
-		name: name,
+		name:    name,
+		metrics: metrics,
+		tracer:  tracez.New(),
 		fn: func(ctx context.Context, value T) (result T, err error) {
 			defer recoverFromPanic(&result, &err, name, value)
 			if condition(ctx, value) {

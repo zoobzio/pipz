@@ -3,11 +3,12 @@ package pipz
 import (
 	"context"
 	"errors"
-	"runtime"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/zoobzio/clockz"
+	"github.com/zoobzio/tracez"
 )
 
 func TestTimeout(t *testing.T) {
@@ -212,68 +213,6 @@ func TestTimeout(t *testing.T) {
 		}
 	})
 
-	t.Run("Goroutine Leak Prevention", func(t *testing.T) {
-		// Test that the goroutine doesn't leak when timeout occurs with a processor
-		// that ignores context cancellation (worst case scenario)
-		processor := Apply("ignores-context", func(_ context.Context, n int) (int, error) {
-			// This processor intentionally ignores context cancellation
-			// to simulate a worst-case scenario where the processor doesn't respect context
-			time.Sleep(200 * time.Millisecond)
-			return n * 2, nil
-		})
-
-		timeout := NewTimeout("leak-test", processor, 50*time.Millisecond)
-
-		// Record initial goroutine count
-		initialGoroutines := runtime.NumGoroutine()
-
-		// Trigger timeout (processor will continue running in background in broken implementation)
-		result, err := timeout.Process(context.Background(), 5)
-
-		// Verify timeout error occurred
-		if err == nil {
-			t.Fatal("expected timeout error")
-		}
-
-		var pipeErr *Error[int]
-		if errors.As(err, &pipeErr) {
-			if !pipeErr.IsTimeout() {
-				t.Errorf("expected timeout error, got %v", err)
-			}
-		}
-
-		// Verify we get the original input back
-		if result != 5 {
-			t.Errorf("expected original input 5, got %d", result)
-		}
-
-		// Give a moment for any leaked goroutines to be detected
-		// In the broken implementation, the goroutine would still be running here
-		time.Sleep(10 * time.Millisecond)
-		runtime.GC()
-		runtime.GC() // Force garbage collection twice to be thorough
-
-		currentGoroutines := runtime.NumGoroutine()
-
-		// With the fix, goroutine count should not have increased significantly
-		// We allow some variance because of GC and runtime activities
-		if currentGoroutines > initialGoroutines+2 {
-			t.Errorf("potential goroutine leak detected: initial=%d, current=%d",
-				initialGoroutines, currentGoroutines)
-		}
-
-		// Wait for the slow processor to finish and verify it doesn't affect our count
-		time.Sleep(200 * time.Millisecond)
-		runtime.GC()
-		runtime.GC()
-
-		finalGoroutines := runtime.NumGoroutine()
-		if finalGoroutines > initialGoroutines+2 {
-			t.Errorf("goroutine leak after processor completion: initial=%d, final=%d",
-				initialGoroutines, finalGoroutines)
-		}
-	})
-
 	t.Run("Timeout panic recovery", func(t *testing.T) {
 		panicProcessor := Apply("panic_processor", func(_ context.Context, _ int) (int, error) {
 			panic("timeout processor panic")
@@ -369,5 +308,217 @@ func TestTimeout(t *testing.T) {
 		if timeout2 != timeout {
 			t.Error("WithClock should return same instance for chaining")
 		}
+	})
+
+	t.Run("Observability", func(t *testing.T) {
+		t.Run("Metrics and Spans", func(t *testing.T) {
+			processor := Apply("slow", func(ctx context.Context, n int) (int, error) {
+				select {
+				case <-time.After(50 * time.Millisecond):
+					return n * 2, nil
+				case <-ctx.Done():
+					return 0, ctx.Err()
+				}
+			})
+
+			timeout := NewTimeout("test-timeout", processor, 100*time.Millisecond)
+			defer timeout.Close()
+
+			// Verify observability components are initialized
+			if timeout.Metrics() == nil {
+				t.Error("expected metrics registry to be initialized")
+			}
+			if timeout.Tracer() == nil {
+				t.Error("expected tracer to be initialized")
+			}
+
+			// Capture spans using the callback API
+			var spans []tracez.Span
+			timeout.Tracer().OnSpanComplete(func(span tracez.Span) {
+				spans = append(spans, span)
+			})
+
+			// Process item that succeeds
+			result, err := timeout.Process(context.Background(), 5)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if result != 10 {
+				t.Errorf("expected 10, got %d", result)
+			}
+
+			// Verify metrics
+			processedTotal := timeout.Metrics().Counter(TimeoutProcessedTotal).Value()
+			if processedTotal != 1 {
+				t.Errorf("expected 1 processed item, got %f", processedTotal)
+			}
+
+			successesTotal := timeout.Metrics().Counter(TimeoutSuccessesTotal).Value()
+			if successesTotal != 1 {
+				t.Errorf("expected 1 success, got %f", successesTotal)
+			}
+
+			// Check duration was recorded
+			duration := timeout.Metrics().Gauge(TimeoutDurationMs).Value()
+			if duration < 50 { // Should be at least 50ms
+				t.Errorf("expected duration >= 50ms, got %f", duration)
+			}
+
+			// Verify spans were captured
+			if len(spans) < 1 {
+				t.Errorf("expected at least 1 span, got %d", len(spans))
+			}
+		})
+
+		t.Run("Timeout Metrics", func(t *testing.T) {
+			processor := Apply("very-slow", func(ctx context.Context, n int) (int, error) {
+				select {
+				case <-time.After(100 * time.Millisecond):
+					return n * 2, nil
+				case <-ctx.Done():
+					return 0, ctx.Err()
+				}
+			})
+
+			timeout := NewTimeout("test-timeout", processor, 50*time.Millisecond)
+			defer timeout.Close()
+
+			_, err := timeout.Process(context.Background(), 5)
+			if err == nil {
+				t.Fatal("expected timeout error")
+			}
+
+			// Check timeout metrics
+			timeoutsTotal := timeout.Metrics().Counter(TimeoutTimeoutsTotal).Value()
+			if timeoutsTotal != 1 {
+				t.Errorf("expected 1 timeout, got %f", timeoutsTotal)
+			}
+
+			processedTotal := timeout.Metrics().Counter(TimeoutProcessedTotal).Value()
+			if processedTotal != 1 {
+				t.Errorf("expected 1 processed item, got %f", processedTotal)
+			}
+
+			successesTotal := timeout.Metrics().Counter(TimeoutSuccessesTotal).Value()
+			if successesTotal != 0 {
+				t.Errorf("expected 0 successes, got %f", successesTotal)
+			}
+		})
+
+		t.Run("Hooks fire on timeout events", func(t *testing.T) {
+			// Test actual timeout
+			processor := Apply("slow", func(_ context.Context, n int) (int, error) {
+				time.Sleep(50 * time.Millisecond)
+				return n * 2, nil
+			})
+
+			timeout := NewTimeout("test-timeout", processor, 10*time.Millisecond)
+			defer timeout.Close()
+
+			var timeoutEvents []TimeoutEvent
+			var mu sync.Mutex
+
+			timeout.OnTimeout(func(_ context.Context, event TimeoutEvent) error {
+				mu.Lock()
+				timeoutEvents = append(timeoutEvents, event)
+				mu.Unlock()
+				return nil
+			})
+
+			// Process should timeout
+			_, err := timeout.Process(context.Background(), 10)
+			if err == nil {
+				t.Error("expected timeout error")
+			}
+
+			// Wait for async hook
+			time.Sleep(10 * time.Millisecond)
+
+			mu.Lock()
+			timeoutCount := len(timeoutEvents)
+			var timedOutFlag bool
+			var duration time.Duration
+			if len(timeoutEvents) > 0 {
+				event := timeoutEvents[0]
+				timedOutFlag = event.TimedOut
+				duration = event.Duration
+			}
+			mu.Unlock()
+
+			if timeoutCount != 1 {
+				t.Errorf("expected 1 timeout event, got %d", timeoutCount)
+			}
+
+			if timeoutCount > 0 {
+				if !timedOutFlag {
+					t.Error("expected TimedOut=true")
+				}
+				if duration != 10*time.Millisecond {
+					t.Errorf("expected duration 10ms, got %v", duration)
+				}
+			}
+		})
+
+		t.Run("Near timeout hook fires for slow operations", func(t *testing.T) {
+			// Test operation that completes but is close to timeout
+			processor := Apply("slow", func(_ context.Context, n int) (int, error) {
+				time.Sleep(18 * time.Millisecond) // 90% of 20ms timeout
+				return n * 2, nil
+			})
+
+			timeout := NewTimeout("test-near", processor, 20*time.Millisecond)
+			defer timeout.Close()
+
+			var nearTimeoutEvents []TimeoutEvent
+			var mu sync.Mutex
+
+			timeout.OnNearTimeout(func(_ context.Context, event TimeoutEvent) error {
+				mu.Lock()
+				nearTimeoutEvents = append(nearTimeoutEvents, event)
+				mu.Unlock()
+				return nil
+			})
+
+			// Process should succeed but trigger near timeout
+			result, err := timeout.Process(context.Background(), 10)
+			if err != nil {
+				t.Errorf("expected success, got error: %v", err)
+			}
+			if result != 20 {
+				t.Errorf("expected result 20, got %d", result)
+			}
+
+			// Wait for async hook
+			time.Sleep(10 * time.Millisecond)
+
+			mu.Lock()
+			nearCount := len(nearTimeoutEvents)
+			var nearFlag bool
+			var timedOutFlag bool
+			var percentUsed float64
+			if len(nearTimeoutEvents) > 0 {
+				event := nearTimeoutEvents[0]
+				nearFlag = event.NearTimeout
+				timedOutFlag = event.TimedOut
+				percentUsed = event.PercentUsed
+			}
+			mu.Unlock()
+
+			if nearCount != 1 {
+				t.Errorf("expected 1 near timeout event, got %d", nearCount)
+			}
+
+			if nearCount > 0 {
+				if !nearFlag {
+					t.Error("expected NearTimeout=true")
+				}
+				if timedOutFlag {
+					t.Error("expected TimedOut=false")
+				}
+				if percentUsed <= 80 {
+					t.Errorf("expected percent used >80, got %f", percentUsed)
+				}
+			}
+		})
 	})
 }

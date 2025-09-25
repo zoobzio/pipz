@@ -7,6 +7,36 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/zoobzio/hookz"
+	"github.com/zoobzio/metricz"
+	"github.com/zoobzio/tracez"
+)
+
+// Observability constants for the Sequence connector.
+const (
+	// Metrics.
+	SequenceProcessedTotal  = metricz.Key("sequence.processed.total")
+	SequenceSuccessesTotal  = metricz.Key("sequence.successes.total")
+	SequenceFailuresTotal   = metricz.Key("sequence.failures.total")
+	SequenceStagesCompleted = metricz.Key("sequence.stages.completed")
+	SequenceStagesTotal     = metricz.Key("sequence.stages.total")
+	SequenceDurationMs      = metricz.Key("sequence.duration.ms")
+
+	// Spans.
+	SequenceProcessSpan = tracez.Key("sequence.process")
+	SequenceStageSpan   = tracez.Key("sequence.stage")
+
+	// Tags.
+	SequenceTagStageCount    = tracez.Tag("sequence.stage_count")
+	SequenceTagStageNumber   = tracez.Tag("sequence.stage_number")
+	SequenceTagProcessorName = tracez.Tag("sequence.processor_name")
+	SequenceTagSuccess       = tracez.Tag("sequence.success")
+	SequenceTagError         = tracez.Tag("sequence.error")
+
+	// Hook event keys.
+	SequenceEventStageComplete = hookz.Key("sequence.stage_complete")
+	SequenceEventAllComplete   = hookz.Key("sequence.all_complete")
 )
 
 // Sequence modification errors.
@@ -15,6 +45,22 @@ var (
 	ErrEmptySequence    = errors.New("sequence is empty")
 	ErrInvalidRange     = errors.New("invalid range")
 )
+
+// SequenceEvent represents a sequence processing event.
+// This is emitted via hookz when individual stages complete or when
+// all stages have finished, providing visibility into pipeline progress.
+type SequenceEvent struct {
+	Name            Name          // Connector name
+	StageName       Name          // Name of the stage processor
+	StageNumber     int           // Current stage number (1-based)
+	TotalStages     int           // Total number of stages
+	Success         bool          // Whether the stage succeeded
+	Error           error         // Error if stage failed
+	Duration        time.Duration // How long this stage took
+	CompletedStages int           // Number of stages completed (for all_complete)
+	TotalDuration   time.Duration // Total time for all stages (for all_complete)
+	Timestamp       time.Time     // When the event occurred
+}
 
 // Sequence provides a type-safe sequence for processing values of type T.
 // It maintains an ordered list of processors that are executed sequentially.
@@ -31,10 +77,62 @@ var (
 //   - Fail-fast execution with detailed errors
 //
 // Sequence is the primary way to chain processors together.
+//
+// # Observability
+//
+// Sequence provides comprehensive observability through metrics, tracing, and events:
+//
+// Metrics:
+//   - sequence.processed.total: Counter of sequence operations
+//   - sequence.successes.total: Counter of successful completions
+//   - sequence.failures.total: Counter of failed sequences
+//   - sequence.stages.completed: Gauge of stages completed
+//   - sequence.stages.total: Gauge of total stages
+//   - sequence.duration.ms: Gauge of total sequence duration
+//
+// Traces:
+//   - sequence.process: Parent span for entire sequence
+//   - sequence.stage: Child span for each individual stage
+//
+// Events (via hooks):
+//   - sequence.stage_complete: Fired as each stage completes
+//   - sequence.all_complete: Fired when all stages succeed
+//
+// Example with hooks:
+//
+//	sequence := pipz.NewSequence("order-pipeline",
+//	    validateOrder,
+//	    calculatePricing,
+//	    applyDiscounts,
+//	    processPayment,
+//	    sendConfirmation,
+//	)
+//
+//	// Track pipeline progress
+//	sequence.OnStageComplete(func(ctx context.Context, event SequenceEvent) error {
+//	    log.Info("Stage %d/%d complete: %s (%.2fms)",
+//	        event.StageNumber, event.TotalStages,
+//	        event.StageName, event.Duration.Milliseconds())
+//	    if !event.Success {
+//	        alert.Warn("Stage %s failed: %v", event.StageName, event.Error)
+//	    }
+//	    return nil
+//	})
+//
+//	// Monitor overall pipeline
+//	sequence.OnAllComplete(func(ctx context.Context, event SequenceEvent) error {
+//	    metrics.Record("pipeline.duration", event.TotalDuration)
+//	    log.Success("Pipeline completed: %d stages in %v",
+//	        event.CompletedStages, event.TotalDuration)
+//	    return nil
+//	})
 type Sequence[T any] struct {
 	name       Name
 	processors []Chainable[T]
 	mu         sync.RWMutex
+	metrics    *metricz.Registry
+	tracer     *tracez.Tracer
+	hooks      *hookz.Hooks[SequenceEvent]
 }
 
 // NewSequence creates a new Sequence with optional initial processors.
@@ -55,9 +153,21 @@ type Sequence[T any] struct {
 //	sequence := pipz.NewSequence[User]("user-processing")
 //	sequence.Register(validateUser, enrichUser)
 func NewSequence[T any](name Name, processors ...Chainable[T]) *Sequence[T] {
+	// Initialize observability
+	metrics := metricz.New()
+	metrics.Counter(SequenceProcessedTotal)
+	metrics.Counter(SequenceSuccessesTotal)
+	metrics.Counter(SequenceFailuresTotal)
+	metrics.Gauge(SequenceStagesCompleted)
+	metrics.Gauge(SequenceStagesTotal)
+	metrics.Gauge(SequenceDurationMs)
+
 	return &Sequence[T]{
 		name:       name,
 		processors: slices.Clone(processors),
+		metrics:    metrics,
+		tracer:     tracez.New(),
+		hooks:      hookz.New[SequenceEvent](),
 	}
 }
 
@@ -104,16 +214,46 @@ func (c *Sequence[T]) Process(ctx context.Context, value T) (result T, err error
 	defer recoverFromPanic(&result, &err, c.name, value)
 
 	c.mu.RLock()
-	defer c.mu.RUnlock()
+	processors := make([]Chainable[T], len(c.processors))
+	copy(processors, c.processors)
+	c.mu.RUnlock()
 
 	// Handle nil context
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	result = value
+	// Track metrics
+	c.metrics.Counter(SequenceProcessedTotal).Inc()
+	c.metrics.Gauge(SequenceStagesTotal).Set(float64(len(processors)))
+	start := time.Now()
 
-	for _, proc := range c.processors {
+	// Start main span
+	ctx, span := c.tracer.StartSpan(ctx, SequenceProcessSpan)
+	span.SetTag(SequenceTagStageCount, fmt.Sprintf("%d", len(processors)))
+	defer func() {
+		// Record duration
+		elapsed := time.Since(start)
+		c.metrics.Gauge(SequenceDurationMs).Set(float64(elapsed.Milliseconds()))
+
+		// Set success status
+		if err == nil {
+			span.SetTag(SequenceTagSuccess, "true")
+			c.metrics.Counter(SequenceSuccessesTotal).Inc()
+		} else {
+			span.SetTag(SequenceTagSuccess, "false")
+			c.metrics.Counter(SequenceFailuresTotal).Inc()
+			if err != nil {
+				span.SetTag(SequenceTagError, err.Error())
+			}
+		}
+		span.Finish()
+	}()
+
+	result = value
+	stagesCompleted := 0
+
+	for i, proc := range processors {
 		// Check context before starting processor
 		select {
 		case <-ctx.Done():
@@ -127,8 +267,45 @@ func (c *Sequence[T]) Process(ctx context.Context, value T) (result T, err error
 				Timestamp: time.Now(),
 			}
 		default:
-			result, err = proc.Process(ctx, result)
+			// Start span for this stage
+			stageCtx, stageSpan := c.tracer.StartSpan(ctx, SequenceStageSpan)
+			stageSpan.SetTag(SequenceTagStageNumber, fmt.Sprintf("%d", i+1))
+			stageSpan.SetTag(SequenceTagProcessorName, proc.Name())
+
+			stageStart := time.Now()
+			result, err = proc.Process(stageCtx, result)
+			stageDuration := time.Since(stageStart)
+			stageSpan.Finish()
+
+			if err == nil {
+				stagesCompleted++
+				c.metrics.Gauge(SequenceStagesCompleted).Set(float64(stagesCompleted))
+
+				// Emit stage complete event for successful stage
+				_ = c.hooks.Emit(ctx, SequenceEventStageComplete, SequenceEvent{ //nolint:errcheck
+					Name:        c.name,
+					StageName:   proc.Name(),
+					StageNumber: i + 1,
+					TotalStages: len(processors),
+					Success:     true,
+					Error:       nil,
+					Duration:    stageDuration,
+					Timestamp:   time.Now(),
+				})
+			}
 			if err != nil {
+				// Emit stage complete event for failed stage
+				_ = c.hooks.Emit(ctx, SequenceEventStageComplete, SequenceEvent{ //nolint:errcheck
+					Name:        c.name,
+					StageName:   proc.Name(),
+					StageNumber: i + 1,
+					TotalStages: len(processors),
+					Success:     false,
+					Error:       err,
+					Duration:    stageDuration,
+					Timestamp:   time.Now(),
+				})
+
 				var pipeErr *Error[T]
 				if errors.As(err, &pipeErr) {
 					// Prepend this sequence's name to the path
@@ -145,6 +322,18 @@ func (c *Sequence[T]) Process(ctx context.Context, value T) (result T, err error
 			}
 		}
 	}
+
+	// All stages completed successfully - emit all_complete event
+	totalDuration := time.Since(start)
+	_ = c.hooks.Emit(ctx, SequenceEventAllComplete, SequenceEvent{ //nolint:errcheck
+		Name:            c.name,
+		TotalStages:     len(processors),
+		CompletedStages: stagesCompleted,
+		TotalDuration:   totalDuration,
+		Success:         true,
+		Timestamp:       time.Now(),
+	})
+
 	return result, nil
 }
 
@@ -284,4 +473,39 @@ func (c *Sequence[T]) Name() Name {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.name
+}
+
+// Metrics returns the metrics registry for this connector.
+func (c *Sequence[T]) Metrics() *metricz.Registry {
+	return c.metrics
+}
+
+// Tracer returns the tracer for this connector.
+func (c *Sequence[T]) Tracer() *tracez.Tracer {
+	return c.tracer
+}
+
+// Close gracefully shuts down observability components.
+func (c *Sequence[T]) Close() error {
+	if c.tracer != nil {
+		c.tracer.Close()
+	}
+	c.hooks.Close()
+	return nil
+}
+
+// OnStageComplete registers a handler for when an individual stage completes.
+// The handler is called asynchronously each time a stage finishes, whether it
+// succeeds or fails. This provides visibility into pipeline progress in real-time.
+func (c *Sequence[T]) OnStageComplete(handler func(context.Context, SequenceEvent) error) error {
+	_, err := c.hooks.Hook(SequenceEventStageComplete, handler)
+	return err
+}
+
+// OnAllComplete registers a handler for when all stages have completed successfully.
+// The handler is called asynchronously after the entire sequence finishes without errors.
+// This event includes aggregate statistics about the pipeline execution.
+func (c *Sequence[T]) OnAllComplete(handler func(context.Context, SequenceEvent) error) error {
+	_, err := c.hooks.Hook(SequenceEventAllComplete, handler)
+	return err
 }

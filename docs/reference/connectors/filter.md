@@ -170,6 +170,57 @@ go func() { filter.Process(ctx, data2) }()
 go func() { filter.SetCondition(newCondition) }()
 ```
 
+## Observability
+
+Filter provides comprehensive observability through metrics, tracing, and hook events.
+
+### Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `filter.processed.total` | Counter | Total filter operations |
+| `filter.passed.total` | Counter | Items that passed the filter |
+| `filter.skipped.total` | Counter | Items that were filtered out |
+| `filter.duration.ms` | Gauge | Operation duration in milliseconds |
+
+### Traces
+
+| Span | Description |
+|------|-------------|
+| `filter.process` | Span for filter operation |
+
+**Span Tags:**
+- `filter.passed` - Whether item passed the filter
+- `filter.processor_name` - Name of wrapped processor
+- `filter.skipped` - Whether item was skipped
+
+### Hook Events
+
+| Event | Key | Description |
+|-------|-----|-------------|
+| Passed | `filter.passed` | Fired when item passes filter |
+| Skipped | `filter.skipped` | Fired when item is filtered out |
+
+### Event Handlers
+
+```go
+// Track filtering patterns
+filter.OnPassed(func(ctx context.Context, event FilterEvent) error {
+    log.Debug("Item passed filter: %v", event.Data)
+    metrics.Inc("filter.pass_rate")
+    return nil
+})
+
+// Monitor filtered items
+filter.OnSkipped(func(ctx context.Context, event FilterEvent) error {
+    log.Debug("Item filtered out: %v", event.Data)
+    if event.SkipReason != "" {
+        metrics.Inc("filter.skip_reason", event.SkipReason)
+    }
+    return nil
+})
+```
+
 ## Performance Characteristics
 
 Filter has minimal overhead:
@@ -371,6 +422,52 @@ mutate := pipz.Mutate("abs-if-negative",
 )
 ```
 
+## Observability
+
+### Metrics
+
+The Filter connector tracks the following metrics using `metricz`:
+
+- `filter.processed.total` - Counter of all items processed
+- `filter.passed.total` - Counter of items where condition was true (processor executed)
+- `filter.skipped.total` - Counter of items where condition was false (passed through)
+
+### Tracing
+
+The Filter connector creates spans using `tracez`:
+
+- `filter.process` - Span for each Process() call
+
+Span tags:
+- `filter.connector` - Name of the filter connector
+- `filter.condition_met` - Whether the condition returned true or false
+- `filter.success` - Whether processing completed successfully
+- `filter.error` - Error message if processor failed (only when condition was true)
+
+### Example Usage
+
+```go
+// Create filter with observability
+filter := pipz.NewFilter("premium-only", isPremium, premiumProcessor)
+defer filter.Close() // Clean up observability resources
+
+// Access metrics
+metrics := filter.Metrics()
+processed := metrics.Counter(pipz.FilterProcessedTotal).Value()
+passed := metrics.Counter(pipz.FilterPassedTotal).Value()
+skipped := metrics.Counter(pipz.FilterSkippedTotal).Value()
+
+// Calculate pass rate
+passRate := (passed / processed) * 100
+
+// Capture spans for analysis
+filter.Tracer().OnSpanComplete(func(span tracez.Span) {
+    if span.Tags["filter.condition_met"] == "false" {
+        log.Printf("Item skipped by filter: %s", span.TraceID)
+    }
+})
+```
+
 ## Best Practices
 
 1. **Keep conditions simple**: Complex logic makes debugging difficult
@@ -380,3 +477,4 @@ mutate := pipz.Mutate("abs-if-negative",
 5. **Consider caching**: For expensive condition calculations
 6. **Use context**: Leverage context for timeouts and values
 7. **Document behavior**: Make condition logic clear to other developers
+8. **Monitor pass rates**: Use metrics to understand filter effectiveness

@@ -118,6 +118,70 @@ result, err := concurrent.Process(ctx, data)
 - All processors run even if some finish early
 - Context cancellation stops waiting processors
 
+## Observability
+
+Concurrent provides comprehensive observability through metrics, tracing, and hook events.
+
+### Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `concurrent.processed.total` | Counter | Total concurrent operations |
+| `concurrent.successes.total` | Counter | Operations where all processors completed |
+| `concurrent.tasks.total` | Counter | Total tasks launched across all operations |
+| `concurrent.duration.ms` | Gauge | Total operation duration in milliseconds |
+
+### Traces
+
+| Span | Description |
+|------|-------------|
+| `concurrent.process` | Parent span for entire concurrent operation |
+| `concurrent.task` | Child span for each individual processor |
+
+**Span Tags:**
+- `concurrent.processor_count` - Number of processors running
+- `concurrent.processor_name` - Name of individual processor (on task spans)
+- `concurrent.success` - Whether all processors completed
+- `concurrent.error` - Error if any processor failed
+
+### Hook Events
+
+| Event | Key | Description |
+|-------|-----|-------------|
+| Task Started | `concurrent.task_started` | Fired when a processor starts |
+| Task Complete | `concurrent.task_complete` | Fired when a processor finishes |
+| All Complete | `concurrent.all_complete` | Fired when all processors finish |
+
+### Event Handlers
+
+```go
+// Monitor task execution
+concurrent.OnTaskStarted(func(ctx context.Context, event ConcurrentEvent) error {
+    log.Debug("Starting processor %s", event.ProcessorName)
+    return nil
+})
+
+// Track individual completions
+concurrent.OnTaskComplete(func(ctx context.Context, event ConcurrentEvent) error {
+    if event.Error != nil {
+        log.Error("Processor %s failed: %v", event.ProcessorName, event.Error)
+    } else {
+        log.Info("Processor %s completed in %v", event.ProcessorName, event.Duration)
+    }
+    return nil
+})
+
+// Monitor overall completion
+concurrent.OnAllComplete(func(ctx context.Context, event ConcurrentEvent) error {
+    log.Info("All %d processors completed in %v (failures: %d)",
+        event.TotalTasks, event.TotalDuration, event.FailedTasks)
+    if event.FailedTasks > 0 {
+        alert.Warn("%d concurrent tasks failed", event.FailedTasks)
+    }
+    return nil
+})
+```
+
 ## Common Patterns
 
 ```go

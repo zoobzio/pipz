@@ -175,6 +175,80 @@ Don't use `Contest` when:
 | Condition Function | Required | Not applicable |
 | Result Evaluation | Checks each result | Accepts any success |
 
+## Observability
+
+Contest provides comprehensive observability through metrics, tracing, and hook events.
+
+### Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `contest.processed.total` | Counter | Total contest operations |
+| `contest.winners.total` | Counter | Contests that found a winner |
+| `contest.no_winners.total` | Counter | Contests with no qualifying results |
+| `contest.tasks.total` | Counter | Total tasks launched |
+| `contest.winner.latency.ms` | Gauge | Time to find winner in milliseconds |
+| `contest.duration.ms` | Gauge | Total operation duration |
+
+### Traces
+
+| Span | Description |
+|------|-------------|
+| `contest.process` | Parent span for entire contest operation |
+| `contest.task` | Child span for each competing processor |
+
+**Span Tags:**
+- `contest.processor_count` - Number of competing processors
+- `contest.processor_name` - Name of individual processor (on task spans)
+- `contest.winner` - Name of winning processor (if any)
+- `contest.found_winner` - Whether a winner was found
+- `contest.error` - Error if operation failed
+
+### Hook Events
+
+| Event | Key | Description |
+|-------|-----|-------------|
+| Task Started | `contest.task_started` | Fired when a processor starts |
+| Task Complete | `contest.task_complete` | Fired when a processor finishes |
+| Winner Found | `contest.winner_found` | Fired when a winner is determined |
+| No Winner | `contest.no_winner` | Fired when no results qualify |
+
+### Event Handlers
+
+```go
+// Monitor task execution
+contest.OnTaskStarted(func(ctx context.Context, event ContestEvent) error {
+    log.Debug("Processor %s entered contest", event.ProcessorName)
+    return nil
+})
+
+// Track task completions
+contest.OnTaskComplete(func(ctx context.Context, event ContestEvent) error {
+    if event.Error != nil {
+        log.Debug("Processor %s failed: %v", event.ProcessorName, event.Error)
+    } else if event.MetCondition {
+        log.Info("Processor %s qualified in %v", event.ProcessorName, event.Duration)
+    } else {
+        log.Debug("Processor %s didn't qualify", event.ProcessorName)
+    }
+    return nil
+})
+
+// Celebrate winners
+contest.OnWinnerFound(func(ctx context.Context, event ContestEvent) error {
+    log.Info("Winner: %s (latency: %v)", event.WinnerName, event.WinnerLatency)
+    metrics.Record("contest.winner", event.WinnerName, event.WinnerLatency.Milliseconds())
+    return nil
+})
+
+// Handle no-winner scenarios
+contest.OnNoWinner(func(ctx context.Context, event ContestEvent) error {
+    log.Warn("No qualifying results from %d processors", event.TotalTasks)
+    alert.Warn("Contest %s found no qualifying results", event.Name)
+    return nil
+})
+```
+
 ## Gotchas
 
 ### ❌ Don't use vague conditions
