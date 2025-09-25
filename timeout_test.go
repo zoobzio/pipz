@@ -462,10 +462,10 @@ func TestTimeout(t *testing.T) {
 		t.Run("Near timeout hook fires for slow operations", func(t *testing.T) {
 			// Use fake clock for deterministic test
 			clock := clockz.NewFakeClock()
-			
+
 			// Track when processor starts
 			processorStarted := make(chan struct{})
-			
+
 			// Test operation that signals when it starts, then waits for clock advance
 			processor := Apply("slow", func(ctx context.Context, n int) (int, error) {
 				close(processorStarted)
@@ -499,17 +499,17 @@ func TestTimeout(t *testing.T) {
 				defer close(done)
 				result, err = timeout.Process(context.Background(), 10)
 			}()
-			
+
 			// Wait for processor to start
 			<-processorStarted
-			
+
 			// Advance clock to 90% of timeout (18ms)
 			clock.Advance(18 * time.Millisecond)
 			clock.BlockUntilReady()
-			
+
 			// Wait for completion
 			<-done
-			
+
 			if err != nil {
 				t.Errorf("expected success, got error: %v", err)
 			}
