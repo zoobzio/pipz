@@ -159,14 +159,14 @@ func (t *Timeout[T]) Process(ctx context.Context, data T) (result T, err error) 
 
 	// Start tracking metrics
 	t.metrics.Counter(TimeoutProcessedTotal).Inc()
-	start := time.Now()
+	start := clock.Now()
 
 	// Start main span
 	ctx, span := t.tracer.StartSpan(ctx, TimeoutProcessSpan)
 	span.SetTag(TimeoutTagDuration, duration.String())
 	defer func() {
 		// Record elapsed time
-		elapsed := time.Since(start)
+		elapsed := clock.Since(start)
 		t.metrics.Gauge(TimeoutDurationMs).Set(float64(elapsed.Milliseconds()))
 		span.SetTag(TimeoutTagElapsed, elapsed.String())
 		span.Finish()
@@ -244,7 +244,7 @@ func (t *Timeout[T]) Process(ctx context.Context, data T) (result T, err error) 
 		t.metrics.Counter(TimeoutSuccessesTotal).Inc()
 
 		// Check if operation was close to timeout (>80% of duration)
-		elapsed := time.Since(start)
+		elapsed := clock.Since(start)
 		percentUsed := float64(elapsed) / float64(duration) * 100
 		if percentUsed > 80 {
 			_ = t.hooks.Emit(ctx, TimeoutEventNearTimeout, TimeoutEvent{ //nolint:errcheck
@@ -267,7 +267,7 @@ func (t *Timeout[T]) Process(ctx context.Context, data T) (result T, err error) 
 			t.metrics.Counter(TimeoutTimeoutsTotal).Inc()
 
 			// Emit timeout event
-			elapsed := time.Since(start)
+			elapsed := clock.Since(start)
 			_ = t.hooks.Emit(ctx, TimeoutEventTimeout, TimeoutEvent{ //nolint:errcheck
 				Name:        t.name,
 				Duration:    duration,

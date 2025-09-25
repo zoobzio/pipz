@@ -460,13 +460,25 @@ func TestTimeout(t *testing.T) {
 		})
 
 		t.Run("Near timeout hook fires for slow operations", func(t *testing.T) {
-			// Test operation that completes but is close to timeout
-			processor := Apply("slow", func(_ context.Context, n int) (int, error) {
-				time.Sleep(18 * time.Millisecond) // 90% of 20ms timeout
-				return n * 2, nil
+			// Use fake clock for deterministic test
+			clock := clockz.NewFakeClock()
+			
+			// Track when processor starts
+			processorStarted := make(chan struct{})
+			
+			// Test operation that signals when it starts, then waits for clock advance
+			processor := Apply("slow", func(ctx context.Context, n int) (int, error) {
+				close(processorStarted)
+				// Simulate slow operation (90% of timeout)
+				select {
+				case <-clock.After(18 * time.Millisecond):
+					return n * 2, nil
+				case <-ctx.Done():
+					return 0, ctx.Err()
+				}
 			})
 
-			timeout := NewTimeout("test-near", processor, 20*time.Millisecond)
+			timeout := NewTimeout("test-near", processor, 20*time.Millisecond).WithClock(clock)
 			defer timeout.Close()
 
 			var nearTimeoutEvents []TimeoutEvent
@@ -479,8 +491,25 @@ func TestTimeout(t *testing.T) {
 				return nil
 			})
 
-			// Process should succeed but trigger near timeout
-			result, err := timeout.Process(context.Background(), 10)
+			// Process in goroutine
+			done := make(chan struct{})
+			var result int
+			var err error
+			go func() {
+				defer close(done)
+				result, err = timeout.Process(context.Background(), 10)
+			}()
+			
+			// Wait for processor to start
+			<-processorStarted
+			
+			// Advance clock to 90% of timeout (18ms)
+			clock.Advance(18 * time.Millisecond)
+			clock.BlockUntilReady()
+			
+			// Wait for completion
+			<-done
+			
 			if err != nil {
 				t.Errorf("expected success, got error: %v", err)
 			}
@@ -488,7 +517,7 @@ func TestTimeout(t *testing.T) {
 				t.Errorf("expected result 20, got %d", result)
 			}
 
-			// Wait for async hook
+			// Allow hooks to fire
 			time.Sleep(10 * time.Millisecond)
 
 			mu.Lock()
