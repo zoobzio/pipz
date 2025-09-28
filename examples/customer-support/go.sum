@@ -1,8 +1,8 @@
 github.com/zoobzio/clockz v0.0.2 h1:72E53zhvh8EyxDPEy41CZOYSpSlmt8S+QNdFMVPA1xQ=
 github.com/zoobzio/clockz v0.0.2/go.mod h1:noq8vP/zaqBtSlAQ8Yp9im3afEhFZxYLmxZX53ZilLc=
-github.com/zoobzio/hookz v0.0.3 h1:NG9gsKwh+W4BkZZbcIqCH1YqsOgIxH5BsabmaQfvsAY=
-github.com/zoobzio/hookz v0.0.3/go.mod h1:ROA/m9JHk7QNzl6mAIo4EZZU9eSyv45xublfpVgF638=
+github.com/zoobzio/hookz v0.0.4 h1:8tkxOe5+xXhm+HKDG2UkXGbyeanDypxlK/ERT+VX5f0=
+github.com/zoobzio/hookz v0.0.4/go.mod h1:ROA/m9JHk7QNzl6mAIo4EZZU9eSyv45xublfpVgF638=
 github.com/zoobzio/metricz v0.0.2 h1:LnDqheiq8LF9dW8IrEfR77fX/0Z+qUil1Bccn7GpWxM=
 github.com/zoobzio/metricz v0.0.2/go.mod h1:7XstFI5KZTI949dld7U9imnR09eFRq9806preNMlKHc=
-github.com/zoobzio/tracez v0.0.7 h1:aGsYIZ+fYL1lsmmq64a0bGylCiYPnX1wx6xD97n9Qsw=
-github.com/zoobzio/tracez v0.0.7/go.mod h1:cEa/ZfpsjN3NYiK5vS76hCZTw5sf6P25bP24A1KVA3M=
+github.com/zoobzio/tracez v0.0.8 h1:QWVq9Kgjuh/3lMuO6gIBuVt4NA6U0zO07QgwrK+rhFw=
+github.com/zoobzio/tracez v0.0.8/go.mod h1:cEa/ZfpsjN3NYiK5vS76hCZTw5sf6P25bP24A1KVA3M=
