@@ -425,7 +425,7 @@ func TestFilter_Observability(t *testing.T) {
 
 		// Check span tags
 		for i, span := range spans {
-			if span.Name != FilterProcessSpan {
+			if span.Name != string(FilterProcessSpan) {
 				t.Errorf("span %d: expected name %s, got %s", i, FilterProcessSpan, span.Name)
 			}
 

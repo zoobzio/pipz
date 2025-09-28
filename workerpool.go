@@ -260,7 +260,7 @@ func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err err
 
 			// Start span for this task
 			taskCtx, taskSpan := w.tracer.StartSpan(ctx, WorkerPoolTaskSpan)
-			taskSpan.SetTag(WorkerPoolTagProcessorName, p.Name())
+			taskSpan.SetTag(WorkerPoolTagProcessorName, string(p.Name()))
 			defer taskSpan.Finish()
 
 			// Track queue wait time

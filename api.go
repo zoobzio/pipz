@@ -41,34 +41,39 @@
 //
 // Transform - Pure transformations that cannot fail:
 //
-//	double := pipz.Transform("double", func(_ context.Context, n int) int {
+//	const DoubleName = pipz.Name("double")
+//	double := pipz.Transform(DoubleName, func(_ context.Context, n int) int {
 //	    return n * 2
 //	})
 //
 // Apply - Operations that can fail:
 //
-//	parseJSON := pipz.Apply("parse", func(_ context.Context, s string) (Data, error) {
+//	const ParseJSONName = pipz.Name("parse")
+//	parseJSON := pipz.Apply(ParseJSONName, func(_ context.Context, s string) (Data, error) {
 //	    var d Data
 //	    return d, json.Unmarshal([]byte(s), &d)
 //	})
 //
 // Effect - Side effects without modifying data:
 //
-//	logger := pipz.Effect("log", func(_ context.Context, d Data) error {
+//	const LoggerName = pipz.Name("log")
+//	logger := pipz.Effect(LoggerName, func(_ context.Context, d Data) error {
 //	    log.Printf("Processing: %+v", d)
 //	    return nil
 //	})
 //
 // Mutate - Conditional modifications:
 //
-//	discountPremium := pipz.Mutate("discount",
-//	    func(_ context.Context, u User) bool { return u.IsPremium },
+//	const DiscountName = pipz.Name("discount")
+//	discountPremium := pipz.Mutate(DiscountName,
 //	    func(_ context.Context, u User) User { u.Discount = 0.2; return u },
+//	    func(_ context.Context, u User) bool { return u.IsPremium },
 //	)
 //
 // Enrich - Optional enhancements that log failures:
 //
-//	addLocation := pipz.Enrich("geo", func(ctx context.Context, u User) (User, error) {
+//	const GeoEnrichName = pipz.Name("geo")
+//	addLocation := pipz.Enrich(GeoEnrichName, func(ctx context.Context, u User) (User, error) {
 //	    u.Country = detectCountry(u.IP) // May fail, but won't stop pipeline
 //	    return u, nil
 //	})
@@ -79,41 +84,51 @@
 //
 // Sequential Processing:
 //
-//	pipeline := pipz.NewSequence("pipeline", step1, step2, step3)
+//	const PipelineName = pipz.Name("pipeline")
+//	pipeline := pipz.NewSequence(PipelineName, step1, step2, step3)
 //	// Or build dynamically:
-//	seq := pipz.NewSequence[T]("name")
+//	const DynamicName = pipz.Name("dynamic")
+//	seq := pipz.NewSequence[T](DynamicName)
 //	seq.Register(step1, step2)
 //	seq.PushTail(step3)  // Add at runtime
 //
 // Parallel Processing (requires T implements Cloner[T]):
 //
 //	// Run all processors, return original data
-//	concurrent := pipz.NewConcurrent("parallel", proc1, proc2, proc3)
+//	const ParallelName = pipz.Name("parallel")
+//	concurrent := pipz.NewConcurrent(ParallelName, proc1, proc2, proc3)
 //
 //	// Return first successful result
-//	race := pipz.NewRace("fastest", primary, secondary, tertiary)
+//	const FastestName = pipz.Name("fastest")
+//	race := pipz.NewRace(FastestName, primary, secondary, tertiary)
 //
 //	// Return first result meeting a condition
-//	contest := pipz.NewContest("best", conditionFunc, option1, option2, option3)
+//	const BestName = pipz.Name("best")
+//	contest := pipz.NewContest(BestName, conditionFunc, option1, option2, option3)
 //
 // Error Handling:
 //
 //	// Try fallback on error
-//	fallback := pipz.NewFallback("safe", primary, backup)
+//	const SafeName = pipz.Name("safe")
+//	fallback := pipz.NewFallback(SafeName, primary, backup)
 //
 //	// Retry with attempts
-//	retry := pipz.NewRetry("resilient", processor, 3)
+//	const ResilientName = pipz.Name("resilient")
+//	retry := pipz.NewRetry(ResilientName, processor, 3)
 //
 //	// Retry with exponential backoff
-//	backoff := pipz.NewBackoff("api-call", processor, 5, time.Second)
+//	const ApiCallName = pipz.Name("api-call")
+//	backoff := pipz.NewBackoff(ApiCallName, processor, 5, time.Second)
 //
 //	// Handle errors without changing data flow
-//	handle := pipz.NewHandle("observed", processor, errorPipeline)
+//	const ObservedName = pipz.Name("observed")
+//	handle := pipz.NewHandle(ObservedName, processor, errorPipeline)
 //
 // Control Flow:
 //
 //	// Route based on conditions
-//	router := pipz.NewSwitch("router", func(ctx context.Context, d Data) string {
+//	const RouterName = pipz.Name("router")
+//	router := pipz.NewSwitch(RouterName, func(ctx context.Context, d Data) string {
 //	    if d.Type == "premium" { return "premium-flow" }
 //	    return "standard-flow"
 //	})
@@ -121,10 +136,12 @@
 //	router.AddRoute("standard-flow", standardProcessor)
 //
 //	// Enforce timeouts
-//	timeout := pipz.NewTimeout("deadline", processor, 30*time.Second)
+//	const DeadlineName = pipz.Name("deadline")
+//	timeout := pipz.NewTimeout(DeadlineName, processor, 30*time.Second)
 //
 //	// Conditional processing
-//	filter := pipz.NewFilter("feature-flag",
+//	const FeatureFlagName = pipz.Name("feature-flag")
+//	filter := pipz.NewFilter(FeatureFlagName,
 //	    func(ctx context.Context, u User) bool { return u.BetaEnabled },
 //	    betaProcessor,
 //	)
@@ -132,11 +149,13 @@
 // Resource Protection:
 //
 //	// Rate limiting
-//	rateLimiter := pipz.NewRateLimiter("api-limit", 100, 10) // 100/sec, burst 10
+//	const ApiLimitName = pipz.Name("api-limit")
+//	rateLimiter := pipz.NewRateLimiter(ApiLimitName, 100, 10) // 100/sec, burst 10
 //	rateLimiter.SetMode("drop") // Or "wait" (default)
 //
 //	// Circuit breaker
-//	breaker := pipz.NewCircuitBreaker("service-breaker", processor, 5, 30*time.Second)
+//	const ServiceBreakerName = pipz.Name("service-breaker")
+//	breaker := pipz.NewCircuitBreaker(ServiceBreakerName, processor, 5, 30*time.Second)
 //
 // # Quick Start
 //
@@ -151,19 +170,26 @@
 //	)
 //
 //	func main() {
+//	    // Define processor names as constants
+//	    const (
+//	        TrimName = pipz.Name("trim")
+//	        UpperName = pipz.Name("uppercase")
+//	        TextProcessorName = pipz.Name("text-processor")
+//	    )
+//
 //	    // Create processors
-//	    trim := pipz.Transform("trim", func(_ context.Context, s string) string {
+//	    trim := pipz.Transform(TrimName, func(_ context.Context, s string) string {
 //	        return strings.TrimSpace(s)
 //	    })
-//	    upper := pipz.Transform("uppercase", func(_ context.Context, s string) string {
+//	    upper := pipz.Transform(UpperName, func(_ context.Context, s string) string {
 //	        return strings.ToUpper(s)
 //	    })
 //
 //	    // Method 1: Direct composition
-//	    pipeline := pipz.NewSequence("text-processor", trim, upper)
+//	    pipeline := pipz.NewSequence(TextProcessorName, trim, upper)
 //
 //	    // Method 2: Build dynamically
-//	    sequence := pipz.NewSequence[string]("text-processor")
+//	    sequence := pipz.NewSequence[string](TextProcessorName)
 //	    sequence.Register(trim, upper)
 //
 //	    // Execute
@@ -274,17 +300,30 @@
 //
 // Validation Pipeline:
 //
-//	validation := pipz.NewSequence("validation",
-//	    pipz.Effect("required", checkRequired),
-//	    pipz.Effect("format", checkFormat),
-//	    pipz.Apply("sanitize", sanitizeInput),
+//	const (
+//	    ValidationName = pipz.Name("validation")
+//	    RequiredName = pipz.Name("required")
+//	    FormatName = pipz.Name("format")
+//	    SanitizeName = pipz.Name("sanitize")
+//	)
+//
+//	validation := pipz.NewSequence(ValidationName,
+//	    pipz.Effect(RequiredName, checkRequired),
+//	    pipz.Effect(FormatName, checkFormat),
+//	    pipz.Apply(SanitizeName, sanitizeInput),
 //	)
 //
 // API with Retry and Timeout:
 //
-//	apiCall := pipz.NewTimeout("api-timeout",
-//	    pipz.NewBackoff("api-retry",
-//	        pipz.Apply("fetch", fetchFromAPI),
+//	const (
+//	    ApiTimeoutName = pipz.Name("api-timeout")
+//	    ApiRetryName = pipz.Name("api-retry")
+//	    FetchName = pipz.Name("fetch")
+//	)
+//
+//	apiCall := pipz.NewTimeout(ApiTimeoutName,
+//	    pipz.NewBackoff(ApiRetryName,
+//	        pipz.Apply(FetchName, fetchFromAPI),
 //	        3, time.Second,
 //	    ),
 //	    30*time.Second,
@@ -292,7 +331,8 @@
 //
 // Multi-path Processing:
 //
-//	processor := pipz.NewSwitch("type-router", detectType)
+//	const TypeRouterName = pipz.Name("type-router")
+//	processor := pipz.NewSwitch(TypeRouterName, detectType)
 //	processor.AddRoute("json", jsonProcessor)
 //	processor.AddRoute("xml", xmlProcessor)
 //	processor.AddRoute("csv", csvProcessor)
@@ -347,7 +387,7 @@ type Chainable[T any] interface {
 //
 //	validateOrder := pipz.Apply(ValidateOrderName, validateFunc)
 //	enrichCustomer := pipz.Transform(EnrichCustomerName, enrichFunc)
-type Name = string
+type Name string
 
 // Observability constants for processors.
 const (
@@ -405,7 +445,7 @@ func (p Processor[T]) Process(ctx context.Context, data T) (result T, err error)
 	var span *tracez.ActiveSpan
 	if p.tracer != nil {
 		ctx, span = p.tracer.StartSpan(ctx, ProcessorSpan)
-		span.SetTag(ProcessorTagName, p.name)
+		span.SetTag(ProcessorTagName, string(p.name))
 		defer func() {
 			if err != nil {
 				span.SetTag(ProcessorTagSuccess, "false")

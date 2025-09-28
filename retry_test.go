@@ -378,10 +378,10 @@ func TestRetry(t *testing.T) {
 		// Check we have both process and attempt spans
 		var processSpans, attemptSpans int
 		for _, span := range spans {
-			if span.Name == RetryProcessSpan {
+			if span.Name == string(RetryProcessSpan) {
 				processSpans++
 			}
-			if span.Name == RetryAttemptSpan {
+			if span.Name == string(RetryAttemptSpan) {
 				attemptSpans++
 			}
 		}

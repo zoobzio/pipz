@@ -29,7 +29,8 @@ import (
 //
 // Example:
 //
-//	parseJSON := pipz.Apply("parse_json", func(ctx context.Context, raw string) (Data, error) {
+//	const ParseJSONName = pipz.Name("parse_json")
+//	parseJSON := pipz.Apply(ParseJSONName, func(ctx context.Context, raw string) (Data, error) {
 //	    var data Data
 //	    if err := json.Unmarshal([]byte(raw), &data); err != nil {
 //	        return Data{}, fmt.Errorf("invalid JSON: %w", err)

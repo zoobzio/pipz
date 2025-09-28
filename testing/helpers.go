@@ -113,7 +113,7 @@ func (m *MockProcessor[T]) WithHistorySize(size int) *MockProcessor[T] {
 
 // Name returns the name of the mock processor.
 func (m *MockProcessor[T]) Name() pipz.Name {
-	return m.name
+	return pipz.Name(m.name)
 }
 
 // Metrics returns nil for mock processors.
@@ -311,7 +311,7 @@ func NewChaosProcessor[T any](name string, wrapped pipz.Chainable[T], config Cha
 
 // Name returns the name of the chaos processor.
 func (c *ChaosProcessor[T]) Name() pipz.Name {
-	return c.name
+	return pipz.Name(c.name)
 }
 
 // Metrics returns nil for chaos processors.

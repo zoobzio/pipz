@@ -591,7 +591,7 @@ func TestSwitch(t *testing.T) {
 
 			// Check span details
 			for _, span := range spans {
-				if span.Name == SwitchProcessSpan {
+				if span.Name == string(SwitchProcessSpan) {
 					// Main span should have route key and routed status
 					if _, ok := span.Tags[SwitchTagRouteKey]; !ok {
 						t.Error("span missing route_key tag")

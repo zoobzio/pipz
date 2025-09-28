@@ -625,7 +625,7 @@ func TestCircuitBreaker(t *testing.T) {
 			// Check span details
 			spanMu.Lock()
 			for i, span := range spans {
-				if span.Name != CircuitBreakerProcessSpan {
+				if span.Name != string(CircuitBreakerProcessSpan) {
 					t.Errorf("span %d: expected name %s, got %s", i, CircuitBreakerProcessSpan, span.Name)
 				}
 

@@ -558,7 +558,7 @@ func TestContest(t *testing.T) {
 			// Check span details
 			spanMu.Lock()
 			for _, span := range spans {
-				if span.Name == ContestProcessSpan {
+				if span.Name == string(ContestProcessSpan) {
 					// Main span should have processor count and winner
 					if _, ok := span.Tags[ContestTagProcessorCount]; !ok {
 						t.Error("main span missing processor_count tag")
@@ -569,7 +569,7 @@ func TestContest(t *testing.T) {
 					if _, ok := span.Tags[ContestTagConditionMet]; !ok {
 						t.Error("main span missing condition_met tag")
 					}
-				} else if span.Name == ContestProcessorSpan {
+				} else if span.Name == string(ContestProcessorSpan) {
 					// Processor spans should have processor name
 					if _, ok := span.Tags[ContestTagProcessorName]; !ok {
 						t.Error("processor span missing processor_name tag")

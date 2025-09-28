@@ -111,7 +111,7 @@ func createRateShoppingContest(providers map[string]ShippingProvider) pipz.Chain
 		p := provider
 		providerName := name
 
-		processor := pipz.Apply(fmt.Sprintf("%s_rates", providerName),
+		processor := pipz.Apply(pipz.Name(fmt.Sprintf("%s_rates", providerName)),
 			func(ctx context.Context, shipment Shipment) (Shipment, error) {
 				// Track attempt
 				shipment.AttemptedProviders = append(shipment.AttemptedProviders, providerName)

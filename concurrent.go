@@ -266,7 +266,7 @@ func (c *Concurrent[T]) Process(ctx context.Context, input T) (result T, err err
 
 			// Start span for this processor
 			procCtx, procSpan := c.tracer.StartSpan(ctx, ConcurrentProcessorSpan)
-			procSpan.SetTag(ConcurrentTagProcessorName, p.Name())
+			procSpan.SetTag(ConcurrentTagProcessorName, string(p.Name()))
 			defer procSpan.Finish()
 
 			// Create an isolated copy using the Clone method

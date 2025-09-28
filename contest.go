@@ -247,7 +247,7 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (result T, err error)
 		go func(idx int, p Chainable[T]) {
 			// Start span for this processor
 			procCtx, procSpan := c.tracer.StartSpan(contestCtx, ContestProcessorSpan)
-			procSpan.SetTag(ContestTagProcessorName, p.Name())
+			procSpan.SetTag(ContestTagProcessorName, string(p.Name()))
 			defer procSpan.Finish()
 
 			// Create an isolated copy using the Clone method
@@ -277,7 +277,7 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (result T, err error)
 					// Winner! Cancel other goroutines and return
 					cancel()
 					winnerName := processors[res.idx].Name()
-					span.SetTag(ContestTagWinner, winnerName)
+					span.SetTag(ContestTagWinner, string(winnerName))
 					span.SetTag(ContestTagConditionMet, "true")
 					c.metrics.Counter(ContestWinsTotal).Inc()
 

@@ -174,7 +174,7 @@ func (r *Retry[T]) Process(ctx context.Context, data T) (result T, err error) {
 	ctx, span := r.tracer.StartSpan(ctx, RetryProcessSpan)
 	defer span.Finish()
 	span.SetTag(RetryTagMaxAttempts, fmt.Sprintf("%d", maxAttempts))
-	span.SetTag(RetryTagConnector, r.name)
+	span.SetTag(RetryTagConnector, string(r.name))
 
 	var lastErr error
 	var lastResult T

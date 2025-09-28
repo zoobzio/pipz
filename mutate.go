@@ -25,7 +25,8 @@ import (
 //
 // Example:
 //
-//	discountPremium := pipz.Mutate("premium_discount",
+//	const PremiumDiscountName = pipz.Name("premium_discount")
+//	discountPremium := pipz.Mutate(PremiumDiscountName,
 //	    func(ctx context.Context, order Order) Order {
 //	        order.Total *= 0.9  // 10% discount
 //	        return order

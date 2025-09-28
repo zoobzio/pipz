@@ -27,7 +27,8 @@ import (
 //
 // Example:
 //
-//	addCustomerName := pipz.Enrich("add_customer_name", func(ctx context.Context, order Order) (Order, error) {
+//	const AddCustomerName = pipz.Name("add_customer_name")
+//	addCustomerName := pipz.Enrich(AddCustomerName, func(ctx context.Context, order Order) (Order, error) {
 //	    customer, err := customerService.Get(ctx, order.CustomerID)
 //	    if err != nil {
 //	        // Log but don't fail - order processing continues without name

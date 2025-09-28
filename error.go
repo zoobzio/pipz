@@ -29,7 +29,11 @@ func (e *Error[T]) Error() string {
 	if e == nil {
 		return "<nil>"
 	}
-	path := strings.Join(e.Path, " -> ")
+	pathStrs := make([]string, len(e.Path))
+	for i, name := range e.Path {
+		pathStrs[i] = string(name)
+	}
+	path := strings.Join(pathStrs, " -> ")
 	if path == "" {
 		path = unknownPath
 	}

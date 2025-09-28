@@ -22,7 +22,8 @@ import (
 //
 // Example:
 //
-//	uppercase := pipz.Transform("uppercase", func(ctx context.Context, s string) string {
+//	const UppercaseName = pipz.Name("uppercase")
+//	uppercase := pipz.Transform(UppercaseName, func(ctx context.Context, s string) string {
 //	    return strings.ToUpper(s)
 //	})
 func Transform[T any](name Name, fn func(context.Context, T) T) Processor[T] {

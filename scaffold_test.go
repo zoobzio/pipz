@@ -87,10 +87,10 @@ func TestScaffold(t *testing.T) {
 			}
 
 			processorName := event.ProcessorName
-			if _, ok := expectedProcessors[processorName]; !ok {
+			if _, ok := expectedProcessors[string(processorName)]; !ok {
 				t.Errorf("event %d: unexpected processor name %s", i, processorName)
 			} else {
-				expectedProcessors[processorName] = true
+				expectedProcessors[string(processorName)] = true
 			}
 		}
 

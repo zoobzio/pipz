@@ -16,7 +16,7 @@ func TestError(t *testing.T) {
 		t.Run("Basic Error", func(t *testing.T) {
 			err := &Error[string]{
 				Err:       baseErr,
-				Path:      []string{"sequence", "validate"},
+				Path:      []Name{"sequence", "validate"},
 				InputData: "test data",
 				Duration:  100 * time.Millisecond,
 				Timestamp: time.Now(),
@@ -37,7 +37,7 @@ func TestError(t *testing.T) {
 		t.Run("Connector With Processor Error", func(t *testing.T) {
 			err := &Error[string]{
 				Err:       baseErr,
-				Path:      []string{"pipeline", "transform"},
+				Path:      []Name{"pipeline", "transform"},
 				InputData: "test",
 				Duration:  50 * time.Millisecond,
 				Timestamp: time.Now(),
@@ -55,7 +55,7 @@ func TestError(t *testing.T) {
 		t.Run("Timeout Error", func(t *testing.T) {
 			err := &Error[string]{
 				Err:       context.DeadlineExceeded,
-				Path:      []string{"api", "slow_process"},
+				Path:      []Name{"api", "slow_process"},
 				InputData: "data",
 				Timeout:   true,
 				Duration:  5 * time.Second,
@@ -71,7 +71,7 @@ func TestError(t *testing.T) {
 		t.Run("Canceled Error", func(t *testing.T) {
 			err := &Error[string]{
 				Err:       context.Canceled,
-				Path:      []string{"worker", "process"},
+				Path:      []Name{"worker", "process"},
 				InputData: "data",
 				Canceled:  true,
 				Duration:  200 * time.Millisecond,
@@ -87,7 +87,7 @@ func TestError(t *testing.T) {
 		t.Run("Single Path Element Error", func(t *testing.T) {
 			err := &Error[string]{
 				Err:       baseErr,
-				Path:      []string{"http"},
+				Path:      []Name{"http"},
 				InputData: "request data",
 				Duration:  75 * time.Millisecond,
 				Timestamp: time.Now(),
@@ -107,7 +107,7 @@ func TestError(t *testing.T) {
 		baseErr := errors.New("base error")
 		pipelineErr := &Error[int]{
 			Err:       baseErr,
-			Path:      []string{"pipeline", "test"},
+			Path:      []Name{"pipeline", "test"},
 			InputData: 42,
 			Timestamp: time.Now(),
 		}
@@ -161,7 +161,7 @@ func TestError(t *testing.T) {
 				err := &Error[string]{
 					Err:       tt.err,
 					Timeout:   tt.timeout,
-					Path:      []string{"test"},
+					Path:      []Name{"test"},
 					Timestamp: time.Now(),
 				}
 
@@ -210,7 +210,7 @@ func TestError(t *testing.T) {
 				err := &Error[string]{
 					Err:       tt.err,
 					Canceled:  tt.canceled,
-					Path:      []string{"test"},
+					Path:      []Name{"test"},
 					Timestamp: time.Now(),
 				}
 
@@ -226,7 +226,7 @@ func TestError(t *testing.T) {
 		t.Run("String Type", func(t *testing.T) {
 			err := &Error[string]{
 				Err:       errors.New("failed"),
-				Path:      []string{"test", "string_processor"},
+				Path:      []Name{"test", "string_processor"},
 				InputData: "hello world",
 				Timestamp: time.Now(),
 			}
@@ -246,7 +246,7 @@ func TestError(t *testing.T) {
 			user := User{Name: "Alice", Age: 30}
 			err := &Error[User]{
 				Err:       errors.New("failed"),
-				Path:      []string{"test", "user_processor"},
+				Path:      []Name{"test", "user_processor"},
 				InputData: user,
 				Timestamp: time.Now(),
 			}

@@ -19,7 +19,7 @@ retract (
 require (
 	github.com/zoobzio/clockz v0.0.2
 	github.com/zoobzio/metricz v0.0.2
-	github.com/zoobzio/tracez v0.0.6
+	github.com/zoobzio/tracez v0.0.8
 )
 
-require github.com/zoobzio/hookz v0.0.3
+require github.com/zoobzio/hookz v0.0.4

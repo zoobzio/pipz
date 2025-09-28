@@ -28,7 +28,8 @@ import (
 //
 // Example:
 //
-//	auditLog := pipz.Effect("audit_payment", func(ctx context.Context, payment Payment) error {
+//	const AuditPaymentName = pipz.Name("audit_payment")
+//	auditLog := pipz.Effect(AuditPaymentName, func(ctx context.Context, payment Payment) error {
 //	    return auditLogger.Log(ctx, "payment_processed", map[string]any{
 //	        "amount": payment.Amount,
 //	        "user_id": payment.UserID,

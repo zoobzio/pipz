@@ -742,7 +742,7 @@ func TestWorkerPool(t *testing.T) {
 			// Check span details
 			spanMu.Lock()
 			for _, span := range spans {
-				if span.Name == WorkerPoolProcessSpan {
+				if span.Name == string(WorkerPoolProcessSpan) {
 					// Main span should have processor and worker counts
 					if _, ok := span.Tags[WorkerPoolTagProcessorCount]; !ok {
 						t.Error("main span missing processor_count tag")
@@ -750,7 +750,7 @@ func TestWorkerPool(t *testing.T) {
 					if _, ok := span.Tags[WorkerPoolTagWorkerCount]; !ok {
 						t.Error("main span missing worker_count tag")
 					}
-				} else if span.Name == WorkerPoolTaskSpan {
+				} else if span.Name == string(WorkerPoolTaskSpan) {
 					// Task spans should have processor name
 					if _, ok := span.Tags[WorkerPoolTagProcessorName]; !ok {
 						t.Error("task span missing processor_name tag")

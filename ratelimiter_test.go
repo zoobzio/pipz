@@ -747,7 +747,7 @@ func TestRateLimiter_Observability(t *testing.T) {
 		// Check span details
 		spanMu.Lock()
 		for i, span := range spans {
-			if span.Name != RateLimiterProcessSpan {
+			if span.Name != string(RateLimiterProcessSpan) {
 				t.Errorf("span %d: expected name %s, got %s", i, RateLimiterProcessSpan, span.Name)
 			}
 

@@ -210,7 +210,7 @@ func (f *Fallback[T]) Process(ctx context.Context, data T) (result T, err error)
 	for i, processor := range processors {
 		// Start span for this attempt
 		attemptCtx, attemptSpan := f.tracer.StartSpan(ctx, FallbackAttemptSpan)
-		attemptSpan.SetTag(FallbackTagProcessorName, processor.Name())
+		attemptSpan.SetTag(FallbackTagProcessorName, string(processor.Name()))
 		attemptSpan.SetTag(FallbackTagAttemptNumber, fmt.Sprintf("%d", i+1))
 
 		f.metrics.Counter(FallbackAttemptsTotal).Inc()
@@ -223,7 +223,7 @@ func (f *Fallback[T]) Process(ctx context.Context, data T) (result T, err error)
 			// Success! Return immediately
 			attemptSpan.SetTag(FallbackTagSuccess, "true")
 			attemptSpan.Finish()
-			span.SetTag(FallbackTagSuccessfulProcessor, processor.Name())
+			span.SetTag(FallbackTagSuccessfulProcessor, string(processor.Name()))
 
 			// If this isn't the first processor, emit recovery event
 			if i > 0 {

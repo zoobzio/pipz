@@ -395,7 +395,7 @@ func TestPipelineFlows_DynamicModification(t *testing.T) {
 	}
 
 	for i, expected := range expectedNames {
-		if names[i] != expected {
+		if names[i] != pipz.Name(expected) {
 			t.Errorf("processor %d: expected %s, got %s", i, expected, names[i])
 		}
 	}
@@ -516,7 +516,7 @@ func TestPipelineFlows_ErrorPropagation(t *testing.T) {
 					// Verify the error includes the failing step
 					found := false
 					for _, elem := range pipzErr.Path {
-						if elem == tt.failAtStep {
+						if elem == pipz.Name(tt.failAtStep) {
 							found = true
 							break
 						}

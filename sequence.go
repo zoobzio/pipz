@@ -100,7 +100,8 @@ type SequenceEvent struct {
 //
 // Example with hooks:
 //
-//	sequence := pipz.NewSequence("order-pipeline",
+//	const OrderPipelineName = pipz.Name("order-pipeline")
+//	sequence := pipz.NewSequence(OrderPipelineName,
 //	    validateOrder,
 //	    calculatePricing,
 //	    applyDiscounts,
@@ -143,14 +144,20 @@ type Sequence[T any] struct {
 // Example:
 //
 //	// Single line declaration
-//	sequence := pipz.NewSequence("user-processing",
-//	    pipz.Effect("validate", validateUser),
-//	    pipz.Apply("enrich", enrichUser),
-//	    pipz.Effect("audit", auditUser),
+//	const (
+//	    UserProcessingName = pipz.Name("user-processing")
+//	    ValidateName = pipz.Name("validate")
+//	    EnrichName = pipz.Name("enrich")
+//	    AuditName = pipz.Name("audit")
+//	)
+//	sequence := pipz.NewSequence(UserProcessingName,
+//	    pipz.Effect(ValidateName, validateUser),
+//	    pipz.Apply(EnrichName, enrichUser),
+//	    pipz.Effect(AuditName, auditUser),
 //	)
 //
 //	// Or create empty and add later
-//	sequence := pipz.NewSequence[User]("user-processing")
+//	sequence := pipz.NewSequence[User](UserProcessingName)
 //	sequence.Register(validateUser, enrichUser)
 func NewSequence[T any](name Name, processors ...Chainable[T]) *Sequence[T] {
 	// Initialize observability
@@ -270,7 +277,7 @@ func (c *Sequence[T]) Process(ctx context.Context, value T) (result T, err error
 			// Start span for this stage
 			stageCtx, stageSpan := c.tracer.StartSpan(ctx, SequenceStageSpan)
 			stageSpan.SetTag(SequenceTagStageNumber, fmt.Sprintf("%d", i+1))
-			stageSpan.SetTag(SequenceTagProcessorName, proc.Name())
+			stageSpan.SetTag(SequenceTagProcessorName, string(proc.Name()))
 
 			stageStart := time.Now()
 			result, err = proc.Process(stageCtx, result)

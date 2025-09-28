@@ -181,7 +181,7 @@ func (f *Filter[T]) Process(ctx context.Context, data T) (result T, err error) {
 	// Start span for filter operation
 	ctx, span := f.tracer.StartSpan(ctx, FilterProcessSpan)
 	defer span.Finish()
-	span.SetTag(FilterTagConnector, f.name)
+	span.SetTag(FilterTagConnector, string(f.name))
 
 	// Increment processed counter
 	f.metrics.Counter(FilterProcessedTotal).Inc()

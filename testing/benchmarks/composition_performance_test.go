@@ -74,7 +74,7 @@ func BenchmarkPipelineLength(b *testing.B) {
 			// Create pipeline with specified length
 			processors := make([]pipz.Chainable[ShoppingCart], length)
 			for i := 0; i < length; i++ {
-				processors[i] = pipz.Transform("step"+strconv.Itoa(i),
+				processors[i] = pipz.Transform(pipz.Name("step"+strconv.Itoa(i)),
 					func(_ context.Context, cart ShoppingCart) ShoppingCart {
 						cart.Total += 0.01 // Add small processing fee
 						return cart
@@ -636,18 +636,18 @@ func BenchmarkDynamicPipelines(b *testing.B) {
 
 		for i := 0; i < b.N; i++ {
 			stepName := "step-" + strconv.Itoa(i%10)
-			processor := pipz.Transform(stepName, func(_ context.Context, n ClonableInt) ClonableInt { return n + 1 })
+			processor := pipz.Transform(pipz.Name(stepName), func(_ context.Context, n ClonableInt) ClonableInt { return n + 1 })
 
 			switch i % 4 {
 			case 0:
 				seq.Register(processor)
 			case 1:
 				if seq.Len() > 0 {
-					_ = seq.Remove(stepName) //nolint:errcheck // Return value ignored in benchmark
+					_ = seq.Remove(pipz.Name(stepName)) //nolint:errcheck // Return value ignored in benchmark
 				}
 			case 2:
 				if seq.Len() > 0 {
-					_ = seq.Replace(stepName, processor) //nolint:errcheck // Return value ignored in benchmark
+					_ = seq.Replace(pipz.Name(stepName), processor) //nolint:errcheck // Return value ignored in benchmark
 				}
 			case 3:
 				if seq.Len() > 1 {
@@ -669,7 +669,7 @@ func BenchmarkScalabilityPatterns(b *testing.B) {
 		b.Run("Concurrent_"+strconv.Itoa(concurrency)+"_Processors", func(b *testing.B) {
 			processors := make([]pipz.Chainable[ClonableInt], concurrency)
 			for i := 0; i < concurrency; i++ {
-				processors[i] = pipz.Transform("proc"+strconv.Itoa(i),
+				processors[i] = pipz.Transform(pipz.Name("proc"+strconv.Itoa(i)),
 					func(_ context.Context, n ClonableInt) ClonableInt {
 						// Add small delay to simulate work
 						for j := 0; j < 100; j++ {
@@ -706,10 +706,10 @@ func BenchmarkScalabilityPatterns(b *testing.B) {
 
 			// Build nested fallbacks
 			for i := levels - 1; i >= 0; i-- {
-				failing := pipz.Apply("fail"+strconv.Itoa(i), func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
+				failing := pipz.Apply(pipz.Name("fail"+strconv.Itoa(i)), func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
 					return 0, errors.New("simulated failure")
 				})
-				pipeline = pipz.NewFallback("fallback"+strconv.Itoa(i), failing, pipeline)
+				pipeline = pipz.NewFallback(pipz.Name("fallback"+strconv.Itoa(i)), failing, pipeline)
 			}
 
 			data := ClonableInt(42)

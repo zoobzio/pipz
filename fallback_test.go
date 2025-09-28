@@ -652,7 +652,7 @@ func TestFallback(t *testing.T) {
 
 			// Check span details
 			for _, span := range spans {
-				if span.Name == FallbackProcessSpan {
+				if span.Name == string(FallbackProcessSpan) {
 					// Main span should have processor count and successful processor
 					if _, ok := span.Tags[FallbackTagProcessorCount]; !ok {
 						t.Error("main span missing processor_count tag")
@@ -660,7 +660,7 @@ func TestFallback(t *testing.T) {
 					if _, ok := span.Tags[FallbackTagSuccessfulProcessor]; !ok {
 						t.Error("main span missing successful_processor tag")
 					}
-				} else if span.Name == FallbackAttemptSpan {
+				} else if span.Name == string(FallbackAttemptSpan) {
 					// Attempt spans should have processor name and attempt number
 					if _, ok := span.Tags[FallbackTagProcessorName]; !ok {
 						t.Error("attempt span missing processor_name tag")

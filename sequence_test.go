@@ -1251,12 +1251,12 @@ func TestSequenceNameBasedOperationsConcurrency(t *testing.T) {
 			// Check span details
 			spanMu.Lock()
 			for _, span := range spans {
-				if span.Name == SequenceProcessSpan {
+				if span.Name == string(SequenceProcessSpan) {
 					// Main span should have stage count
 					if _, ok := span.Tags[SequenceTagStageCount]; !ok {
 						t.Error("main span missing stage_count tag")
 					}
-				} else if span.Name == SequenceStageSpan {
+				} else if span.Name == string(SequenceStageSpan) {
 					// Stage spans should have stage number and processor name
 					if _, ok := span.Tags[SequenceTagStageNumber]; !ok {
 						t.Error("stage span missing stage_number tag")

@@ -61,7 +61,11 @@ func main() {
 			var pipeErr *pipz.Error[Shipment]
 			if errors.As(err, &pipeErr) {
 				fmt.Printf("   ❌ Failed: %v\n", pipeErr.Err)
-				fmt.Printf("   Path: %s\n", strings.Join(pipeErr.Path, " → "))
+				pathStrs := make([]string, len(pipeErr.Path))
+				for i, name := range pipeErr.Path {
+					pathStrs[i] = string(name)
+				}
+				fmt.Printf("   Path: %s\n", strings.Join(pathStrs, " → "))
 			} else {
 				fmt.Printf("   ❌ Failed: %v\n", err)
 			}
