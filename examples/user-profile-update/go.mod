@@ -10,7 +10,7 @@ require (
 	github.com/zoobzio/clockz v0.0.2 // indirect
 	github.com/zoobzio/hookz v0.0.6 // indirect
 	github.com/zoobzio/metricz v0.0.2 // indirect
-	github.com/zoobzio/tracez v0.0.12 // indirect
+	github.com/zoobzio/tracez v0.0.13 // indirect
 )
 
 replace github.com/zoobzio/pipz => ../..
