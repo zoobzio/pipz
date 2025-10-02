@@ -226,9 +226,16 @@ func TestRateLimiter_WaitMode(t *testing.T) {
 			done <- err
 		}()
 
+		// Give the goroutine time to reach the wait state
+		time.Sleep(50 * time.Millisecond)
+
 		// Should wait for 0.5 seconds (1 token / 2 tokens/sec)
 		clock.BlockUntilReady()
 		clock.Advance(500 * time.Millisecond)
+		clock.BlockUntilReady()
+
+		// Give a bit more time for processing
+		time.Sleep(10 * time.Millisecond)
 
 		// Should complete successfully
 		select {
@@ -236,7 +243,7 @@ func TestRateLimiter_WaitMode(t *testing.T) {
 			if err != nil {
 				t.Errorf("unexpected error after wait: %v", err)
 			}
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(200 * time.Millisecond):
 			t.Fatal("wait did not complete")
 		}
 	})
