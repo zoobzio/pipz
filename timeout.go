@@ -247,14 +247,16 @@ func (t *Timeout[T]) Process(ctx context.Context, data T) (result T, err error) 
 		elapsed := clock.Since(start)
 		percentUsed := float64(elapsed) / float64(duration) * 100
 		if percentUsed > 80 {
-			_ = t.hooks.Emit(ctx, TimeoutEventNearTimeout, TimeoutEvent{ //nolint:errcheck
-				Name:        t.name,
-				Duration:    duration,
-				Elapsed:     elapsed,
-				NearTimeout: true,
-				PercentUsed: percentUsed,
-				Timestamp:   clock.Now(),
-			})
+			if t.hooks.ListenerCount(TimeoutEventNearTimeout) > 0 {
+				_ = t.hooks.Emit(ctx, TimeoutEventNearTimeout, TimeoutEvent{ //nolint:errcheck
+					Name:        t.name,
+					Duration:    duration,
+					Elapsed:     elapsed,
+					NearTimeout: true,
+					PercentUsed: percentUsed,
+					Timestamp:   clock.Now(),
+				})
+			}
 		}
 
 		return res.result, nil
@@ -268,15 +270,17 @@ func (t *Timeout[T]) Process(ctx context.Context, data T) (result T, err error) 
 
 			// Emit timeout event
 			elapsed := clock.Since(start)
-			_ = t.hooks.Emit(ctx, TimeoutEventTimeout, TimeoutEvent{ //nolint:errcheck
-				Name:        t.name,
-				Duration:    duration,
-				Elapsed:     elapsed,
-				TimedOut:    true,
-				PercentUsed: 100.0, // Exceeded timeout
-				Error:       ctx.Err(),
-				Timestamp:   clock.Now(),
-			})
+			if t.hooks.ListenerCount(TimeoutEventTimeout) > 0 {
+				_ = t.hooks.Emit(ctx, TimeoutEventTimeout, TimeoutEvent{ //nolint:errcheck
+					Name:        t.name,
+					Duration:    duration,
+					Elapsed:     elapsed,
+					TimedOut:    true,
+					PercentUsed: 100.0, // Exceeded timeout
+					Error:       ctx.Err(),
+					Timestamp:   clock.Now(),
+				})
+			}
 		} else {
 			// Context was canceled
 			span.SetTag(TimeoutTagSuccess, "false")

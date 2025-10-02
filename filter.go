@@ -196,13 +196,15 @@ func (f *Filter[T]) Process(ctx context.Context, data T) (result T, err error) {
 		span.SetTag(FilterTagSuccess, "true")
 
 		// Emit skipped event
-		_ = f.hooks.Emit(ctx, FilterEventSkipped, FilterEvent{ //nolint:errcheck
-			Name:         f.name,
-			ConditionMet: false,
-			Passed:       false,
-			Skipped:      true,
-			Timestamp:    time.Now(),
-		})
+		if f.hooks.ListenerCount(FilterEventSkipped) > 0 {
+			_ = f.hooks.Emit(ctx, FilterEventSkipped, FilterEvent{ //nolint:errcheck
+				Name:         f.name,
+				ConditionMet: false,
+				Passed:       false,
+				Skipped:      true,
+				Timestamp:    time.Now(),
+			})
+		}
 
 		return data, nil
 	}
@@ -218,17 +220,19 @@ func (f *Filter[T]) Process(ctx context.Context, data T) (result T, err error) {
 		span.SetTag(FilterTagError, err.Error())
 
 		// Emit passed event with error
-		_ = f.hooks.Emit(ctx, FilterEventPassed, FilterEvent{ //nolint:errcheck
-			Name:          f.name,
-			ConditionMet:  true,
-			Passed:        true,
-			Skipped:       false,
-			ProcessorName: processor.Name(),
-			Success:       false,
-			Error:         err,
-			Duration:      processorDuration,
-			Timestamp:     time.Now(),
-		})
+		if f.hooks.ListenerCount(FilterEventPassed) > 0 {
+			_ = f.hooks.Emit(ctx, FilterEventPassed, FilterEvent{ //nolint:errcheck
+				Name:          f.name,
+				ConditionMet:  true,
+				Passed:        true,
+				Skipped:       false,
+				ProcessorName: processor.Name(),
+				Success:       false,
+				Error:         err,
+				Duration:      processorDuration,
+				Timestamp:     time.Now(),
+			})
+		}
 
 		// Prepend this filter's name to the error path
 		var pipeErr *Error[T]
@@ -246,17 +250,19 @@ func (f *Filter[T]) Process(ctx context.Context, data T) (result T, err error) {
 	}
 
 	// Emit passed event with success
-	_ = f.hooks.Emit(ctx, FilterEventPassed, FilterEvent{ //nolint:errcheck
-		Name:          f.name,
-		ConditionMet:  true,
-		Passed:        true,
-		Skipped:       false,
-		ProcessorName: processor.Name(),
-		Success:       true,
-		Error:         nil,
-		Duration:      processorDuration,
-		Timestamp:     time.Now(),
-	})
+	if f.hooks.ListenerCount(FilterEventPassed) > 0 {
+		_ = f.hooks.Emit(ctx, FilterEventPassed, FilterEvent{ //nolint:errcheck
+			Name:          f.name,
+			ConditionMet:  true,
+			Passed:        true,
+			Skipped:       false,
+			ProcessorName: processor.Name(),
+			Success:       true,
+			Error:         nil,
+			Duration:      processorDuration,
+			Timestamp:     time.Now(),
+		})
+	}
 
 	span.SetTag(FilterTagSuccess, "true")
 	return result, nil

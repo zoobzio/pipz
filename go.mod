@@ -22,4 +22,4 @@ require (
 	github.com/zoobzio/tracez v0.0.11
 )
 
-require github.com/zoobzio/hookz v0.0.5
+require github.com/zoobzio/hookz v0.0.6

@@ -282,14 +282,16 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (result T, err error)
 					c.metrics.Counter(ContestWinsTotal).Inc()
 
 					// Emit winner event
-					_ = c.hooks.Emit(ctx, ContestEventWinner, ContestEvent{ //nolint:errcheck
-						Name:           c.name,
-						Winner:         winnerName,
-						ConditionMet:   true,
-						ProcessorCount: len(processors),
-						Duration:       time.Since(start),
-						Timestamp:      time.Now(),
-					})
+					if c.hooks.ListenerCount(ContestEventWinner) > 0 {
+						_ = c.hooks.Emit(ctx, ContestEventWinner, ContestEvent{ //nolint:errcheck
+							Name:           c.name,
+							Winner:         winnerName,
+							ConditionMet:   true,
+							ProcessorCount: len(processors),
+							Duration:       time.Since(start),
+							Timestamp:      time.Now(),
+						})
+					}
 
 					return res.data, nil
 				}
@@ -314,14 +316,16 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (result T, err error)
 		err = fmt.Errorf("all processors failed: %d errors", len(allErrors))
 
 		// Emit all failed event
-		_ = c.hooks.Emit(ctx, ContestEventAllFailed, ContestEvent{ //nolint:errcheck
-			Name:           c.name,
-			AllFailed:      true,
-			ProcessorCount: len(processors),
-			Duration:       time.Since(start),
-			Error:          err,
-			Timestamp:      time.Now(),
-		})
+		if c.hooks.ListenerCount(ContestEventAllFailed) > 0 {
+			_ = c.hooks.Emit(ctx, ContestEventAllFailed, ContestEvent{ //nolint:errcheck
+				Name:           c.name,
+				AllFailed:      true,
+				ProcessorCount: len(processors),
+				Duration:       time.Since(start),
+				Error:          err,
+				Timestamp:      time.Now(),
+			})
+		}
 	} else {
 		// Some succeeded but none met the condition
 		c.metrics.Counter(ContestNoConditionMet).Inc()
@@ -329,14 +333,16 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (result T, err error)
 		err = fmt.Errorf("no processor results met the specified condition")
 
 		// Emit no condition met event
-		_ = c.hooks.Emit(ctx, ContestEventNoCondition, ContestEvent{ //nolint:errcheck
-			Name:           c.name,
-			ConditionMet:   false,
-			ProcessorCount: len(processors),
-			Duration:       time.Since(start),
-			Error:          err,
-			Timestamp:      time.Now(),
-		})
+		if c.hooks.ListenerCount(ContestEventNoCondition) > 0 {
+			_ = c.hooks.Emit(ctx, ContestEventNoCondition, ContestEvent{ //nolint:errcheck
+				Name:           c.name,
+				ConditionMet:   false,
+				ProcessorCount: len(processors),
+				Duration:       time.Since(start),
+				Error:          err,
+				Timestamp:      time.Now(),
+			})
+		}
 	}
 
 	return input, &Error[T]{

@@ -8,9 +8,9 @@ require github.com/zoobzio/pipz v0.0.0
 
 require (
 	github.com/zoobzio/clockz v0.0.2 // indirect
-	github.com/zoobzio/hookz v0.0.5 // indirect
+	github.com/zoobzio/hookz v0.0.6 // indirect
 	github.com/zoobzio/metricz v0.0.2 // indirect
-	github.com/zoobzio/tracez v0.0.11 // indirect
+	github.com/zoobzio/tracez v0.0.12 // indirect
 )
 
 replace github.com/zoobzio/pipz => ../..

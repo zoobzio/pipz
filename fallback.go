@@ -227,16 +227,18 @@ func (f *Fallback[T]) Process(ctx context.Context, data T) (result T, err error)
 
 			// If this isn't the first processor, emit recovery event
 			if i > 0 {
-				_ = f.hooks.Emit(ctx, FallbackEventRecovered, FallbackEvent{ //nolint:errcheck
-					Name:            f.name,
-					PrimaryFailed:   processors[0].Name(),
-					FallbackUsed:    processor.Name(),
-					AttemptNumber:   i + 1,
-					TotalProcessors: len(processors),
-					Recovered:       true,
-					Duration:        attemptDuration,
-					Timestamp:       time.Now(),
-				})
+				if f.hooks.ListenerCount(FallbackEventRecovered) > 0 {
+					_ = f.hooks.Emit(ctx, FallbackEventRecovered, FallbackEvent{ //nolint:errcheck
+						Name:            f.name,
+						PrimaryFailed:   processors[0].Name(),
+						FallbackUsed:    processor.Name(),
+						AttemptNumber:   i + 1,
+						TotalProcessors: len(processors),
+						Recovered:       true,
+						Duration:        attemptDuration,
+						Timestamp:       time.Now(),
+					})
+				}
 			}
 
 			return result, nil
@@ -252,15 +254,17 @@ func (f *Fallback[T]) Process(ctx context.Context, data T) (result T, err error)
 
 		// If this isn't the last processor, emit fallback activation event
 		if i < len(processors)-1 {
-			_ = f.hooks.Emit(ctx, FallbackEventActivated, FallbackEvent{ //nolint:errcheck
-				Name:            f.name,
-				PrimaryFailed:   processor.Name(),
-				AttemptNumber:   i + 1,
-				TotalProcessors: len(processors),
-				Duration:        attemptDuration,
-				Error:           err,
-				Timestamp:       time.Now(),
-			})
+			if f.hooks.ListenerCount(FallbackEventActivated) > 0 {
+				_ = f.hooks.Emit(ctx, FallbackEventActivated, FallbackEvent{ //nolint:errcheck
+					Name:            f.name,
+					PrimaryFailed:   processor.Name(),
+					AttemptNumber:   i + 1,
+					TotalProcessors: len(processors),
+					Duration:        attemptDuration,
+					Error:           err,
+					Timestamp:       time.Now(),
+				})
+			}
 		}
 
 		// Continue to next processor (if any)
@@ -271,15 +275,17 @@ func (f *Fallback[T]) Process(ctx context.Context, data T) (result T, err error)
 		f.metrics.Counter(FallbackAllFailedTotal).Inc()
 
 		// Emit exhausted event
-		_ = f.hooks.Emit(ctx, FallbackEventExhausted, FallbackEvent{ //nolint:errcheck
-			Name:            f.name,
-			AttemptNumber:   len(processors),
-			TotalProcessors: len(processors),
-			AllFailed:       true,
-			Duration:        time.Since(start),
-			Error:           lastErr,
-			Timestamp:       time.Now(),
-		})
+		if f.hooks.ListenerCount(FallbackEventExhausted) > 0 {
+			_ = f.hooks.Emit(ctx, FallbackEventExhausted, FallbackEvent{ //nolint:errcheck
+				Name:            f.name,
+				AttemptNumber:   len(processors),
+				TotalProcessors: len(processors),
+				AllFailed:       true,
+				Duration:        time.Since(start),
+				Error:           lastErr,
+				Timestamp:       time.Now(),
+			})
+		}
 
 		var pipeErr *Error[T]
 		if errors.As(lastErr, &pipeErr) {

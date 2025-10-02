@@ -249,13 +249,15 @@ func (r *Race[T]) Process(ctx context.Context, input T) (result T, err error) {
 				r.metrics.Counter(RaceWinsTotal).Inc()
 
 				// Emit winner event
-				_ = r.hooks.Emit(ctx, RaceEventWinner, RaceEvent{ //nolint:errcheck
-					Name:           r.name,
-					Winner:         winnerName,
-					ProcessorCount: len(processors),
-					Duration:       time.Since(start),
-					Timestamp:      time.Now(),
-				})
+				if r.hooks.ListenerCount(RaceEventWinner) > 0 {
+					_ = r.hooks.Emit(ctx, RaceEventWinner, RaceEvent{ //nolint:errcheck
+						Name:           r.name,
+						Winner:         winnerName,
+						ProcessorCount: len(processors),
+						Duration:       time.Since(start),
+						Timestamp:      time.Now(),
+					})
+				}
 
 				return res.data, nil
 			}
@@ -271,14 +273,16 @@ func (r *Race[T]) Process(ctx context.Context, input T) (result T, err error) {
 		r.metrics.Counter(RaceAllFailedTotal).Inc()
 
 		// Emit all failed event
-		_ = r.hooks.Emit(ctx, RaceEventAllFailed, RaceEvent{ //nolint:errcheck
-			Name:           r.name,
-			ProcessorCount: len(processors),
-			Duration:       time.Since(start),
-			AllFailed:      true,
-			Error:          lastErr,
-			Timestamp:      time.Now(),
-		})
+		if r.hooks.ListenerCount(RaceEventAllFailed) > 0 {
+			_ = r.hooks.Emit(ctx, RaceEventAllFailed, RaceEvent{ //nolint:errcheck
+				Name:           r.name,
+				ProcessorCount: len(processors),
+				Duration:       time.Since(start),
+				AllFailed:      true,
+				Error:          lastErr,
+				Timestamp:      time.Now(),
+			})
+		}
 
 		var pipeErr *Error[T]
 		if errors.As(lastErr, &pipeErr) {

@@ -198,16 +198,18 @@ func (r *Retry[T]) Process(ctx context.Context, data T) (result T, err error) {
 		attemptDuration := time.Since(attemptStart)
 
 		// Emit attempt event
-		_ = r.hooks.Emit(ctx, RetryEventAttempt, RetryEvent{ //nolint:errcheck
-			Name:          r.name,
-			ProcessorName: processor.Name(),
-			AttemptNumber: attemptNum,
-			MaxAttempts:   maxAttempts,
-			Success:       err == nil,
-			Error:         err,
-			Duration:      attemptDuration,
-			Timestamp:     time.Now(),
-		})
+		if r.hooks.ListenerCount(RetryEventAttempt) > 0 {
+			_ = r.hooks.Emit(ctx, RetryEventAttempt, RetryEvent{ //nolint:errcheck
+				Name:          r.name,
+				ProcessorName: processor.Name(),
+				AttemptNumber: attemptNum,
+				MaxAttempts:   maxAttempts,
+				Success:       err == nil,
+				Error:         err,
+				Duration:      attemptDuration,
+				Timestamp:     time.Now(),
+			})
+		}
 
 		if err == nil {
 			// Success!
@@ -223,16 +225,18 @@ func (r *Retry[T]) Process(ctx context.Context, data T) (result T, err error) {
 
 			// Emit success event
 			totalDuration := time.Since(totalStart)
-			_ = r.hooks.Emit(ctx, RetryEventSuccess, RetryEvent{ //nolint:errcheck
-				Name:          r.name,
-				ProcessorName: processor.Name(),
-				AttemptNumber: attemptNum,
-				MaxAttempts:   maxAttempts,
-				Success:       true,
-				TotalDuration: totalDuration,
-				AttemptsUsed:  attemptNum,
-				Timestamp:     time.Now(),
-			})
+			if r.hooks.ListenerCount(RetryEventSuccess) > 0 {
+				_ = r.hooks.Emit(ctx, RetryEventSuccess, RetryEvent{ //nolint:errcheck
+					Name:          r.name,
+					ProcessorName: processor.Name(),
+					AttemptNumber: attemptNum,
+					MaxAttempts:   maxAttempts,
+					Success:       true,
+					TotalDuration: totalDuration,
+					AttemptsUsed:  attemptNum,
+					Timestamp:     time.Now(),
+				})
+			}
 
 			return result, nil
 		}
@@ -274,16 +278,18 @@ func (r *Retry[T]) Process(ctx context.Context, data T) (result T, err error) {
 
 	// Emit exhausted event
 	totalDuration := time.Since(totalStart)
-	_ = r.hooks.Emit(ctx, RetryEventExhausted, RetryEvent{ //nolint:errcheck
-		Name:          r.name,
-		ProcessorName: processor.Name(),
-		MaxAttempts:   maxAttempts,
-		Success:       false,
-		Error:         lastErr,
-		TotalDuration: totalDuration,
-		AttemptsUsed:  maxAttempts,
-		Timestamp:     time.Now(),
-	})
+	if r.hooks.ListenerCount(RetryEventExhausted) > 0 {
+		_ = r.hooks.Emit(ctx, RetryEventExhausted, RetryEvent{ //nolint:errcheck
+			Name:          r.name,
+			ProcessorName: processor.Name(),
+			MaxAttempts:   maxAttempts,
+			Success:       false,
+			Error:         lastErr,
+			TotalDuration: totalDuration,
+			AttemptsUsed:  maxAttempts,
+			Timestamp:     time.Now(),
+		})
+	}
 
 	// Return the last error
 	if lastErr != nil {

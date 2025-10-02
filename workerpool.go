@@ -221,16 +221,18 @@ func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err err
 
 	if len(processors) == 0 {
 		// Emit all complete event for empty processor list
-		_ = w.hooks.Emit(ctx, WorkerPoolEventAllComplete, WorkerPoolEvent{ //nolint:errcheck
-			Name:            w.name,
-			WorkerCount:     cap(w.sem),
-			TotalTasks:      0,
-			CompletedTasks:  0,
-			SuccessfulTasks: 0,
-			FailedTasks:     0,
-			TotalDuration:   0,
-			Timestamp:       time.Now(),
-		})
+		if w.hooks.ListenerCount(WorkerPoolEventAllComplete) > 0 {
+			_ = w.hooks.Emit(ctx, WorkerPoolEventAllComplete, WorkerPoolEvent{ //nolint:errcheck
+				Name:            w.name,
+				WorkerCount:     cap(w.sem),
+				TotalTasks:      0,
+				CompletedTasks:  0,
+				SuccessfulTasks: 0,
+				FailedTasks:     0,
+				TotalDuration:   0,
+				Timestamp:       time.Now(),
+			})
+		}
 		return input, nil
 	}
 
@@ -247,13 +249,15 @@ func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err err
 		w.metrics.Counter(WorkerPoolTasksTotal).Inc()
 
 		// Emit task queued event
-		_ = w.hooks.Emit(ctx, WorkerPoolEventTaskQueued, WorkerPoolEvent{ //nolint:errcheck
-			Name:          w.name,
-			ProcessorName: processor.Name(),
-			WorkerCount:   cap(w.sem),
-			ActiveWorkers: len(w.sem),
-			Timestamp:     time.Now(),
-		})
+		if w.hooks.ListenerCount(WorkerPoolEventTaskQueued) > 0 {
+			_ = w.hooks.Emit(ctx, WorkerPoolEventTaskQueued, WorkerPoolEvent{ //nolint:errcheck
+				Name:          w.name,
+				ProcessorName: processor.Name(),
+				WorkerCount:   cap(w.sem),
+				ActiveWorkers: len(w.sem),
+				Timestamp:     time.Now(),
+			})
+		}
 
 		go func(p Chainable[T]) {
 			defer wg.Done()
@@ -277,14 +281,16 @@ func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err err
 				w.metrics.Gauge(WorkerPoolWorkersActive).Set(float64(len(w.sem)))
 
 				// Emit task started event
-				_ = w.hooks.Emit(ctx, WorkerPoolEventTaskStarted, WorkerPoolEvent{ //nolint:errcheck
-					Name:          w.name,
-					ProcessorName: p.Name(),
-					WorkerCount:   cap(w.sem),
-					ActiveWorkers: len(w.sem),
-					QueueWaitTime: queueWait,
-					Timestamp:     time.Now(),
-				})
+				if w.hooks.ListenerCount(WorkerPoolEventTaskStarted) > 0 {
+					_ = w.hooks.Emit(ctx, WorkerPoolEventTaskStarted, WorkerPoolEvent{ //nolint:errcheck
+						Name:          w.name,
+						ProcessorName: p.Name(),
+						WorkerCount:   cap(w.sem),
+						ActiveWorkers: len(w.sem),
+						QueueWaitTime: queueWait,
+						Timestamp:     time.Now(),
+					})
+				}
 
 				defer func() {
 					<-w.sem // Release slot when done
@@ -300,14 +306,16 @@ func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err err
 				completedMu.Unlock()
 
 				// Emit task complete event for canceled task
-				_ = w.hooks.Emit(ctx, WorkerPoolEventTaskComplete, WorkerPoolEvent{ //nolint:errcheck
-					Name:          w.name,
-					ProcessorName: p.Name(),
-					WorkerCount:   cap(w.sem),
-					Success:       false,
-					Error:         ctx.Err(),
-					Timestamp:     time.Now(),
-				})
+				if w.hooks.ListenerCount(WorkerPoolEventTaskComplete) > 0 {
+					_ = w.hooks.Emit(ctx, WorkerPoolEventTaskComplete, WorkerPoolEvent{ //nolint:errcheck
+						Name:          w.name,
+						ProcessorName: p.Name(),
+						WorkerCount:   cap(w.sem),
+						Success:       false,
+						Error:         ctx.Err(),
+						Timestamp:     time.Now(),
+					})
+				}
 				return
 			}
 
@@ -336,16 +344,18 @@ func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err err
 			completedMu.Unlock()
 
 			// Emit task complete event
-			_ = w.hooks.Emit(ctx, WorkerPoolEventTaskComplete, WorkerPoolEvent{ //nolint:errcheck
-				Name:          w.name,
-				ProcessorName: p.Name(),
-				WorkerCount:   cap(w.sem),
-				ActiveWorkers: len(w.sem) - 1, // One less after release
-				Success:       taskErr == nil,
-				Error:         taskErr,
-				Duration:      taskDuration,
-				Timestamp:     time.Now(),
-			})
+			if w.hooks.ListenerCount(WorkerPoolEventTaskComplete) > 0 {
+				_ = w.hooks.Emit(ctx, WorkerPoolEventTaskComplete, WorkerPoolEvent{ //nolint:errcheck
+					Name:          w.name,
+					ProcessorName: p.Name(),
+					WorkerCount:   cap(w.sem),
+					ActiveWorkers: len(w.sem) - 1, // One less after release
+					Success:       taskErr == nil,
+					Error:         taskErr,
+					Duration:      taskDuration,
+					Timestamp:     time.Now(),
+				})
+			}
 		}(processor)
 	}
 
@@ -355,16 +365,18 @@ func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err err
 
 	// Emit all complete event
 	allTasksDuration := time.Since(allTasksStart)
-	_ = w.hooks.Emit(ctx, WorkerPoolEventAllComplete, WorkerPoolEvent{ //nolint:errcheck
-		Name:            w.name,
-		WorkerCount:     cap(w.sem),
-		TotalTasks:      len(processors),
-		CompletedTasks:  successfulTasks + failedTasks,
-		SuccessfulTasks: successfulTasks,
-		FailedTasks:     failedTasks,
-		TotalDuration:   allTasksDuration,
-		Timestamp:       time.Now(),
-	})
+	if w.hooks.ListenerCount(WorkerPoolEventAllComplete) > 0 {
+		_ = w.hooks.Emit(ctx, WorkerPoolEventAllComplete, WorkerPoolEvent{ //nolint:errcheck
+			Name:            w.name,
+			WorkerCount:     cap(w.sem),
+			TotalTasks:      len(processors),
+			CompletedTasks:  successfulTasks + failedTasks,
+			SuccessfulTasks: successfulTasks,
+			FailedTasks:     failedTasks,
+			TotalDuration:   allTasksDuration,
+			Timestamp:       time.Now(),
+		})
+	}
 
 	// Handle errors (first error wins)
 	for err := range errors {

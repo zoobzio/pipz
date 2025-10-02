@@ -172,13 +172,15 @@ func (s *Scaffold[T]) Process(ctx context.Context, input T) (result T, err error
 		s.metrics.Counter(ScaffoldLaunchedTotal).Inc()
 
 		// Emit launched event for each processor
-		_ = s.hooks.Emit(ctx, ScaffoldEventLaunched, ScaffoldEvent{ //nolint:errcheck
-			Name:           s.name,
-			ProcessorName:  processor.Name(),
-			ProcessorCount: len(processors),
-			ProcessorIndex: i,
-			Timestamp:      time.Now(),
-		})
+		if s.hooks.ListenerCount(ScaffoldEventLaunched) > 0 {
+			_ = s.hooks.Emit(ctx, ScaffoldEventLaunched, ScaffoldEvent{ //nolint:errcheck
+				Name:           s.name,
+				ProcessorName:  processor.Name(),
+				ProcessorCount: len(processors),
+				ProcessorIndex: i,
+				Timestamp:      time.Now(),
+			})
+		}
 
 		go func(p Chainable[T]) {
 			// Create an isolated copy using the Clone method
@@ -193,11 +195,13 @@ func (s *Scaffold[T]) Process(ctx context.Context, input T) (result T, err error
 	}
 
 	// Emit all launched event
-	_ = s.hooks.Emit(ctx, ScaffoldEventAllLaunched, ScaffoldEvent{ //nolint:errcheck
-		Name:           s.name,
-		ProcessorCount: len(processors),
-		Timestamp:      time.Now(),
-	})
+	if s.hooks.ListenerCount(ScaffoldEventAllLaunched) > 0 {
+		_ = s.hooks.Emit(ctx, ScaffoldEventAllLaunched, ScaffoldEvent{ //nolint:errcheck
+			Name:           s.name,
+			ProcessorCount: len(processors),
+			Timestamp:      time.Now(),
+		})
+	}
 
 	// Return immediately without waiting
 	return input, nil

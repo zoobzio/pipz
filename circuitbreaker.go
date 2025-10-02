@@ -265,14 +265,16 @@ func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err
 		span.SetTag(CircuitBreakerTagStateChange, fmt.Sprintf("%s->%s", oldState, cb.state))
 
 		// Emit hook event
-		_ = cb.hooks.Emit(ctx, CircuitBreakerEventHalfOpen, CircuitBreakerStateChange{ //nolint:errcheck
-			Name:                cb.name,
-			OldState:            oldState,
-			NewState:            stateHalfOpen,
-			ConsecutiveFailures: 0,
-			Reason:              "timeout_elapsed",
-			Timestamp:           clock.Now(),
-		})
+		if cb.hooks.ListenerCount(CircuitBreakerEventHalfOpen) > 0 {
+			_ = cb.hooks.Emit(ctx, CircuitBreakerEventHalfOpen, CircuitBreakerStateChange{ //nolint:errcheck
+				Name:                cb.name,
+				OldState:            oldState,
+				NewState:            stateHalfOpen,
+				ConsecutiveFailures: 0,
+				Reason:              "timeout_elapsed",
+				Timestamp:           clock.Now(),
+			})
+		}
 	}
 
 	state := cb.state
@@ -286,14 +288,16 @@ func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err
 		span.SetTag(CircuitBreakerTagAllowed, "false")
 
 		// Emit hook event for rejection
-		_ = cb.hooks.Emit(ctx, CircuitBreakerEventRejected, CircuitBreakerStateChange{ //nolint:errcheck
-			Name:                cb.name,
-			OldState:            state,
-			NewState:            state,
-			ConsecutiveFailures: cb.failures,
-			Reason:              "circuit_open",
-			Timestamp:           cb.getClock().Now(),
-		})
+		if cb.hooks.ListenerCount(CircuitBreakerEventRejected) > 0 {
+			_ = cb.hooks.Emit(ctx, CircuitBreakerEventRejected, CircuitBreakerStateChange{ //nolint:errcheck
+				Name:                cb.name,
+				OldState:            state,
+				NewState:            state,
+				ConsecutiveFailures: cb.failures,
+				Reason:              "circuit_open",
+				Timestamp:           cb.getClock().Now(),
+			})
+		}
 
 		cb.mu.Unlock()
 		return data, &Error[T]{
@@ -362,14 +366,16 @@ func (cb *CircuitBreaker[T]) onSuccess(ctx context.Context) {
 			cb.metrics.Gauge(CircuitBreakerConsecutiveFails).Set(0)
 
 			// Emit hook event
-			_ = cb.hooks.Emit(ctx, CircuitBreakerEventClosed, CircuitBreakerStateChange{ //nolint:errcheck
-				Name:                cb.name,
-				OldState:            oldState,
-				NewState:            stateClosed,
-				ConsecutiveFailures: 0,
-				Reason:              "recovery_successful",
-				Timestamp:           cb.getClock().Now(),
-			})
+			if cb.hooks.ListenerCount(CircuitBreakerEventClosed) > 0 {
+				_ = cb.hooks.Emit(ctx, CircuitBreakerEventClosed, CircuitBreakerStateChange{ //nolint:errcheck
+					Name:                cb.name,
+					OldState:            oldState,
+					NewState:            stateClosed,
+					ConsecutiveFailures: 0,
+					Reason:              "recovery_successful",
+					Timestamp:           cb.getClock().Now(),
+				})
+			}
 		}
 	}
 }
@@ -392,14 +398,16 @@ func (cb *CircuitBreaker[T]) onFailure(ctx context.Context) {
 			cb.metrics.Gauge(CircuitBreakerCurrentState).Set(1) // open = 1
 
 			// Emit hook event
-			_ = cb.hooks.Emit(ctx, CircuitBreakerEventOpened, CircuitBreakerStateChange{ //nolint:errcheck
-				Name:                cb.name,
-				OldState:            oldState,
-				NewState:            stateOpen,
-				ConsecutiveFailures: cb.failures,
-				Reason:              "failure_threshold_exceeded",
-				Timestamp:           cb.getClock().Now(),
-			})
+			if cb.hooks.ListenerCount(CircuitBreakerEventOpened) > 0 {
+				_ = cb.hooks.Emit(ctx, CircuitBreakerEventOpened, CircuitBreakerStateChange{ //nolint:errcheck
+					Name:                cb.name,
+					OldState:            oldState,
+					NewState:            stateOpen,
+					ConsecutiveFailures: cb.failures,
+					Reason:              "failure_threshold_exceeded",
+					Timestamp:           cb.getClock().Now(),
+				})
+			}
 		}
 	case stateHalfOpen:
 		oldState := cb.state
@@ -412,14 +420,16 @@ func (cb *CircuitBreaker[T]) onFailure(ctx context.Context) {
 		cb.metrics.Gauge(CircuitBreakerCurrentState).Set(1) // open = 1
 
 		// Emit hook event
-		_ = cb.hooks.Emit(ctx, CircuitBreakerEventOpened, CircuitBreakerStateChange{ //nolint:errcheck
-			Name:                cb.name,
-			OldState:            oldState,
-			NewState:            stateOpen,
-			ConsecutiveFailures: 1, // Single failure in half-open
-			Reason:              "halfopen_test_failed",
-			Timestamp:           cb.getClock().Now(),
-		})
+		if cb.hooks.ListenerCount(CircuitBreakerEventOpened) > 0 {
+			_ = cb.hooks.Emit(ctx, CircuitBreakerEventOpened, CircuitBreakerStateChange{ //nolint:errcheck
+				Name:                cb.name,
+				OldState:            oldState,
+				NewState:            stateOpen,
+				ConsecutiveFailures: 1, // Single failure in half-open
+				Reason:              "halfopen_test_failed",
+				Timestamp:           cb.getClock().Now(),
+			})
+		}
 	}
 }
 

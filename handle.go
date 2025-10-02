@@ -180,14 +180,16 @@ func (h *Handle[T]) Process(ctx context.Context, input T) (result T, err error) 
 		h.metrics.Counter(HandleErrorsTotal).Inc()
 
 		// Emit error event
-		_ = h.hooks.Emit(ctx, HandleEventError, HandleEvent{ //nolint:errcheck
-			Name:          h.name,
-			ProcessorName: processor.Name(),
-			Error:         err,
-			HandlerName:   errorHandler.Name(),
-			InputData:     input,
-			Timestamp:     time.Now(),
-		})
+		if h.hooks.ListenerCount(HandleEventError) > 0 {
+			_ = h.hooks.Emit(ctx, HandleEventError, HandleEvent{ //nolint:errcheck
+				Name:          h.name,
+				ProcessorName: processor.Name(),
+				Error:         err,
+				HandlerName:   errorHandler.Name(),
+				InputData:     input,
+				Timestamp:     time.Now(),
+			})
+		}
 
 		var pipeErr *Error[T]
 		if errors.As(err, &pipeErr) {
@@ -203,17 +205,19 @@ func (h *Handle[T]) Process(ctx context.Context, input T) (result T, err error) 
 				errorSpan.SetTag(HandleTagHandlerError, handlerErr.Error())
 
 				// Emit handler error event
-				_ = h.hooks.Emit(ctx, HandleEventHandlerError, HandleEvent{ //nolint:errcheck
-					Name:          h.name,
-					ProcessorName: processor.Name(),
-					Error:         err,
-					HandlerName:   errorHandler.Name(),
-					HandlerError:  handlerErr,
-					InputData:     input,
-					Duration:      handlerDuration,
-					Timestamp:     time.Now(),
-				})
-			} else {
+				if h.hooks.ListenerCount(HandleEventHandlerError) > 0 {
+					_ = h.hooks.Emit(ctx, HandleEventHandlerError, HandleEvent{ //nolint:errcheck
+						Name:          h.name,
+						ProcessorName: processor.Name(),
+						Error:         err,
+						HandlerName:   errorHandler.Name(),
+						HandlerError:  handlerErr,
+						InputData:     input,
+						Duration:      handlerDuration,
+						Timestamp:     time.Now(),
+					})
+				}
+			} else if h.hooks.ListenerCount(HandleEventHandled) > 0 {
 				// Emit handled event
 				_ = h.hooks.Emit(ctx, HandleEventHandled, HandleEvent{ //nolint:errcheck
 					Name:          h.name,
@@ -247,17 +251,19 @@ func (h *Handle[T]) Process(ctx context.Context, input T) (result T, err error) 
 			errorSpan.SetTag(HandleTagHandlerError, handlerErr.Error())
 
 			// Emit handler error event
-			_ = h.hooks.Emit(ctx, HandleEventHandlerError, HandleEvent{ //nolint:errcheck
-				Name:          h.name,
-				ProcessorName: processorName,
-				Error:         err,
-				HandlerName:   errorHandler.Name(),
-				HandlerError:  handlerErr,
-				InputData:     input,
-				Duration:      handlerDuration,
-				Timestamp:     time.Now(),
-			})
-		} else {
+			if h.hooks.ListenerCount(HandleEventHandlerError) > 0 {
+				_ = h.hooks.Emit(ctx, HandleEventHandlerError, HandleEvent{ //nolint:errcheck
+					Name:          h.name,
+					ProcessorName: processorName,
+					Error:         err,
+					HandlerName:   errorHandler.Name(),
+					HandlerError:  handlerErr,
+					InputData:     input,
+					Duration:      handlerDuration,
+					Timestamp:     time.Now(),
+				})
+			}
+		} else if h.hooks.ListenerCount(HandleEventHandled) > 0 {
 			// Emit handled event
 			_ = h.hooks.Emit(ctx, HandleEventHandled, HandleEvent{ //nolint:errcheck
 				Name:          h.name,

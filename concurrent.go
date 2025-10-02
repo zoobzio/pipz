@@ -250,16 +250,18 @@ func (c *Concurrent[T]) Process(ctx context.Context, input T) (result T, err err
 				completedMu.Unlock()
 
 				// Emit event
-				_ = c.hooks.Emit(ctx, ConcurrentEventProcessorComplete, ConcurrentEvent{ //nolint:errcheck
-					Name:            c.name,
-					ProcessorName:   p.Name(),
-					ProcessorIndex:  index,
-					TotalProcessors: len(processors),
-					Success:         success,
-					Error:           processorErr,
-					Duration:        duration,
-					Timestamp:       time.Now(),
-				})
+				if c.hooks.ListenerCount(ConcurrentEventProcessorComplete) > 0 {
+					_ = c.hooks.Emit(ctx, ConcurrentEventProcessorComplete, ConcurrentEvent{ //nolint:errcheck
+						Name:            c.name,
+						ProcessorName:   p.Name(),
+						ProcessorIndex:  index,
+						TotalProcessors: len(processors),
+						Success:         success,
+						Error:           processorErr,
+						Duration:        duration,
+						Timestamp:       time.Now(),
+					})
+				}
 
 				wg.Done()
 			}()
@@ -292,15 +294,17 @@ func (c *Concurrent[T]) Process(ctx context.Context, input T) (result T, err err
 	case <-done:
 		// All processors completed - emit all_complete event
 		totalDuration := time.Since(start)
-		_ = c.hooks.Emit(ctx, ConcurrentEventAllComplete, ConcurrentEvent{ //nolint:errcheck
-			Name:            c.name,
-			TotalProcessors: len(processors),
-			CompletedCount:  successCount + failureCount,
-			SuccessCount:    successCount,
-			FailureCount:    failureCount,
-			TotalDuration:   totalDuration,
-			Timestamp:       time.Now(),
-		})
+		if c.hooks.ListenerCount(ConcurrentEventAllComplete) > 0 {
+			_ = c.hooks.Emit(ctx, ConcurrentEventAllComplete, ConcurrentEvent{ //nolint:errcheck
+				Name:            c.name,
+				TotalProcessors: len(processors),
+				CompletedCount:  successCount + failureCount,
+				SuccessCount:    successCount,
+				FailureCount:    failureCount,
+				TotalDuration:   totalDuration,
+				Timestamp:       time.Now(),
+			})
+		}
 		return input, nil
 	case <-ctx.Done():
 		// Context canceled - return without error as processors run independently

@@ -225,12 +225,14 @@ func (s *Switch[T, K]) Process(ctx context.Context, data T) (result T, err error
 		s.metrics.Counter(SwitchUnroutedTotal).Inc()
 
 		// Emit unrouted event
-		_ = s.hooks.Emit(ctx, SwitchEventUnrouted, SwitchEvent[K]{ //nolint:errcheck
-			Name:      s.name,
-			RouteKey:  route,
-			Routed:    false,
-			Timestamp: time.Now(),
-		})
+		if s.hooks.ListenerCount(SwitchEventUnrouted) > 0 {
+			_ = s.hooks.Emit(ctx, SwitchEventUnrouted, SwitchEvent[K]{ //nolint:errcheck
+				Name:      s.name,
+				RouteKey:  route,
+				Routed:    false,
+				Timestamp: time.Now(),
+			})
+		}
 
 		return data, nil
 	}
@@ -244,16 +246,18 @@ func (s *Switch[T, K]) Process(ctx context.Context, data T) (result T, err error
 	processorDuration := time.Since(processorStart)
 
 	// Emit routed event
-	_ = s.hooks.Emit(ctx, SwitchEventRouted, SwitchEvent[K]{ //nolint:errcheck
-		Name:          s.name,
-		RouteKey:      route,
-		ProcessorName: processor.Name(),
-		Routed:        true,
-		Success:       err == nil,
-		Error:         err,
-		Duration:      processorDuration,
-		Timestamp:     time.Now(),
-	})
+	if s.hooks.ListenerCount(SwitchEventRouted) > 0 {
+		_ = s.hooks.Emit(ctx, SwitchEventRouted, SwitchEvent[K]{ //nolint:errcheck
+			Name:          s.name,
+			RouteKey:      route,
+			ProcessorName: processor.Name(),
+			Routed:        true,
+			Success:       err == nil,
+			Error:         err,
+			Duration:      processorDuration,
+			Timestamp:     time.Now(),
+		})
+	}
 	if err != nil {
 		var pipeErr *Error[T]
 		if errors.As(err, &pipeErr) {

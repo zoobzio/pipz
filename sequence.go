@@ -289,29 +289,33 @@ func (c *Sequence[T]) Process(ctx context.Context, value T) (result T, err error
 				c.metrics.Gauge(SequenceStagesCompleted).Set(float64(stagesCompleted))
 
 				// Emit stage complete event for successful stage
-				_ = c.hooks.Emit(ctx, SequenceEventStageComplete, SequenceEvent{ //nolint:errcheck
-					Name:        c.name,
-					StageName:   proc.Name(),
-					StageNumber: i + 1,
-					TotalStages: len(processors),
-					Success:     true,
-					Error:       nil,
-					Duration:    stageDuration,
-					Timestamp:   time.Now(),
-				})
+				if c.hooks.ListenerCount(SequenceEventStageComplete) > 0 {
+					_ = c.hooks.Emit(ctx, SequenceEventStageComplete, SequenceEvent{ //nolint:errcheck
+						Name:        c.name,
+						StageName:   proc.Name(),
+						StageNumber: i + 1,
+						TotalStages: len(processors),
+						Success:     true,
+						Error:       nil,
+						Duration:    stageDuration,
+						Timestamp:   time.Now(),
+					})
+				}
 			}
 			if err != nil {
 				// Emit stage complete event for failed stage
-				_ = c.hooks.Emit(ctx, SequenceEventStageComplete, SequenceEvent{ //nolint:errcheck
-					Name:        c.name,
-					StageName:   proc.Name(),
-					StageNumber: i + 1,
-					TotalStages: len(processors),
-					Success:     false,
-					Error:       err,
-					Duration:    stageDuration,
-					Timestamp:   time.Now(),
-				})
+				if c.hooks.ListenerCount(SequenceEventStageComplete) > 0 {
+					_ = c.hooks.Emit(ctx, SequenceEventStageComplete, SequenceEvent{ //nolint:errcheck
+						Name:        c.name,
+						StageName:   proc.Name(),
+						StageNumber: i + 1,
+						TotalStages: len(processors),
+						Success:     false,
+						Error:       err,
+						Duration:    stageDuration,
+						Timestamp:   time.Now(),
+					})
+				}
 
 				var pipeErr *Error[T]
 				if errors.As(err, &pipeErr) {
@@ -332,14 +336,16 @@ func (c *Sequence[T]) Process(ctx context.Context, value T) (result T, err error
 
 	// All stages completed successfully - emit all_complete event
 	totalDuration := time.Since(start)
-	_ = c.hooks.Emit(ctx, SequenceEventAllComplete, SequenceEvent{ //nolint:errcheck
-		Name:            c.name,
-		TotalStages:     len(processors),
-		CompletedStages: stagesCompleted,
-		TotalDuration:   totalDuration,
-		Success:         true,
-		Timestamp:       time.Now(),
-	})
+	if c.hooks.ListenerCount(SequenceEventAllComplete) > 0 {
+		_ = c.hooks.Emit(ctx, SequenceEventAllComplete, SequenceEvent{ //nolint:errcheck
+			Name:            c.name,
+			TotalStages:     len(processors),
+			CompletedStages: stagesCompleted,
+			TotalDuration:   totalDuration,
+			Success:         true,
+			Timestamp:       time.Now(),
+		})
+	}
 
 	return result, nil
 }

@@ -196,14 +196,16 @@ func (b *Backoff[T]) Process(ctx context.Context, data T) (result T, err error) 
 		// Emit attempt event
 		if i > 0 {
 			// Don't emit for first attempt since there's no delay
-			_ = b.hooks.Emit(ctx, BackoffEventAttempt, BackoffEvent{ //nolint:errcheck
-				Name:        b.name,
-				AttemptNum:  attemptNum,
-				MaxAttempts: maxAttempts,
-				Delay:       delay,
-				TotalDelay:  totalDelay,
-				Timestamp:   clock.Now(),
-			})
+			if b.hooks.ListenerCount(BackoffEventAttempt) > 0 {
+				_ = b.hooks.Emit(ctx, BackoffEventAttempt, BackoffEvent{ //nolint:errcheck
+					Name:        b.name,
+					AttemptNum:  attemptNum,
+					MaxAttempts: maxAttempts,
+					Delay:       delay,
+					TotalDelay:  totalDelay,
+					Timestamp:   clock.Now(),
+				})
+			}
 		}
 
 		result, err := processor.Process(attemptCtx, data)
@@ -221,14 +223,16 @@ func (b *Backoff[T]) Process(ctx context.Context, data T) (result T, err error) 
 			b.metrics.Gauge(BackoffAttemptCurrent).Set(0) // Reset gauge
 
 			// Emit success event
-			_ = b.hooks.Emit(ctx, BackoffEventSuccess, BackoffEvent{ //nolint:errcheck
-				Name:        b.name,
-				AttemptNum:  attemptNum,
-				MaxAttempts: maxAttempts,
-				TotalDelay:  totalDelay,
-				Success:     true,
-				Timestamp:   clock.Now(),
-			})
+			if b.hooks.ListenerCount(BackoffEventSuccess) > 0 {
+				_ = b.hooks.Emit(ctx, BackoffEventSuccess, BackoffEvent{ //nolint:errcheck
+					Name:        b.name,
+					AttemptNum:  attemptNum,
+					MaxAttempts: maxAttempts,
+					TotalDelay:  totalDelay,
+					Success:     true,
+					Timestamp:   clock.Now(),
+				})
+			}
 
 			return result, nil
 		}
@@ -277,15 +281,17 @@ func (b *Backoff[T]) Process(ctx context.Context, data T) (result T, err error) 
 	b.metrics.Gauge(BackoffAttemptCurrent).Set(0) // Reset gauge
 
 	// Emit exhausted event
-	_ = b.hooks.Emit(ctx, BackoffEventExhausted, BackoffEvent{ //nolint:errcheck
-		Name:        b.name,
-		AttemptNum:  maxAttempts,
-		MaxAttempts: maxAttempts,
-		TotalDelay:  totalDelay,
-		Exhausted:   true,
-		Error:       lastErr,
-		Timestamp:   clock.Now(),
-	})
+	if b.hooks.ListenerCount(BackoffEventExhausted) > 0 {
+		_ = b.hooks.Emit(ctx, BackoffEventExhausted, BackoffEvent{ //nolint:errcheck
+			Name:        b.name,
+			AttemptNum:  maxAttempts,
+			MaxAttempts: maxAttempts,
+			TotalDelay:  totalDelay,
+			Exhausted:   true,
+			Error:       lastErr,
+			Timestamp:   clock.Now(),
+		})
+	}
 
 	// Return the last error
 	if lastErr != nil {

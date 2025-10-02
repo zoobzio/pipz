@@ -317,17 +317,19 @@ func (r *RateLimiter[T]) Process(ctx context.Context, data T) (result T, err err
 
 			// Check if bucket is exhausted (tokens <= 0)
 			if tokensAvailable <= 0 {
-				_ = r.hooks.Emit(ctx, RateLimiterEventExhausted, RateLimiterEvent{ //nolint:errcheck
-					Name:            r.name,
-					Mode:            mode,
-					TokensAvailable: tokensAvailable,
-					RatePerSecond:   ratePerSec,
-					Burst:           burstLimit,
-					WaitTime:        waitTime,
-					Dropped:         false,
-					Reason:          "bucket_exhausted",
-					Timestamp:       r.clock.Now(),
-				})
+				if r.hooks.ListenerCount(RateLimiterEventExhausted) > 0 {
+					_ = r.hooks.Emit(ctx, RateLimiterEventExhausted, RateLimiterEvent{ //nolint:errcheck
+						Name:            r.name,
+						Mode:            mode,
+						TokensAvailable: tokensAvailable,
+						RatePerSecond:   ratePerSec,
+						Burst:           burstLimit,
+						WaitTime:        waitTime,
+						Dropped:         false,
+						Reason:          "bucket_exhausted",
+						Timestamp:       r.clock.Now(),
+					})
+				}
 			}
 
 			r.mu.Unlock() // Unlock before blocking
@@ -372,16 +374,18 @@ func (r *RateLimiter[T]) Process(ctx context.Context, data T) (result T, err err
 			burstLimit := r.burst
 			r.mu.Unlock()
 
-			_ = r.hooks.Emit(ctx, RateLimiterEventLimited, RateLimiterEvent{ //nolint:errcheck
-				Name:            r.name,
-				Mode:            mode,
-				TokensAvailable: tokensAvailable,
-				RatePerSecond:   ratePerSec,
-				Burst:           burstLimit,
-				Dropped:         true,
-				Reason:          "rate_limit_exceeded",
-				Timestamp:       r.clock.Now(),
-			})
+			if r.hooks.ListenerCount(RateLimiterEventLimited) > 0 {
+				_ = r.hooks.Emit(ctx, RateLimiterEventLimited, RateLimiterEvent{ //nolint:errcheck
+					Name:            r.name,
+					Mode:            mode,
+					TokensAvailable: tokensAvailable,
+					RatePerSecond:   ratePerSec,
+					Burst:           burstLimit,
+					Dropped:         true,
+					Reason:          "rate_limit_exceeded",
+					Timestamp:       r.clock.Now(),
+				})
+			}
 
 			return data, &Error[T]{
 				Err:       fmt.Errorf("rate limit exceeded"),
