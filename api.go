@@ -365,11 +365,6 @@ import (
 type Chainable[T any] interface {
 	Process(context.Context, T) (T, error)
 	Name() Name
-
-	// Observability methods - all connectors and processors must implement these.
-	// Simple processors can return nil for unused observability components.
-	Metrics() *metricz.Registry
-	Tracer() *tracez.Tracer
 	Close() error
 }
 
