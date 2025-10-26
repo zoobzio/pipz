@@ -2,9 +2,6 @@ package pipz
 
 import (
 	"context"
-
-	"github.com/zoobzio/metricz"
-	"github.com/zoobzio/tracez"
 )
 
 // Transform creates a Processor that applies a pure transformation function to data.
@@ -27,15 +24,8 @@ import (
 //	    return strings.ToUpper(s)
 //	})
 func Transform[T any](name Name, fn func(context.Context, T) T) Processor[T] {
-	// Initialize observability
-	metrics := metricz.New()
-	metrics.Counter(ProcessorCallsTotal)
-	metrics.Counter(ProcessorErrorsTotal)
-
 	return Processor[T]{
-		name:    name,
-		metrics: metrics,
-		tracer:  tracez.New(),
+		name: name,
 		fn: func(ctx context.Context, value T) (result T, err error) {
 			defer recoverFromPanic(&result, &err, name, value)
 			result = fn(ctx, value)

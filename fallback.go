@@ -3,58 +3,11 @@ package pipz
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
-	"github.com/zoobzio/hookz"
-	"github.com/zoobzio/metricz"
-	"github.com/zoobzio/tracez"
+	"github.com/zoobzio/capitan"
 )
-
-// Observability constants for the Fallback connector.
-const (
-	// Metrics.
-	FallbackProcessedTotal = metricz.Key("fallback.processed.total")
-	FallbackSuccessesTotal = metricz.Key("fallback.successes.total")
-	FallbackAllFailedTotal = metricz.Key("fallback.all_failed.total")
-	FallbackAttemptsTotal  = metricz.Key("fallback.attempts.total")
-	FallbackProcessorCount = metricz.Key("fallback.processor.count")
-	FallbackDurationMs     = metricz.Key("fallback.duration.ms")
-
-	// Spans.
-	FallbackProcessSpan = tracez.Key("fallback.process")
-	FallbackAttemptSpan = tracez.Key("fallback.attempt")
-
-	// Tags.
-	FallbackTagProcessorCount      = tracez.Tag("fallback.processor_count")
-	FallbackTagProcessorName       = tracez.Tag("fallback.processor_name")
-	FallbackTagAttemptNumber       = tracez.Tag("fallback.attempt_number")
-	FallbackTagSuccess             = tracez.Tag("fallback.success")
-	FallbackTagSuccessfulProcessor = tracez.Tag("fallback.successful_processor")
-	FallbackTagError               = tracez.Tag("fallback.error")
-
-	// Hook event keys.
-	FallbackEventActivated = hookz.Key("fallback.activated")
-	FallbackEventExhausted = hookz.Key("fallback.exhausted")
-	FallbackEventRecovered = hookz.Key("fallback.recovered")
-)
-
-// FallbackEvent represents a fallback event.
-// This is emitted via hookz when fallback processing occurs,
-// allowing external systems to monitor service degradation and recovery patterns.
-type FallbackEvent struct {
-	Name            Name          // Connector name
-	PrimaryFailed   Name          // Name of processor that failed (if not first success)
-	FallbackUsed    Name          // Name of processor that succeeded (if any)
-	AttemptNumber   int           // Which attempt in chain (1-based)
-	TotalProcessors int           // Total processors available
-	AllFailed       bool          // Whether all fallbacks were exhausted
-	Recovered       bool          // Whether a fallback successfully recovered
-	Duration        time.Duration // How long this attempt took
-	Error           error         // Error from failed processor
-	Timestamp       time.Time     // When the event occurred
-}
 
 // Fallback attempts processors in order, falling back to the next on error.
 // Fallback provides automatic failover through a chain of alternative processors
@@ -86,56 +39,10 @@ type FallbackEvent struct {
 //	fallback1 → fallback2 → fallback3 → fallback1
 //
 // This creates infinite recursion risk if all processors fail, leading to stack overflow.
-//
-// # Observability
-//
-// Fallback provides comprehensive observability through metrics, tracing, and events:
-//
-// Metrics:
-//   - fallback.processed.total: Counter of fallback operations
-//   - fallback.successes.total: Counter of successful completions
-//   - fallback.all_failed.total: Counter of completely exhausted fallback chains
-//   - fallback.attempts.total: Counter of individual processor attempts
-//   - fallback.processor.count: Gauge of processors in the chain
-//   - fallback.duration.ms: Gauge of total operation duration
-//
-// Traces:
-//   - fallback.process: Parent span for entire fallback operation
-//   - fallback.attempt: Child span for each processor attempt
-//
-// Events (via hooks):
-//   - fallback.activated: Fired when switching to a fallback processor
-//   - fallback.recovered: Fired when a non-primary processor succeeds
-//   - fallback.exhausted: Fired when all processors fail
-//
-// Example with hooks:
-//
-//	fallback := pipz.NewFallback("payment",
-//	    stripeProcessor,
-//	    paypalProcessor,
-//	    squareProcessor,
-//	)
-//
-//	// Monitor service degradation
-//	fallback.OnActivated(func(ctx context.Context, event FallbackEvent) error {
-//	    metrics.Inc("payment.fallback.activated", event.PrimaryFailed)
-//	    log.Warn("Payment processor %s failed, trying %d/%d",
-//	        event.PrimaryFailed, event.AttemptNumber, event.TotalProcessors)
-//	    return nil
-//	})
-//
-//	// Alert when completely exhausted
-//	fallback.OnExhausted(func(ctx context.Context, event FallbackEvent) error {
-//	    alert.Critical("All %d payment processors failed", event.TotalProcessors)
-//	    return nil
-//	})
 type Fallback[T any] struct {
 	name       Name
 	processors []Chainable[T]
 	mu         sync.RWMutex
-	metrics    *metricz.Registry
-	tracer     *tracez.Tracer
-	hooks      *hookz.Hooks[FallbackEvent]
 }
 
 // NewFallback creates a new Fallback connector that tries processors in order.
@@ -151,21 +58,9 @@ func NewFallback[T any](name Name, processors ...Chainable[T]) *Fallback[T] {
 		panic("NewFallback requires at least one processor")
 	}
 
-	// Initialize observability
-	metrics := metricz.New()
-	metrics.Counter(FallbackProcessedTotal)
-	metrics.Counter(FallbackSuccessesTotal)
-	metrics.Counter(FallbackAllFailedTotal)
-	metrics.Counter(FallbackAttemptsTotal)
-	metrics.Gauge(FallbackProcessorCount)
-	metrics.Gauge(FallbackDurationMs)
-
 	return &Fallback[T]{
 		name:       name,
 		processors: processors,
-		metrics:    metrics,
-		tracer:     tracez.New(),
-		hooks:      hookz.New[FallbackEvent](),
 	}
 }
 
@@ -179,113 +74,40 @@ func (f *Fallback[T]) Process(ctx context.Context, data T) (result T, err error)
 	copy(processors, f.processors)
 	f.mu.RUnlock()
 
-	// Track metrics
-	f.metrics.Counter(FallbackProcessedTotal).Inc()
-	f.metrics.Gauge(FallbackProcessorCount).Set(float64(len(processors)))
-	start := time.Now()
-
-	// Start main span
-	ctx, span := f.tracer.StartSpan(ctx, FallbackProcessSpan)
-	span.SetTag(FallbackTagProcessorCount, fmt.Sprintf("%d", len(processors)))
-	defer func() {
-		// Record duration
-		elapsed := time.Since(start)
-		f.metrics.Gauge(FallbackDurationMs).Set(float64(elapsed.Milliseconds()))
-
-		// Set success status
-		if err == nil {
-			span.SetTag(FallbackTagSuccess, "true")
-			f.metrics.Counter(FallbackSuccessesTotal).Inc()
-		} else {
-			span.SetTag(FallbackTagSuccess, "false")
-			if err != nil {
-				span.SetTag(FallbackTagError, err.Error())
-			}
-		}
-		span.Finish()
-	}()
-
 	var lastErr error
+	name := string(f.name)
 
 	for i, processor := range processors {
-		// Start span for this attempt
-		attemptCtx, attemptSpan := f.tracer.StartSpan(ctx, FallbackAttemptSpan)
-		attemptSpan.SetTag(FallbackTagProcessorName, string(processor.Name()))
-		attemptSpan.SetTag(FallbackTagAttemptNumber, fmt.Sprintf("%d", i+1))
+		// Get processor name if available
+		procName := "unknown"
+		if named, ok := interface{}(processor).(interface{ Name() Name }); ok {
+			procName = string(named.Name())
+		}
 
-		f.metrics.Counter(FallbackAttemptsTotal).Inc()
+		// Emit attempt signal
+		capitan.Emit(ctx, SignalFallbackAttempt,
+			FieldName.Field(name),
+			FieldProcessorIndex.Field(i),
+			FieldProcessorName.Field(procName),
+		)
 
-		attemptStart := time.Now()
-		result, err := processor.Process(attemptCtx, data)
-		attemptDuration := time.Since(attemptStart)
-
+		result, err := processor.Process(ctx, data)
 		if err == nil {
 			// Success! Return immediately
-			attemptSpan.SetTag(FallbackTagSuccess, "true")
-			attemptSpan.Finish()
-			span.SetTag(FallbackTagSuccessfulProcessor, string(processor.Name()))
-
-			// If this isn't the first processor, emit recovery event
-			if i > 0 {
-				if f.hooks.ListenerCount(FallbackEventRecovered) > 0 {
-					_ = f.hooks.Emit(ctx, FallbackEventRecovered, FallbackEvent{ //nolint:errcheck
-						Name:            f.name,
-						PrimaryFailed:   processors[0].Name(),
-						FallbackUsed:    processor.Name(),
-						AttemptNumber:   i + 1,
-						TotalProcessors: len(processors),
-						Recovered:       true,
-						Duration:        attemptDuration,
-						Timestamp:       time.Now(),
-					})
-				}
-			}
-
 			return result, nil
 		}
 
-		// Failed, record error
-		attemptSpan.SetTag(FallbackTagSuccess, "false")
-		attemptSpan.SetTag(FallbackTagError, err.Error())
-		attemptSpan.Finish()
-
 		// Store the error for potential return
 		lastErr = err
-
-		// If this isn't the last processor, emit fallback activation event
-		if i < len(processors)-1 {
-			if f.hooks.ListenerCount(FallbackEventActivated) > 0 {
-				_ = f.hooks.Emit(ctx, FallbackEventActivated, FallbackEvent{ //nolint:errcheck
-					Name:            f.name,
-					PrimaryFailed:   processor.Name(),
-					AttemptNumber:   i + 1,
-					TotalProcessors: len(processors),
-					Duration:        attemptDuration,
-					Error:           err,
-					Timestamp:       time.Now(),
-				})
-			}
-		}
-
-		// Continue to next processor (if any)
 	}
 
 	// All processors failed, return the last error with path
 	if lastErr != nil {
-		f.metrics.Counter(FallbackAllFailedTotal).Inc()
-
-		// Emit exhausted event
-		if f.hooks.ListenerCount(FallbackEventExhausted) > 0 {
-			_ = f.hooks.Emit(ctx, FallbackEventExhausted, FallbackEvent{ //nolint:errcheck
-				Name:            f.name,
-				AttemptNumber:   len(processors),
-				TotalProcessors: len(processors),
-				AllFailed:       true,
-				Duration:        time.Since(start),
-				Error:           lastErr,
-				Timestamp:       time.Now(),
-			})
-		}
+		// Emit failed signal
+		capitan.Emit(ctx, SignalFallbackFailed,
+			FieldName.Field(name),
+			FieldError.Field(lastErr.Error()),
+		)
 
 		var pipeErr *Error[T]
 		if errors.As(lastErr, &pipeErr) {
@@ -355,44 +177,9 @@ func (f *Fallback[T]) Name() Name {
 	return f.name
 }
 
-// Metrics returns the metrics registry for this connector.
-func (f *Fallback[T]) Metrics() *metricz.Registry {
-	return f.metrics
-}
-
-// Tracer returns the tracer for this connector.
-func (f *Fallback[T]) Tracer() *tracez.Tracer {
-	return f.tracer
-}
-
-// Close gracefully shuts down observability components.
-func (f *Fallback[T]) Close() error {
-	if f.tracer != nil {
-		f.tracer.Close()
-	}
-	f.hooks.Close()
+// Close gracefully shuts down the connector.
+func (*Fallback[T]) Close() error {
 	return nil
-}
-
-// OnActivated registers a handler for when a fallback processor is activated.
-// The handler is called asynchronously when a processor fails and the next one is tried.
-func (f *Fallback[T]) OnActivated(handler func(context.Context, FallbackEvent) error) error {
-	_, err := f.hooks.Hook(FallbackEventActivated, handler)
-	return err
-}
-
-// OnRecovered registers a handler for when a fallback successfully recovers.
-// The handler is called asynchronously when a non-primary processor succeeds.
-func (f *Fallback[T]) OnRecovered(handler func(context.Context, FallbackEvent) error) error {
-	_, err := f.hooks.Hook(FallbackEventRecovered, handler)
-	return err
-}
-
-// OnExhausted registers a handler for when all fallback options are exhausted.
-// The handler is called asynchronously when every processor in the chain fails.
-func (f *Fallback[T]) OnExhausted(handler func(context.Context, FallbackEvent) error) error {
-	_, err := f.hooks.Hook(FallbackEventExhausted, handler)
-	return err
 }
 
 // GetProcessors returns a copy of all processors in order.

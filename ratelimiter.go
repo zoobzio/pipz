@@ -8,56 +8,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zoobzio/capitan"
 	"github.com/zoobzio/clockz"
-	"github.com/zoobzio/hookz"
-	"github.com/zoobzio/metricz"
-	"github.com/zoobzio/tracez"
 )
 
-// Observability constants for the RateLimiter connector.
+// Mode constants.
 const (
-	// Metrics.
-	RateLimiterProcessedTotal  = metricz.Key("ratelimiter.processed.total")
-	RateLimiterAllowedTotal    = metricz.Key("ratelimiter.allowed.total")
-	RateLimiterDroppedTotal    = metricz.Key("ratelimiter.dropped.total")
-	RateLimiterWaitTimeMs      = metricz.Key("ratelimiter.wait_time.ms")
-	RateLimiterTokensAvailable = metricz.Key("ratelimiter.tokens.available")
-	RateLimiterTokensUsed      = metricz.Key("ratelimiter.tokens.used")
-	RateLimiterBurstLimit      = metricz.Key("ratelimiter.burst.limit")
-	RateLimiterRateLimit       = metricz.Key("ratelimiter.rate.limit")
-
-	// Spans.
-	RateLimiterProcessSpan = tracez.Key("ratelimiter.process")
-
-	// Tags.
-	RateLimiterTagMode     = tracez.Tag("ratelimiter.mode")
-	RateLimiterTagAllowed  = tracez.Tag("ratelimiter.allowed")
-	RateLimiterTagWaitTime = tracez.Tag("ratelimiter.wait_time")
-	RateLimiterTagError    = tracez.Tag("ratelimiter.error")
-
-	// Mode constants.
 	modeWait = "wait"
 	modeDrop = "drop"
-
-	// Hook event keys.
-	RateLimiterEventLimited   = hookz.Key("ratelimiter.limited")
-	RateLimiterEventExhausted = hookz.Key("ratelimiter.exhausted")
 )
-
-// RateLimiterEvent represents a rate limiting event.
-// This is emitted via hookz when rate limiting occurs,
-// allowing external systems to monitor and react to rate limiting.
-type RateLimiterEvent struct {
-	Name            Name          // Connector name
-	Mode            string        // Current mode (wait/drop)
-	TokensAvailable float64       // Tokens available when event occurred
-	RatePerSecond   float64       // Current rate limit
-	Burst           int           // Current burst limit
-	WaitTime        time.Duration // How long the request waited (wait mode)
-	Dropped         bool          // Whether request was dropped (drop mode)
-	Reason          string        // Why the event occurred
-	Timestamp       time.Time     // When it occurred
-}
 
 // RateLimiter controls the rate of processing to protect downstream services.
 // RateLimiter uses a token bucket algorithm to enforce rate limits, allowing
@@ -125,48 +84,6 @@ type RateLimiterEvent struct {
 //	        pipz.Apply("charge", processPayment),   // Actual operation
 //	    )
 //	}
-//
-// # Observability
-//
-// RateLimiter provides comprehensive observability through metrics, tracing, and events:
-//
-// Metrics:
-//   - ratelimiter.processed.total: Counter of rate limiter operations
-//   - ratelimiter.allowed.total: Counter of allowed requests
-//   - ratelimiter.dropped.total: Counter of dropped requests (drop mode)
-//   - ratelimiter.wait_time.ms: Gauge of wait time in milliseconds (wait mode)
-//   - ratelimiter.tokens.available: Gauge of current available tokens
-//   - ratelimiter.tokens.used: Gauge of tokens consumed
-//   - ratelimiter.burst.limit: Gauge of maximum burst size
-//   - ratelimiter.rate.limit: Gauge of requests per second
-//
-// Traces:
-//   - ratelimiter.process: Span for rate limiting decision
-//
-// Events (via hooks):
-//   - ratelimiter.limited: Fired when request is rate limited
-//   - ratelimiter.exhausted: Fired when token bucket is empty
-//
-// Example with hooks:
-//
-//	var apiLimiter = pipz.NewRateLimiter("api-limiter", 100, 10)
-//
-//	// Monitor rate limiting patterns
-//	apiLimiter.OnLimited(func(ctx context.Context, event RateLimiterEvent) error {
-//	    if event.Dropped {
-//	        metrics.Inc("api.rate_limit.dropped")
-//	        log.Warn("API request dropped due to rate limit")
-//	    } else {
-//	        metrics.Add("api.rate_limit.wait_ms", event.WaitTime.Milliseconds())
-//	    }
-//	    return nil
-//	})
-//
-//	// Alert on exhaustion
-//	apiLimiter.OnExhausted(func(ctx context.Context, event RateLimiterEvent) error {
-//	    alert.Warn("API rate limiter exhausted: %v tokens available", event.TokensAvailable)
-//	    return nil
-//	})
 type RateLimiter[T any] struct {
 	lastRefill time.Time    // last refill time (24 bytes)
 	clock      clockz.Clock // interface (16 bytes)
@@ -176,9 +93,6 @@ type RateLimiter[T any] struct {
 	tokens     float64      // current tokens (8 bytes)
 	mu         sync.Mutex   // mutex (8 bytes)
 	burst      int          // maximum tokens (8 bytes)
-	metrics    *metricz.Registry
-	tracer     *tracez.Tracer
-	hooks      *hookz.Hooks[RateLimiterEvent]
 }
 
 // NewRateLimiter creates a new RateLimiter connector.
@@ -187,18 +101,7 @@ type RateLimiter[T any] struct {
 func NewRateLimiter[T any](name Name, ratePerSecond float64, burst int) *RateLimiter[T] {
 	now := clockz.RealClock.Now()
 
-	// Initialize observability
-	metrics := metricz.New()
-	metrics.Counter(RateLimiterProcessedTotal)
-	metrics.Counter(RateLimiterAllowedTotal)
-	metrics.Counter(RateLimiterDroppedTotal)
-	metrics.Gauge(RateLimiterWaitTimeMs)
-	metrics.Gauge(RateLimiterTokensAvailable)
-	metrics.Gauge(RateLimiterTokensUsed)
-	metrics.Gauge(RateLimiterBurstLimit)
-	metrics.Gauge(RateLimiterRateLimit)
-
-	rl := &RateLimiter[T]{
+	return &RateLimiter[T]{
 		name:       name,
 		rate:       ratePerSecond,
 		burst:      burst,
@@ -206,17 +109,7 @@ func NewRateLimiter[T any](name Name, ratePerSecond float64, burst int) *RateLim
 		lastRefill: now,
 		mode:       modeWait, // Default to wait mode
 		clock:      clockz.RealClock,
-		metrics:    metrics,
-		tracer:     tracez.New(),
-		hooks:      hookz.New[RateLimiterEvent](),
 	}
-
-	// Set initial gauge values
-	rl.metrics.Gauge(RateLimiterBurstLimit).Set(float64(burst))
-	rl.metrics.Gauge(RateLimiterRateLimit).Set(ratePerSecond)
-	rl.metrics.Gauge(RateLimiterTokensAvailable).Set(float64(burst))
-
-	return rl
 }
 
 // refillTokens updates the token bucket based on elapsed time since last refill.
@@ -230,13 +123,11 @@ func (r *RateLimiter[T]) refillTokens() {
 	// Handle infinite rate - bypass limits entirely
 	if math.IsInf(r.rate, 1) {
 		r.tokens = float64(r.burst)
-		r.metrics.Gauge(RateLimiterTokensAvailable).Set(r.tokens)
 		return
 	}
 
 	// Refill tokens based on elapsed time
 	r.tokens = math.Min(float64(r.burst), r.tokens+elapsed*r.rate)
-	r.metrics.Gauge(RateLimiterTokensAvailable).Set(r.tokens)
 }
 
 // canTakeToken checks if a token is available and takes it if so.
@@ -278,32 +169,19 @@ func (r *RateLimiter[T]) calculateWaitTime() time.Duration {
 func (r *RateLimiter[T]) Process(ctx context.Context, data T) (result T, err error) {
 	defer recoverFromPanic(&result, &err, r.name, data)
 
-	// Track metrics
-	r.metrics.Counter(RateLimiterProcessedTotal).Inc()
-
-	// Start span
-	ctx, span := r.tracer.StartSpan(ctx, RateLimiterProcessSpan)
-	defer func() {
-		if err != nil {
-			span.SetTag(RateLimiterTagError, err.Error())
-		}
-		span.Finish()
-	}()
-
-	var totalWaitTime time.Duration
-
 	for {
 		r.mu.Lock()
 		mode := r.mode
 		if r.canTakeToken() {
-			r.metrics.Counter(RateLimiterAllowedTotal).Inc()
-			r.metrics.Gauge(RateLimiterTokensUsed).Inc()
-			span.SetTag(RateLimiterTagMode, mode)
-			span.SetTag(RateLimiterTagAllowed, "true")
-			if totalWaitTime > 0 {
-				span.SetTag(RateLimiterTagWaitTime, fmt.Sprintf("%d", totalWaitTime.Milliseconds()))
-				r.metrics.Gauge(RateLimiterWaitTimeMs).Set(float64(totalWaitTime.Milliseconds()))
-			}
+			// Emit allowed signal
+			capitan.Emit(ctx, SignalRateLimiterAllowed,
+				FieldName.Field(string(r.name)),
+				FieldTokens.Field(r.tokens),
+				FieldRate.Field(r.rate),
+				FieldBurst.Field(r.burst),
+				FieldTimestamp.Field(float64(r.clock.Now().Unix())),
+			)
+
 			r.mu.Unlock()
 			return data, nil
 		}
@@ -311,29 +189,17 @@ func (r *RateLimiter[T]) Process(ctx context.Context, data T) (result T, err err
 		switch mode {
 		case modeWait:
 			waitTime := r.calculateWaitTime()
-			tokensAvailable := r.tokens
-			ratePerSec := r.rate
-			burstLimit := r.burst
 
-			// Check if bucket is exhausted (tokens <= 0)
-			if tokensAvailable <= 0 {
-				if r.hooks.ListenerCount(RateLimiterEventExhausted) > 0 {
-					_ = r.hooks.Emit(ctx, RateLimiterEventExhausted, RateLimiterEvent{ //nolint:errcheck
-						Name:            r.name,
-						Mode:            mode,
-						TokensAvailable: tokensAvailable,
-						RatePerSecond:   ratePerSec,
-						Burst:           burstLimit,
-						WaitTime:        waitTime,
-						Dropped:         false,
-						Reason:          "bucket_exhausted",
-						Timestamp:       r.clock.Now(),
-					})
-				}
-			}
+			// Emit throttled signal
+			capitan.Emit(ctx, SignalRateLimiterThrottled,
+				FieldName.Field(string(r.name)),
+				FieldWaitTime.Field(waitTime.Seconds()),
+				FieldTokens.Field(r.tokens),
+				FieldRate.Field(r.rate),
+				FieldTimestamp.Field(float64(r.clock.Now().Unix())),
+			)
 
 			r.mu.Unlock() // Unlock before blocking
-			totalWaitTime += waitTime
 
 			// Handle zero rate (infinite wait)
 			if waitTime == time.Duration(math.MaxInt64) {
@@ -364,29 +230,17 @@ func (r *RateLimiter[T]) Process(ctx context.Context, data T) (result T, err err
 			}
 
 		case modeDrop:
-			r.metrics.Counter(RateLimiterDroppedTotal).Inc()
-			span.SetTag(RateLimiterTagMode, mode)
-			span.SetTag(RateLimiterTagAllowed, "false")
+			// Emit dropped signal
+			capitan.Emit(ctx, SignalRateLimiterDropped,
+				FieldName.Field(string(r.name)),
+				FieldTokens.Field(r.tokens),
+				FieldRate.Field(r.rate),
+				FieldBurst.Field(r.burst),
+				FieldMode.Field(mode),
+				FieldTimestamp.Field(float64(r.clock.Now().Unix())),
+			)
 
-			// Emit hook event for dropped request
-			tokensAvailable := r.tokens
-			ratePerSec := r.rate
-			burstLimit := r.burst
 			r.mu.Unlock()
-
-			if r.hooks.ListenerCount(RateLimiterEventLimited) > 0 {
-				_ = r.hooks.Emit(ctx, RateLimiterEventLimited, RateLimiterEvent{ //nolint:errcheck
-					Name:            r.name,
-					Mode:            mode,
-					TokensAvailable: tokensAvailable,
-					RatePerSecond:   ratePerSec,
-					Burst:           burstLimit,
-					Dropped:         true,
-					Reason:          "rate_limit_exceeded",
-					Timestamp:       r.clock.Now(),
-				})
-			}
-
 			return data, &Error[T]{
 				Err:       fmt.Errorf("rate limit exceeded"),
 				InputData: data,
@@ -413,7 +267,6 @@ func (r *RateLimiter[T]) SetRate(ratePerSecond float64) *RateLimiter[T] {
 	// Refill tokens before changing rate to maintain accuracy
 	r.refillTokens()
 	r.rate = ratePerSecond
-	r.metrics.Gauge(RateLimiterRateLimit).Set(ratePerSecond)
 	return r
 }
 
@@ -428,8 +281,6 @@ func (r *RateLimiter[T]) SetBurst(burst int) *RateLimiter[T] {
 	if r.tokens > float64(burst) {
 		r.tokens = float64(burst)
 	}
-	r.metrics.Gauge(RateLimiterBurstLimit).Set(float64(burst))
-	r.metrics.Gauge(RateLimiterTokensAvailable).Set(r.tokens)
 	return r
 }
 
@@ -492,35 +343,7 @@ func (r *RateLimiter[T]) GetAvailableTokens() float64 {
 	return r.tokens
 }
 
-// Metrics returns the metrics registry for this connector.
-func (r *RateLimiter[T]) Metrics() *metricz.Registry {
-	return r.metrics
-}
-
-// Tracer returns the tracer for this connector.
-func (r *RateLimiter[T]) Tracer() *tracez.Tracer {
-	return r.tracer
-}
-
-// Close gracefully shuts down observability components.
-func (r *RateLimiter[T]) Close() error {
-	if r.tracer != nil {
-		r.tracer.Close()
-	}
-	r.hooks.Close()
+// Close gracefully shuts down the connector.
+func (*RateLimiter[T]) Close() error {
 	return nil
-}
-
-// OnLimited registers a handler for when requests are rate limited.
-// The handler is called asynchronously when a request is delayed (wait mode) or dropped (drop mode).
-func (r *RateLimiter[T]) OnLimited(handler func(context.Context, RateLimiterEvent) error) error {
-	_, err := r.hooks.Hook(RateLimiterEventLimited, handler)
-	return err
-}
-
-// OnExhausted registers a handler for when the token bucket is exhausted.
-// The handler is called asynchronously when the bucket has no tokens available.
-func (r *RateLimiter[T]) OnExhausted(handler func(context.Context, RateLimiterEvent) error) error {
-	_, err := r.hooks.Hook(RateLimiterEventExhausted, handler)
-	return err
 }

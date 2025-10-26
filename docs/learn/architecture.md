@@ -215,6 +215,83 @@ Common integration patterns:
 4. **Stream Processing**: Integrate with streaming platforms
 5. **Service Mesh**: Use as sidecar processing logic
 
+## Observability Architecture
+
+### Hook System
+
+Pipz integrates with [capitan](https://github.com/zoobzio/capitan) to provide type-safe event hooks for monitoring and debugging. Stateful connectors emit signals at critical decision points:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                      Application Code                        │
+└───────────────────────┬──────────────────────────────────────┘
+                        │
+                        ▼
+┌──────────────────────────────────────────────────────────────┐
+│                   Stateful Connectors                        │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│  │CircuitBreaker│  │ RateLimiter  │  │ WorkerPool   │       │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘       │
+└─────────┼──────────────────┼──────────────────┼──────────────┘
+          │                  │                  │
+          │ capitan.Emit()   │                  │
+          ▼                  ▼                  ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    Capitan Event Bus                         │
+│              (Async, Per-Signal Workers)                     │
+└───────────────────────┬──────────────────────────────────────┘
+                        │
+                        ▼
+        ┌───────────────┴───────────────┐
+        ▼                               ▼
+┌──────────────┐              ┌──────────────────┐
+│  Observers   │              │  Hook Handlers   │
+├──────────────┤              ├──────────────────┤
+│ • Metrics    │              │ • Logging        │
+│ • Alerting   │              │ • Tracing        │
+│ • Debugging  │              │ • Custom Logic   │
+└──────────────┘              └──────────────────┘
+```
+
+### Signal Emission Points
+
+Signals are emitted at state transitions and decision points:
+
+**CircuitBreaker:**
+- `circuitbreaker.opened` - Threshold reached
+- `circuitbreaker.closed` - Recovery successful
+- `circuitbreaker.half-open` - Testing recovery
+- `circuitbreaker.rejected` - Request blocked
+
+**RateLimiter:**
+- `ratelimiter.allowed` - Token consumed
+- `ratelimiter.throttled` - Waiting for token
+- `ratelimiter.dropped` - Request dropped
+
+**WorkerPool:**
+- `workerpool.saturated` - All workers busy
+- `workerpool.acquired` - Worker slot taken
+- `workerpool.released` - Worker slot freed
+
+### Asynchronous Processing
+
+All events are processed asynchronously via per-signal worker goroutines:
+
+```
+Emit() → Buffered Channel → Worker Goroutine → Handler
+  ↓           (size: 16)          ↓               ↓
+Returns                        Isolated       Panic Safe
+Immediately                   Execution
+```
+
+This architecture ensures:
+- **Zero impact** on pipeline performance
+- **Isolation** between different signal types
+- **Panic safety** with automatic recovery
+- **Backpressure** via configurable buffers
+
+See [Hooks Documentation](./hooks.md) for detailed usage and examples.
+
 ## Performance Considerations
 
 ### Optimization Strategies
@@ -267,8 +344,7 @@ Be careful with error details in production:
 1. **Distributed Execution**: Support for distributed pipeline execution
 2. **Persistent State**: Durable state management for long-running pipelines
 3. **Visual Pipeline Builder**: Tool for visual pipeline composition
-4. **Metrics Collection**: Built-in observability and metrics
-5. **Schema Evolution**: Support for data schema versioning
+4. **Schema Evolution**: Support for data schema versioning
 
 ### API Stability
 

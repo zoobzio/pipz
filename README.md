@@ -85,9 +85,10 @@ result, err := pipeline.Process(ctx, order)
 ## Why pipz?
 
 - **Type-safe**: Full compile-time type checking with Go generics
-- **Composable**: Build complex pipelines from simple, reusable parts  
-- **Zero dependencies**: Just standard library
+- **Composable**: Build complex pipelines from simple, reusable parts
+- **Minimal dependencies**: Just standard library plus [clockz](https://github.com/zoobzio/clockz) and optional [capitan](https://github.com/zoobzio/capitan)
 - **Battle-tested patterns**: Retry, timeout, fallback, error recovery built-in
+- **Observable**: Emit typed signals for state changes (CircuitBreaker, RateLimiter, WorkerPool) via hooks
 - **Testable**: Every component is independently testable
 - **Fast**: Minimal allocations, optimized for performance
 - **Rich error context**: Know exactly where failures occur with complete path tracking

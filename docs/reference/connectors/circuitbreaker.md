@@ -120,6 +120,32 @@ HALF-OPEN → OPEN:   On any failure during half-open state
 - **Circuit context** - Adds circuit breaker information to error paths
 - **State awareness** - Different errors for open vs processor failures
 
+## Signals
+
+CircuitBreaker emits typed signals at state transitions for observability and monitoring via [capitan](https://github.com/zoobzio/capitan):
+
+| Signal | When Emitted | Fields |
+|--------|--------------|--------|
+| `circuitbreaker.opened` | Circuit opens after failure threshold reached | `name`, `state`, `failures`, `failure_threshold` |
+| `circuitbreaker.closed` | Circuit closes after successful recovery | `name`, `state`, `successes`, `success_threshold` |
+| `circuitbreaker.half-open` | Circuit transitions to half-open for testing | `name`, `state`, `generation` |
+| `circuitbreaker.rejected` | Request rejected while circuit is open | `name`, `state`, `generation` |
+
+**Example:**
+
+```go
+import "github.com/zoobzio/capitan"
+
+// Hook circuit breaker signals
+capitan.Hook(pipz.SignalCircuitBreakerOpened, func(ctx context.Context, e *capitan.Event) {
+    name, _ := pipz.FieldName.From(e)
+    failures, _ := pipz.FieldFailures.From(e)
+    // Alert or log circuit opening
+})
+```
+
+See [Hooks Documentation](../../learn/hooks.md) for complete signal reference and usage examples.
+
 ## Configuration Methods
 
 ```go
@@ -219,89 +245,6 @@ if err != nil {
         }
     }
 }
-```
-
-## Observability
-
-CircuitBreaker provides comprehensive observability through metrics, tracing, and hook events.
-
-### Metrics
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `circuitbreaker.processed.total` | Counter | Total circuit breaker operations |
-| `circuitbreaker.successes.total` | Counter | Operations that succeeded |
-| `circuitbreaker.failures.total` | Counter | Operations that failed |
-| `circuitbreaker.opens.total` | Counter | Times circuit opened |
-| `circuitbreaker.closes.total` | Counter | Times circuit closed |
-| `circuitbreaker.blocks.total` | Counter | Requests blocked by open circuit |
-| `circuitbreaker.state` | Gauge | Current state (0=closed, 1=open, 2=half-open) |
-| `circuitbreaker.consecutive.failures` | Gauge | Current consecutive failure count |
-| `circuitbreaker.consecutive.successes` | Gauge | Current consecutive success count |
-| `circuitbreaker.duration.ms` | Gauge | Operation duration in milliseconds |
-
-### Traces
-
-| Span | Description |
-|------|-------------|
-| `circuitbreaker.process` | Parent span for circuit breaker operation |
-
-**Span Tags:**
-- `circuitbreaker.state` - Current circuit state
-- `circuitbreaker.failure_threshold` - Configured failure threshold
-- `circuitbreaker.success_threshold` - Configured success threshold
-- `circuitbreaker.reset_timeout` - Configured reset timeout
-- `circuitbreaker.success` - Whether operation succeeded
-- `circuitbreaker.blocked` - Whether request was blocked
-- `circuitbreaker.state_changed` - Whether state changed
-- `circuitbreaker.new_state` - New state after change
-
-### Hook Events
-
-| Event | Key | Description |
-|-------|-----|-------------|
-| State Changed | `circuitbreaker.state_changed` | Fired when circuit state changes |
-| Blocked | `circuitbreaker.blocked` | Fired when request is blocked by open circuit |
-| Success | `circuitbreaker.success` | Fired when operation succeeds |
-| Failure | `circuitbreaker.failure` | Fired when operation fails |
-
-### Event Handlers
-
-```go
-// Monitor state transitions
-breaker.OnStateChange(func(ctx context.Context, event CircuitBreakerEvent) error {
-    log.Printf("Circuit %s changed from %s to %s",
-        event.Name, event.OldState, event.NewState)
-    if event.NewState == "open" {
-        alert.Critical("Circuit %s is now open", event.Name)
-    }
-    return nil
-})
-
-// Track blocked requests
-breaker.OnBlocked(func(ctx context.Context, event CircuitBreakerEvent) error {
-    metrics.Inc("circuit.blocks", event.Name)
-    log.Warn("Request blocked by open circuit %s", event.Name)
-    return nil
-})
-
-// Monitor failure patterns
-breaker.OnFailure(func(ctx context.Context, event CircuitBreakerEvent) error {
-    if event.ConsecutiveFailures >= event.FailureThreshold-1 {
-        log.Warn("Circuit %s approaching threshold: %d/%d failures",
-            event.Name, event.ConsecutiveFailures, event.FailureThreshold)
-    }
-    return nil
-})
-
-// Track recovery
-breaker.OnSuccess(func(ctx context.Context, event CircuitBreakerEvent) error {
-    if event.State == "half-open" {
-        log.Info("Circuit %s recovering: %d/%d successes",
-            event.Name, event.ConsecutiveSuccesses, event.SuccessThreshold)
-    }
-    return nil
-})
 ```
 
 ## Common Patterns

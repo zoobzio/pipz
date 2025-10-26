@@ -95,11 +95,11 @@ Effect has similar performance to Apply:
 ## Common Patterns
 
 ```go
-// Observability pipeline
-observability := pipz.NewSequence[Order]("observe",
+// Custom observability pipeline
+observe := pipz.NewSequence[Order]("observe",
     pipz.Effect("log", logOrder),
     pipz.Effect("metrics", recordMetrics),
-    pipz.Effect("trace", addTraceSpan),
+    pipz.Effect("audit", auditOrder),
 )
 
 // Notification effects running in parallel

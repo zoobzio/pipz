@@ -197,57 +197,6 @@ _, err := router.Process(ctx, data)
 // err: "no route found for key: typeC"
 ```
 
-## Observability
-
-Switch provides comprehensive observability through metrics, tracing, and hook events.
-
-### Metrics
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `switch.processed.total` | Counter | Total switch operations |
-| `switch.routed.total` | Counter | Requests that found a route |
-| `switch.unrouted.total` | Counter | Requests with no matching route |
-| `switch.successes.total` | Counter | Successful routing operations |
-| `switch.duration.ms` | Gauge | Routing and processing duration |
-
-### Traces
-
-| Span | Description |
-|------|-------------|
-| `switch.process` | Span for switch operation including routing |
-
-**Span Tags:**
-- `switch.route_key` - The key returned by condition
-- `switch.routed` - Whether a route was found
-- `switch.processor_name` - Name of selected processor (if any)
-- `switch.success` - Whether operation succeeded
-
-### Hook Events
-
-| Event | Key | Description |
-|-------|-----|-------------|
-| Routed | `switch.routed` | Fired when route is found and executed |
-| Unrouted | `switch.unrouted` | Fired when no route matches |
-
-### Event Handlers
-
-```go
-// Monitor routing patterns
-sw.OnRouted(func(ctx context.Context, event SwitchEvent) error {
-    log.Debug("Routed to %s via key %v", event.ProcessorName, event.RouteKey)
-    metrics.Inc("routing.distribution", fmt.Sprintf("%v", event.RouteKey))
-    return nil
-})
-
-// Track unhandled routes
-sw.OnUnrouted(func(ctx context.Context, event SwitchEvent) error {
-    log.Warn("No route found for key: %v", event.RouteKey)
-    alert.Warning("Unhandled route key: %v", event.RouteKey)
-    return nil
-})
-```
-
 ## Common Patterns
 
 ```go

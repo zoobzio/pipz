@@ -7,56 +7,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zoobzio/capitan"
 	"github.com/zoobzio/clockz"
-	"github.com/zoobzio/hookz"
-	"github.com/zoobzio/metricz"
-	"github.com/zoobzio/tracez"
 )
 
-// Observability constants for the CircuitBreaker connector.
+// State constants.
 const (
-	// Metrics.
-	CircuitBreakerProcessedTotal   = metricz.Key("circuitbreaker.processed.total")
-	CircuitBreakerSuccessesTotal   = metricz.Key("circuitbreaker.successes.total")
-	CircuitBreakerFailuresTotal    = metricz.Key("circuitbreaker.failures.total")
-	CircuitBreakerOpenedTotal      = metricz.Key("circuitbreaker.opened.total")
-	CircuitBreakerRejectedTotal    = metricz.Key("circuitbreaker.rejected.total")
-	CircuitBreakerStateTransitions = metricz.Key("circuitbreaker.state.transitions")
-	CircuitBreakerCurrentState     = metricz.Key("circuitbreaker.state.current")
-	CircuitBreakerConsecutiveFails = metricz.Key("circuitbreaker.consecutive.failures")
-
-	// Spans.
-	CircuitBreakerProcessSpan = tracez.Key("circuitbreaker.process")
-
-	// Tags.
-	CircuitBreakerTagState       = tracez.Tag("circuitbreaker.state")
-	CircuitBreakerTagAllowed     = tracez.Tag("circuitbreaker.allowed")
-	CircuitBreakerTagStateChange = tracez.Tag("circuitbreaker.state_change")
-	CircuitBreakerTagError       = tracez.Tag("circuitbreaker.error")
-
-	// State constants.
 	stateClosed   = "closed"
 	stateOpen     = "open"
 	stateHalfOpen = "half-open"
-
-	// Hook event keys.
-	CircuitBreakerEventOpened   = hookz.Key("circuitbreaker.opened")
-	CircuitBreakerEventClosed   = hookz.Key("circuitbreaker.closed")
-	CircuitBreakerEventHalfOpen = hookz.Key("circuitbreaker.halfopen")
-	CircuitBreakerEventRejected = hookz.Key("circuitbreaker.rejected")
 )
-
-// CircuitBreakerStateChange represents a state transition event.
-// This is emitted via hookz when the circuit breaker changes state,
-// allowing external systems to react to circuit state changes.
-type CircuitBreakerStateChange struct {
-	Name                Name      // Connector name
-	OldState            string    // Previous state
-	NewState            string    // New state
-	ConsecutiveFailures int       // Current failure count
-	Reason              string    // Why the state changed
-	Timestamp           time.Time // When it occurred
-}
 
 // CircuitBreaker prevents cascading failures by stopping requests to failing services.
 // CircuitBreaker implements the circuit breaker pattern with three states:
@@ -137,48 +97,6 @@ type CircuitBreakerStateChange struct {
 //	        pipz.NewRetry("retry", processor, 3),  // Retry transient failures
 //	    )
 //	}
-//
-// # Observability
-//
-// CircuitBreaker provides comprehensive observability through metrics, tracing, and events:
-//
-// Metrics:
-//   - circuitbreaker.requests.total: Counter of total requests processed
-//   - circuitbreaker.failures.total: Counter of consecutive failures
-//   - circuitbreaker.successes.total: Counter of successful requests
-//   - circuitbreaker.rejections.total: Counter of requests rejected (open state)
-//   - circuitbreaker.state: Gauge showing current state (0=closed, 1=open, 2=half-open)
-//
-// Traces:
-//   - circuitbreaker.process: Span for circuit breaker processing
-//   - Tags include state, success status, and rejection reason
-//
-// Events (via hooks):
-//   - circuitbreaker.opened: Fired when circuit opens due to failures
-//   - circuitbreaker.closed: Fired when circuit closes after recovery
-//   - circuitbreaker.halfopen: Fired when circuit enters testing state
-//   - circuitbreaker.rejected: Fired when requests are rejected (open state)
-//
-// Example with hooks:
-//
-//	var apiBreaker = pipz.NewCircuitBreaker(
-//	    "api-breaker",
-//	    apiProcessor,
-//	    5,
-//	    30*time.Second,
-//	)
-//
-//	// Alert when circuit opens
-//	apiBreaker.OnOpened(func(ctx context.Context, event CircuitBreakerStateChange) error {
-//	    alert.Send("API circuit breaker opened after %d failures", event.FailureCount)
-//	    return nil
-//	})
-//
-//	// Log recovery
-//	apiBreaker.OnClosed(func(ctx context.Context, event CircuitBreakerStateChange) error {
-//	    log.Info("Circuit recovered from %s state", event.OldState)
-//	    return nil
-//	})
 type CircuitBreaker[T any] struct {
 	lastFailTime     time.Time
 	processor        Chainable[T]
@@ -187,14 +105,11 @@ type CircuitBreaker[T any] struct {
 	state            string
 	mu               sync.Mutex
 	resetTimeout     time.Duration
-	generation       uint64
+	generation       int
 	failureThreshold int
 	successThreshold int
 	failures         int
 	successes        int
-	metrics          *metricz.Registry
-	tracer           *tracez.Tracer
-	hooks            *hookz.Hooks[CircuitBreakerStateChange]
 }
 
 // NewCircuitBreaker creates a new CircuitBreaker connector.
@@ -205,99 +120,52 @@ func NewCircuitBreaker[T any](name Name, processor Chainable[T], failureThreshol
 		failureThreshold = 1
 	}
 
-	// Initialize observability
-	metrics := metricz.New()
-	metrics.Counter(CircuitBreakerProcessedTotal)
-	metrics.Counter(CircuitBreakerSuccessesTotal)
-	metrics.Counter(CircuitBreakerFailuresTotal)
-	metrics.Counter(CircuitBreakerOpenedTotal)
-	metrics.Counter(CircuitBreakerRejectedTotal)
-	metrics.Counter(CircuitBreakerStateTransitions)
-	metrics.Gauge(CircuitBreakerCurrentState)
-	metrics.Gauge(CircuitBreakerConsecutiveFails)
-
-	cb := &CircuitBreaker[T]{
+	return &CircuitBreaker[T]{
 		name:             name,
 		processor:        processor,
 		failureThreshold: failureThreshold,
 		successThreshold: 1, // Default: 1 success to close from half-open
 		resetTimeout:     resetTimeout,
 		state:            stateClosed,
-		metrics:          metrics,
-		tracer:           tracez.New(),
-		hooks:            hookz.New[CircuitBreakerStateChange](),
 	}
-
-	// Set initial state gauge (0 = closed, 1 = open, 2 = half-open)
-	cb.metrics.Gauge(CircuitBreakerCurrentState).Set(0)
-
-	return cb
 }
 
 // Process implements the Chainable interface.
 func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err error) {
 	defer recoverFromPanic(&result, &err, cb.name, data)
 
-	// Track metrics
-	cb.metrics.Counter(CircuitBreakerProcessedTotal).Inc()
-
-	// Start span
-	ctx, span := cb.tracer.StartSpan(ctx, CircuitBreakerProcessSpan)
-	defer func() {
-		if err != nil {
-			span.SetTag(CircuitBreakerTagError, err.Error())
-		}
-		span.Finish()
-	}()
-
 	cb.mu.Lock()
 
 	// Check if we should transition from open to half-open
 	clock := cb.getClock()
 	if cb.state == stateOpen && clock.Since(cb.lastFailTime) > cb.resetTimeout {
-		oldState := cb.state
 		cb.state = stateHalfOpen
 		cb.failures = 0
 		cb.successes = 0
 		cb.generation++
-		cb.metrics.Counter(CircuitBreakerStateTransitions).Inc()
-		cb.metrics.Gauge(CircuitBreakerCurrentState).Set(2) // half-open = 2
-		span.SetTag(CircuitBreakerTagStateChange, fmt.Sprintf("%s->%s", oldState, cb.state))
 
-		// Emit hook event
-		if cb.hooks.ListenerCount(CircuitBreakerEventHalfOpen) > 0 {
-			_ = cb.hooks.Emit(ctx, CircuitBreakerEventHalfOpen, CircuitBreakerStateChange{ //nolint:errcheck
-				Name:                cb.name,
-				OldState:            oldState,
-				NewState:            stateHalfOpen,
-				ConsecutiveFailures: 0,
-				Reason:              "timeout_elapsed",
-				Timestamp:           clock.Now(),
-			})
-		}
+		// Emit half-open signal
+		capitan.Emit(ctx, SignalCircuitBreakerHalfOpen,
+			FieldName.Field(string(cb.name)),
+			FieldState.Field(cb.state),
+			FieldGeneration.Field(cb.generation),
+			FieldTimestamp.Field(float64(clock.Now().Unix())),
+		)
 	}
 
 	state := cb.state
 	generation := cb.generation
 	processor := cb.processor
-	span.SetTag(CircuitBreakerTagState, state)
 
 	// Fail fast if circuit is open
 	if state == stateOpen {
-		cb.metrics.Counter(CircuitBreakerRejectedTotal).Inc()
-		span.SetTag(CircuitBreakerTagAllowed, "false")
-
-		// Emit hook event for rejection
-		if cb.hooks.ListenerCount(CircuitBreakerEventRejected) > 0 {
-			_ = cb.hooks.Emit(ctx, CircuitBreakerEventRejected, CircuitBreakerStateChange{ //nolint:errcheck
-				Name:                cb.name,
-				OldState:            state,
-				NewState:            state,
-				ConsecutiveFailures: cb.failures,
-				Reason:              "circuit_open",
-				Timestamp:           cb.getClock().Now(),
-			})
-		}
+		// Emit rejected signal
+		capitan.Emit(ctx, SignalCircuitBreakerRejected,
+			FieldName.Field(string(cb.name)),
+			FieldState.Field(state),
+			FieldGeneration.Field(generation),
+			FieldTimestamp.Field(float64(cb.getClock().Now().Unix())),
+		)
 
 		cb.mu.Unlock()
 		return data, &Error[T]{
@@ -308,7 +176,6 @@ func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err
 		}
 	}
 
-	span.SetTag(CircuitBreakerTagAllowed, "true")
 	cb.mu.Unlock()
 
 	// Try the operation
@@ -325,7 +192,7 @@ func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err
 	}
 
 	if err != nil {
-		cb.onFailure(ctx)
+		cb.onFailure()
 		// Wrap the error with circuit breaker context
 		var pipeErr *Error[T]
 		if errors.As(err, &pipeErr) {
@@ -340,96 +207,70 @@ func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err
 		}
 	}
 
-	cb.onSuccess(ctx)
+	cb.onSuccess()
 	return result, nil
 }
 
 // onSuccess handles successful request.
-func (cb *CircuitBreaker[T]) onSuccess(ctx context.Context) {
-	cb.metrics.Counter(CircuitBreakerSuccessesTotal).Inc()
-
+func (cb *CircuitBreaker[T]) onSuccess() {
 	switch cb.state {
 	case stateClosed:
 		// Reset failure count on success
 		cb.failures = 0
-		cb.metrics.Gauge(CircuitBreakerConsecutiveFails).Set(0)
 	case stateHalfOpen:
 		cb.successes++
 		if cb.successes >= cb.successThreshold {
-			oldState := cb.state
 			// Enough successes, close the circuit
 			cb.state = stateClosed
 			cb.failures = 0
 			cb.successes = 0
-			cb.metrics.Counter(CircuitBreakerStateTransitions).Inc()
-			cb.metrics.Gauge(CircuitBreakerCurrentState).Set(0) // closed = 0
-			cb.metrics.Gauge(CircuitBreakerConsecutiveFails).Set(0)
 
-			// Emit hook event
-			if cb.hooks.ListenerCount(CircuitBreakerEventClosed) > 0 {
-				_ = cb.hooks.Emit(ctx, CircuitBreakerEventClosed, CircuitBreakerStateChange{ //nolint:errcheck
-					Name:                cb.name,
-					OldState:            oldState,
-					NewState:            stateClosed,
-					ConsecutiveFailures: 0,
-					Reason:              "recovery_successful",
-					Timestamp:           cb.getClock().Now(),
-				})
-			}
+			// Emit closed signal
+			capitan.Emit(context.Background(), SignalCircuitBreakerClosed,
+				FieldName.Field(string(cb.name)),
+				FieldState.Field(cb.state),
+				FieldSuccesses.Field(cb.successes),
+				FieldSuccessThreshold.Field(cb.successThreshold),
+				FieldTimestamp.Field(float64(cb.getClock().Now().Unix())),
+			)
 		}
 	}
 }
 
 // onFailure handles failed request.
-func (cb *CircuitBreaker[T]) onFailure(ctx context.Context) {
+func (cb *CircuitBreaker[T]) onFailure() {
 	cb.lastFailTime = cb.getClock().Now()
-	cb.metrics.Counter(CircuitBreakerFailuresTotal).Inc()
 
 	switch cb.state {
 	case stateClosed:
 		cb.failures++
-		cb.metrics.Gauge(CircuitBreakerConsecutiveFails).Set(float64(cb.failures))
 		if cb.failures >= cb.failureThreshold {
-			oldState := cb.state
 			// Too many failures, open the circuit
 			cb.state = stateOpen
-			cb.metrics.Counter(CircuitBreakerOpenedTotal).Inc()
-			cb.metrics.Counter(CircuitBreakerStateTransitions).Inc()
-			cb.metrics.Gauge(CircuitBreakerCurrentState).Set(1) // open = 1
 
-			// Emit hook event
-			if cb.hooks.ListenerCount(CircuitBreakerEventOpened) > 0 {
-				_ = cb.hooks.Emit(ctx, CircuitBreakerEventOpened, CircuitBreakerStateChange{ //nolint:errcheck
-					Name:                cb.name,
-					OldState:            oldState,
-					NewState:            stateOpen,
-					ConsecutiveFailures: cb.failures,
-					Reason:              "failure_threshold_exceeded",
-					Timestamp:           cb.getClock().Now(),
-				})
-			}
+			// Emit opened signal
+			capitan.Emit(context.Background(), SignalCircuitBreakerOpened,
+				FieldName.Field(string(cb.name)),
+				FieldState.Field(cb.state),
+				FieldFailures.Field(cb.failures),
+				FieldFailureThreshold.Field(cb.failureThreshold),
+				FieldTimestamp.Field(float64(cb.getClock().Now().Unix())),
+			)
 		}
 	case stateHalfOpen:
-		oldState := cb.state
 		// Any failure in half-open state reopens the circuit
 		cb.state = stateOpen
 		cb.failures = 0
 		cb.successes = 0
-		cb.metrics.Counter(CircuitBreakerOpenedTotal).Inc()
-		cb.metrics.Counter(CircuitBreakerStateTransitions).Inc()
-		cb.metrics.Gauge(CircuitBreakerCurrentState).Set(1) // open = 1
 
-		// Emit hook event
-		if cb.hooks.ListenerCount(CircuitBreakerEventOpened) > 0 {
-			_ = cb.hooks.Emit(ctx, CircuitBreakerEventOpened, CircuitBreakerStateChange{ //nolint:errcheck
-				Name:                cb.name,
-				OldState:            oldState,
-				NewState:            stateOpen,
-				ConsecutiveFailures: 1, // Single failure in half-open
-				Reason:              "halfopen_test_failed",
-				Timestamp:           cb.getClock().Now(),
-			})
-		}
+		// Emit opened signal (reopened from half-open)
+		capitan.Emit(context.Background(), SignalCircuitBreakerOpened,
+			FieldName.Field(string(cb.name)),
+			FieldState.Field(cb.state),
+			FieldFailures.Field(cb.failures),
+			FieldFailureThreshold.Field(cb.failureThreshold),
+			FieldTimestamp.Field(float64(cb.getClock().Now().Unix())),
+		)
 	}
 }
 
@@ -531,49 +372,7 @@ func (cb *CircuitBreaker[T]) Name() Name {
 	return cb.name
 }
 
-// Metrics returns the metrics registry for this connector.
-func (cb *CircuitBreaker[T]) Metrics() *metricz.Registry {
-	return cb.metrics
-}
-
-// Tracer returns the tracer for this connector.
-func (cb *CircuitBreaker[T]) Tracer() *tracez.Tracer {
-	return cb.tracer
-}
-
-// Close gracefully shuts down observability components.
-func (cb *CircuitBreaker[T]) Close() error {
-	if cb.tracer != nil {
-		cb.tracer.Close()
-	}
-	cb.hooks.Close()
+// Close gracefully shuts down the connector.
+func (*CircuitBreaker[T]) Close() error {
 	return nil
-}
-
-// OnOpened registers a handler for when the circuit opens.
-// The handler is called asynchronously when the circuit breaker opens due to failures.
-func (cb *CircuitBreaker[T]) OnOpened(handler func(context.Context, CircuitBreakerStateChange) error) error {
-	_, err := cb.hooks.Hook(CircuitBreakerEventOpened, handler)
-	return err
-}
-
-// OnClosed registers a handler for when the circuit closes.
-// The handler is called asynchronously when the circuit breaker closes after recovery.
-func (cb *CircuitBreaker[T]) OnClosed(handler func(context.Context, CircuitBreakerStateChange) error) error {
-	_, err := cb.hooks.Hook(CircuitBreakerEventClosed, handler)
-	return err
-}
-
-// OnHalfOpen registers a handler for when the circuit enters half-open state.
-// The handler is called asynchronously when the circuit breaker starts testing recovery.
-func (cb *CircuitBreaker[T]) OnHalfOpen(handler func(context.Context, CircuitBreakerStateChange) error) error {
-	_, err := cb.hooks.Hook(CircuitBreakerEventHalfOpen, handler)
-	return err
-}
-
-// OnRejected registers a handler for when the circuit rejects requests.
-// The handler is called asynchronously when the circuit breaker rejects a request while open.
-func (cb *CircuitBreaker[T]) OnRejected(handler func(context.Context, CircuitBreakerStateChange) error) error {
-	_, err := cb.hooks.Hook(CircuitBreakerEventRejected, handler)
-	return err
 }
