@@ -1,6 +1,6 @@
 module github.com/zoobzio/pipz
 
-go 1.24.5
+go 1.23
 
 retract (
 	v1.0.1 // Not part of the package
@@ -18,4 +18,4 @@ retract (
 
 require github.com/zoobzio/clockz v0.0.2
 
-require github.com/zoobzio/capitan v0.0.2
+require github.com/zoobzio/capitan v0.0.3
