@@ -29,6 +29,12 @@ const (
 	// Fallback signals.
 	SignalFallbackAttempt capitan.Signal = "fallback.attempt"
 	SignalFallbackFailed  capitan.Signal = "fallback.failed"
+
+	// Timeout signals.
+	SignalTimeoutTriggered capitan.Signal = "timeout.triggered"
+
+	// Backoff signals.
+	SignalBackoffWaiting capitan.Signal = "backoff.waiting"
 )
 
 // Common field keys using capitan primitive types.
@@ -67,4 +73,11 @@ var (
 	// Fallback fields.
 	FieldProcessorIndex = capitan.NewIntKey("processor_index")   // Index of processor being tried
 	FieldProcessorName  = capitan.NewStringKey("processor_name") // Name of processor being tried
+
+	// Timeout fields.
+	FieldDuration = capitan.NewFloat64Key("duration") // Timeout duration in seconds
+
+	// Backoff fields.
+	FieldDelay     = capitan.NewFloat64Key("delay")      // Current backoff delay in seconds
+	FieldNextDelay = capitan.NewFloat64Key("next_delay") // Next delay if this attempt fails in seconds
 )

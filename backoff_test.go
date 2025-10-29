@@ -3,10 +3,12 @@ package pipz
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/zoobzio/capitan"
 	"github.com/zoobzio/clockz"
 )
 
@@ -225,6 +227,130 @@ func TestBackoff(t *testing.T) {
 		}
 		if calls != 2 {
 			t.Errorf("expected 2 calls, got %d", calls)
+		}
+	})
+
+	t.Run("Emits backoff.waiting hook", func(t *testing.T) {
+		var mu sync.Mutex
+		var waitingEvents []struct {
+			name        string
+			attempt     int
+			maxAttempts int
+			delay       float64
+			nextDelay   float64
+		}
+
+		listener := capitan.Hook(SignalBackoffWaiting, func(_ context.Context, e *capitan.Event) {
+			mu.Lock()
+			defer mu.Unlock()
+
+			name, _ := FieldName.From(e)
+			attempt, _ := FieldAttempt.From(e)
+			maxAttempts, _ := FieldMaxAttempts.From(e)
+			delay, _ := FieldDelay.From(e)
+			nextDelay, _ := FieldNextDelay.From(e)
+
+			waitingEvents = append(waitingEvents, struct {
+				name        string
+				attempt     int
+				maxAttempts int
+				delay       float64
+				nextDelay   float64
+			}{name, attempt, maxAttempts, delay, nextDelay})
+		})
+		defer listener.Close()
+
+		calls := 0
+		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+			calls++
+			if calls < 3 {
+				return 0, errors.New("temporary error")
+			}
+			return n * 2, nil
+		})
+
+		backoff := NewBackoff("backoff-hook-test", processor, 3, 100*time.Millisecond)
+		result, err := backoff.Process(context.Background(), 5)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if result != 10 {
+			t.Errorf("expected 10, got %d", result)
+		}
+
+		// Wait for async hook processing
+		time.Sleep(50 * time.Millisecond)
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		// Should emit 2 waiting signals (after 1st and 2nd failed attempts)
+		if len(waitingEvents) != 2 {
+			t.Fatalf("expected 2 backoff.waiting signals, got %d", len(waitingEvents))
+		}
+
+		// Check first backoff event
+		if waitingEvents[0].name != "backoff-hook-test" {
+			t.Errorf("expected name 'backoff-hook-test', got %q", waitingEvents[0].name)
+		}
+		if waitingEvents[0].attempt != 1 {
+			t.Errorf("expected attempt 1, got %d", waitingEvents[0].attempt)
+		}
+		if waitingEvents[0].maxAttempts != 3 {
+			t.Errorf("expected maxAttempts 3, got %d", waitingEvents[0].maxAttempts)
+		}
+		if waitingEvents[0].delay != 0.1 {
+			t.Errorf("expected delay 0.1s, got %.3f", waitingEvents[0].delay)
+		}
+		if waitingEvents[0].nextDelay != 0.2 {
+			t.Errorf("expected nextDelay 0.2s, got %.3f", waitingEvents[0].nextDelay)
+		}
+
+		// Check second backoff event (exponential increase)
+		if waitingEvents[1].attempt != 2 {
+			t.Errorf("expected attempt 2, got %d", waitingEvents[1].attempt)
+		}
+		if waitingEvents[1].delay != 0.2 {
+			t.Errorf("expected delay 0.2s, got %.3f", waitingEvents[1].delay)
+		}
+		if waitingEvents[1].nextDelay != 0.4 {
+			t.Errorf("expected nextDelay 0.4s, got %.3f", waitingEvents[1].nextDelay)
+		}
+	})
+
+	t.Run("No hook on final attempt", func(t *testing.T) {
+		var mu sync.Mutex
+		var eventCount int
+
+		listener := capitan.Hook(SignalBackoffWaiting, func(_ context.Context, _ *capitan.Event) {
+			mu.Lock()
+			defer mu.Unlock()
+			eventCount++
+		})
+		defer listener.Close()
+
+		processor := Apply("test", func(_ context.Context, _ int) (int, error) {
+			return 0, errors.New("always fails")
+		})
+
+		backoff := NewBackoff("final-attempt-test", processor, 3, 10*time.Millisecond)
+		_, err := backoff.Process(context.Background(), 5)
+
+		if err == nil {
+			t.Fatal("expected error")
+		}
+
+		// Wait for async hook processing
+		time.Sleep(50 * time.Millisecond)
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		// Should emit 2 signals (before attempt 2 and 3, but not after final attempt)
+		if eventCount != 2 {
+			t.Errorf("expected 2 backoff.waiting signals, got %d", eventCount)
 		}
 	})
 }

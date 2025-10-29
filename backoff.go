@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zoobzio/capitan"
 	"github.com/zoobzio/clockz"
 )
 
@@ -78,9 +79,20 @@ func (b *Backoff[T]) Process(ctx context.Context, data T) (result T, err error) 
 
 		// Don't sleep after the last attempt
 		if i < maxAttempts-1 {
+			// Emit backoff waiting signal
+			nextDelay := delay * 2
+			capitan.Emit(context.Background(), SignalBackoffWaiting,
+				FieldName.Field(string(b.name)),
+				FieldAttempt.Field(i+1),
+				FieldMaxAttempts.Field(maxAttempts),
+				FieldDelay.Field(delay.Seconds()),
+				FieldNextDelay.Field(nextDelay.Seconds()),
+				FieldTimestamp.Field(float64(time.Now().Unix())),
+			)
+
 			select {
 			case <-clock.After(delay):
-				delay *= 2 // Exponential backoff
+				delay = nextDelay // Exponential backoff
 			case <-ctx.Done():
 				// Context canceled/timed out
 				return data, &Error[T]{

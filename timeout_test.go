@@ -3,9 +3,11 @@ package pipz
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/zoobzio/capitan"
 	"github.com/zoobzio/clockz"
 )
 
@@ -305,6 +307,125 @@ func TestTimeout(t *testing.T) {
 		// Should return same instance for chaining
 		if timeout2 != timeout {
 			t.Error("WithClock should return same instance for chaining")
+		}
+	})
+
+	t.Run("Emits timeout.triggered hook", func(t *testing.T) {
+		clock := clockz.NewFakeClock()
+
+		var mu sync.Mutex
+		var triggered bool
+		var hookName string
+		var hookDuration float64
+
+		listener := capitan.Hook(SignalTimeoutTriggered, func(_ context.Context, e *capitan.Event) {
+			mu.Lock()
+			defer mu.Unlock()
+			triggered = true
+			hookName, _ = FieldName.From(e)
+			hookDuration, _ = FieldDuration.From(e)
+		})
+		defer listener.Close()
+
+		processor := Apply("slow", func(ctx context.Context, n int) (int, error) {
+			select {
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			case <-clock.After(100 * time.Millisecond):
+				return n * 2, nil
+			}
+		})
+
+		timeout := NewTimeout("timeout-hook-test", processor, 50*time.Millisecond).WithClock(clock)
+
+		// Run in goroutine so we can advance clock
+		done := make(chan struct{})
+		var result int
+		var err error
+		go func() {
+			defer close(done)
+			result, err = timeout.Process(context.Background(), 5)
+		}()
+
+		// Allow goroutine to start
+		time.Sleep(10 * time.Millisecond)
+
+		// Advance clock past timeout duration
+		clock.Advance(50 * time.Millisecond)
+		clock.BlockUntilReady()
+
+		// Give time for processing
+		time.Sleep(10 * time.Millisecond)
+
+		// Wait for completion
+		<-done
+
+		if err == nil {
+			t.Fatal("expected timeout error")
+		}
+
+		if result != 5 {
+			t.Errorf("expected original input 5, got %d", result)
+		}
+
+		// Wait for async hook processing
+		time.Sleep(50 * time.Millisecond)
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		if !triggered {
+			t.Error("expected timeout.triggered signal to be emitted")
+		}
+
+		if hookName != "timeout-hook-test" {
+			t.Errorf("expected name 'timeout-hook-test', got %q", hookName)
+		}
+
+		if hookDuration != 0.05 {
+			t.Errorf("expected duration 0.05s, got %.2f", hookDuration)
+		}
+	})
+
+	t.Run("Does not emit hook on cancellation", func(t *testing.T) {
+		var mu sync.Mutex
+		var triggered bool
+
+		listener := capitan.Hook(SignalTimeoutTriggered, func(_ context.Context, _ *capitan.Event) {
+			mu.Lock()
+			defer mu.Unlock()
+			triggered = true
+		})
+		defer listener.Close()
+
+		processor := Apply("slow", func(ctx context.Context, n int) (int, error) {
+			select {
+			case <-time.After(100 * time.Millisecond):
+				return n * 2, nil
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			}
+		})
+
+		timeout := NewTimeout("cancel-test", processor, 200*time.Millisecond)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // Cancel immediately
+
+		_, err := timeout.Process(ctx, 5)
+
+		if err == nil {
+			t.Fatal("expected cancellation error")
+		}
+
+		// Wait for any potential async hook processing
+		time.Sleep(50 * time.Millisecond)
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		if triggered {
+			t.Error("should not emit timeout.triggered on cancellation")
 		}
 	})
 }

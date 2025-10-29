@@ -5,9 +5,9 @@ Pipz integrates with [capitan](https://github.com/zoobzio/capitan) to provide ty
 ## Overview
 
 Hooks enable you to:
-- **Monitor** circuit breaker state changes
+- **Monitor** circuit breaker state changes and timeout events
 - **Track** rate limiting behavior and backpressure
-- **Observe** worker pool saturation and retry exhaustion
+- **Observe** worker pool saturation, retry exhaustion, and backoff patterns
 - **Detect** when fallback processors are being used
 - **Alert** on threshold violations and failure patterns
 - **Collect** metrics for dashboards
@@ -57,6 +57,18 @@ All events are emitted asynchronously via per-signal worker goroutines, ensuring
 | `fallback.attempt` | Attempting a fallback processor | `name`, `processor_index`, `processor_name` |
 | `fallback.failed` | All fallback processors failed | `name`, `error` |
 
+### Timeout
+
+| Signal | When Emitted | Key Fields |
+|--------|--------------|------------|
+| `timeout.triggered` | Operation exceeded timeout duration | `name`, `duration` |
+
+### Backoff
+
+| Signal | When Emitted | Key Fields |
+|--------|--------------|------------|
+| `backoff.waiting` | Entering exponential backoff delay | `name`, `attempt`, `max_attempts`, `delay`, `next_delay` |
+
 ## Field Reference
 
 All fields use primitive types for easy integration with monitoring systems:
@@ -85,6 +97,9 @@ All fields use primitive types for easy integration with monitoring systems:
 | `FieldMaxAttempts` | int | Maximum retry attempts |
 | `FieldProcessorIndex` | int | Fallback processor index |
 | `FieldProcessorName` | string | Fallback processor name |
+| `FieldDuration` | float64 | Timeout duration in seconds |
+| `FieldDelay` | float64 | Current backoff delay in seconds |
+| `FieldNextDelay` | float64 | Next backoff delay in seconds |
 
 ## Usage Examples
 
@@ -440,6 +455,50 @@ capitan.Hook(pipz.SignalFallbackAttempt, func(ctx context.Context, e *capitan.Ev
 
 See [Fallback reference](../reference/connectors/fallback.md) for details.
 
+### Timeout
+
+Emits signals when operations exceed timeout duration:
+
+```go
+var apiTimeout = pipz.NewTimeout(
+    "api-timeout",
+    apiProcessor,
+    5 * time.Second,
+)
+
+// Hook to track timeout events
+capitan.Hook(pipz.SignalTimeoutTriggered, func(ctx context.Context, e *capitan.Event) {
+    name, _ := pipz.FieldName.From(e)
+    duration, _ := pipz.FieldDuration.From(e)
+    log.Printf("ALERT: Operation %s timed out after %.2fs", name, duration)
+})
+```
+
+See [Timeout reference](../reference/connectors/timeout.md) for details.
+
+### Backoff
+
+Emits signals when entering exponential backoff delays:
+
+```go
+var backoffProcessor = pipz.NewBackoff(
+    "api-backoff",
+    apiProcessor,
+    5,                  // maxAttempts
+    1 * time.Second,    // baseDelay
+)
+
+// Hook to track backoff behavior
+capitan.Hook(pipz.SignalBackoffWaiting, func(ctx context.Context, e *capitan.Event) {
+    name, _ := pipz.FieldName.From(e)
+    attempt, _ := pipz.FieldAttempt.From(e)
+    delay, _ := pipz.FieldDelay.From(e)
+    log.Printf("WARNING: %s backing off on attempt %d, waiting %.2fs", name, attempt, delay)
+})
+```
+
+See [Backoff reference](../reference/connectors/backoff.md) for details.
+
 ## Testing with Hooks
 
 ### Sync Mode (v0.0.2+)
@@ -511,3 +570,5 @@ For production code, hooks are for observability, not control flow.
 - [WorkerPool Reference](../reference/connectors/workerpool.md)
 - [Retry Reference](../reference/connectors/retry.md)
 - [Fallback Reference](../reference/connectors/fallback.md)
+- [Timeout Reference](../reference/connectors/timeout.md)
+- [Backoff Reference](../reference/connectors/backoff.md)

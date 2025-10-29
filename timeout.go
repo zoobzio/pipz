@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zoobzio/capitan"
 	"github.com/zoobzio/clockz"
 )
 
@@ -125,11 +126,22 @@ func (t *Timeout[T]) Process(ctx context.Context, data T) (result T, err error) 
 		return res.result, nil
 	case <-ctx.Done():
 		// Timeout or cancellation occurred
+		isTimeout := errors.Is(ctx.Err(), context.DeadlineExceeded)
+
+		// Emit timeout signal only when deadline exceeded (not cancellation)
+		if isTimeout {
+			capitan.Emit(context.Background(), SignalTimeoutTriggered,
+				FieldName.Field(string(t.name)),
+				FieldDuration.Field(duration.Seconds()),
+				FieldTimestamp.Field(float64(time.Now().Unix())),
+			)
+		}
+
 		return data, &Error[T]{
 			Err:       ctx.Err(),
 			InputData: data,
 			Path:      []Name{t.name},
-			Timeout:   errors.Is(ctx.Err(), context.DeadlineExceeded),
+			Timeout:   isTimeout,
 			Canceled:  errors.Is(ctx.Err(), context.Canceled),
 			Timestamp: time.Now(),
 		}
