@@ -81,7 +81,7 @@ func (b *Backoff[T]) Process(ctx context.Context, data T) (result T, err error) 
 		if i < maxAttempts-1 {
 			// Emit backoff waiting signal
 			nextDelay := delay * 2
-			capitan.Emit(context.Background(), SignalBackoffWaiting,
+			capitan.Warn(context.Background(), SignalBackoffWaiting,
 				FieldName.Field(string(b.name)),
 				FieldAttempt.Field(i+1),
 				FieldMaxAttempts.Field(maxAttempts),

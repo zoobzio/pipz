@@ -130,7 +130,7 @@ func (t *Timeout[T]) Process(ctx context.Context, data T) (result T, err error) 
 
 		// Emit timeout signal only when deadline exceeded (not cancellation)
 		if isTimeout {
-			capitan.Emit(context.Background(), SignalTimeoutTriggered,
+			capitan.Error(context.Background(), SignalTimeoutTriggered,
 				FieldName.Field(string(t.name)),
 				FieldDuration.Field(duration.Seconds()),
 				FieldTimestamp.Field(float64(time.Now().Unix())),

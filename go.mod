@@ -18,4 +18,4 @@ retract (
 
 require github.com/zoobzio/clockz v0.0.2
 
-require github.com/zoobzio/capitan v0.0.3
+require github.com/zoobzio/capitan v0.0.5

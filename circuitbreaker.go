@@ -145,7 +145,7 @@ func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err
 		cb.generation++
 
 		// Emit half-open signal
-		capitan.Emit(ctx, SignalCircuitBreakerHalfOpen,
+		capitan.Warn(ctx, SignalCircuitBreakerHalfOpen,
 			FieldName.Field(string(cb.name)),
 			FieldState.Field(cb.state),
 			FieldGeneration.Field(cb.generation),
@@ -160,7 +160,7 @@ func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err
 	// Fail fast if circuit is open
 	if state == stateOpen {
 		// Emit rejected signal
-		capitan.Emit(ctx, SignalCircuitBreakerRejected,
+		capitan.Error(ctx, SignalCircuitBreakerRejected,
 			FieldName.Field(string(cb.name)),
 			FieldState.Field(state),
 			FieldGeneration.Field(generation),
@@ -226,7 +226,7 @@ func (cb *CircuitBreaker[T]) onSuccess() {
 			cb.successes = 0
 
 			// Emit closed signal
-			capitan.Emit(context.Background(), SignalCircuitBreakerClosed,
+			capitan.Info(context.Background(), SignalCircuitBreakerClosed,
 				FieldName.Field(string(cb.name)),
 				FieldState.Field(cb.state),
 				FieldSuccesses.Field(cb.successes),
@@ -249,7 +249,7 @@ func (cb *CircuitBreaker[T]) onFailure() {
 			cb.state = stateOpen
 
 			// Emit opened signal
-			capitan.Emit(context.Background(), SignalCircuitBreakerOpened,
+			capitan.Error(context.Background(), SignalCircuitBreakerOpened,
 				FieldName.Field(string(cb.name)),
 				FieldState.Field(cb.state),
 				FieldFailures.Field(cb.failures),

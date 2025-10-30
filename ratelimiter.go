@@ -174,7 +174,7 @@ func (r *RateLimiter[T]) Process(ctx context.Context, data T) (result T, err err
 		mode := r.mode
 		if r.canTakeToken() {
 			// Emit allowed signal
-			capitan.Emit(ctx, SignalRateLimiterAllowed,
+			capitan.Info(ctx, SignalRateLimiterAllowed,
 				FieldName.Field(string(r.name)),
 				FieldTokens.Field(r.tokens),
 				FieldRate.Field(r.rate),
@@ -191,7 +191,7 @@ func (r *RateLimiter[T]) Process(ctx context.Context, data T) (result T, err err
 			waitTime := r.calculateWaitTime()
 
 			// Emit throttled signal
-			capitan.Emit(ctx, SignalRateLimiterThrottled,
+			capitan.Warn(ctx, SignalRateLimiterThrottled,
 				FieldName.Field(string(r.name)),
 				FieldWaitTime.Field(waitTime.Seconds()),
 				FieldTokens.Field(r.tokens),
@@ -231,7 +231,7 @@ func (r *RateLimiter[T]) Process(ctx context.Context, data T) (result T, err err
 
 		case modeDrop:
 			// Emit dropped signal
-			capitan.Emit(ctx, SignalRateLimiterDropped,
+			capitan.Error(ctx, SignalRateLimiterDropped,
 				FieldName.Field(string(r.name)),
 				FieldTokens.Field(r.tokens),
 				FieldRate.Field(r.rate),

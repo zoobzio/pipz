@@ -84,12 +84,20 @@ func (f *Fallback[T]) Process(ctx context.Context, data T) (result T, err error)
 			procName = string(named.Name())
 		}
 
-		// Emit attempt signal
-		capitan.Emit(ctx, SignalFallbackAttempt,
-			FieldName.Field(name),
-			FieldProcessorIndex.Field(i),
-			FieldProcessorName.Field(procName),
-		)
+		// Emit attempt signal (Warn if using fallback, Info if using primary)
+		if i == 0 {
+			capitan.Info(ctx, SignalFallbackAttempt,
+				FieldName.Field(name),
+				FieldProcessorIndex.Field(i),
+				FieldProcessorName.Field(procName),
+			)
+		} else {
+			capitan.Warn(ctx, SignalFallbackAttempt,
+				FieldName.Field(name),
+				FieldProcessorIndex.Field(i),
+				FieldProcessorName.Field(procName),
+			)
+		}
 
 		result, err := processor.Process(ctx, data)
 		if err == nil {
@@ -104,7 +112,7 @@ func (f *Fallback[T]) Process(ctx context.Context, data T) (result T, err error)
 	// All processors failed, return the last error with path
 	if lastErr != nil {
 		// Emit failed signal
-		capitan.Emit(ctx, SignalFallbackFailed,
+		capitan.Error(ctx, SignalFallbackFailed,
 			FieldName.Field(name),
 			FieldError.Field(lastErr.Error()),
 		)

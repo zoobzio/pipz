@@ -90,7 +90,7 @@ func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err err
 			activeWorkers := len(w.sem)
 			if activeWorkers >= workerCount {
 				// Emit saturated signal
-				capitan.Emit(ctx, SignalWorkerPoolSaturated,
+				capitan.Warn(ctx, SignalWorkerPoolSaturated,
 					FieldName.Field(string(w.name)),
 					FieldWorkerCount.Field(workerCount),
 					FieldActiveWorkers.Field(activeWorkers),
@@ -102,7 +102,7 @@ func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err err
 			select {
 			case w.sem <- struct{}{}:
 				// Emit acquired signal
-				capitan.Emit(ctx, SignalWorkerPoolAcquired,
+				capitan.Info(ctx, SignalWorkerPoolAcquired,
 					FieldName.Field(string(w.name)),
 					FieldWorkerCount.Field(workerCount),
 					FieldActiveWorkers.Field(len(w.sem)),
@@ -113,7 +113,7 @@ func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err err
 					<-w.sem // Release slot when done
 
 					// Emit released signal
-					capitan.Emit(ctx, SignalWorkerPoolReleased,
+					capitan.Info(ctx, SignalWorkerPoolReleased,
 						FieldName.Field(string(w.name)),
 						FieldWorkerCount.Field(workerCount),
 						FieldActiveWorkers.Field(len(w.sem)),

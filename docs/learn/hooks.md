@@ -15,6 +15,17 @@ Hooks enable you to:
 
 All events are emitted asynchronously via per-signal worker goroutines, ensuring hooks don't impact pipeline performance.
 
+## Event Severity
+
+As of capitan v0.0.5, all events include a severity level that indicates their importance:
+
+- **Error**: System failures requiring immediate attention (circuit opened, requests rejected/dropped, all retries exhausted, timeouts)
+- **Warn**: Degraded performance or fallback scenarios (circuit half-open, rate limiting throttled, pool saturated, individual retry failures, using fallback processors, backoff delays)
+- **Info**: Normal operations (circuit closed, rate limiter allowed, worker acquired/released, retry attempts, using primary processor)
+- **Debug**: Detailed operational information (currently unused, but available for verbose logging)
+
+Events can be filtered by severity in your hooks using `e.Severity()`.
+
 ## Available Signals
 
 ### CircuitBreaker
@@ -250,6 +261,37 @@ func setupAlerts() {
         })
     })
 }
+```
+
+### Severity-Based Filtering
+
+```go
+// Only process error-level events
+capitan.Observe(func(ctx context.Context, e *capitan.Event) {
+    if e.Severity() != capitan.SeverityError {
+        return
+    }
+
+    name, _ := pipz.FieldName.From(e)
+    log.Printf("ERROR event from %s: %s", name, e.Signal())
+
+    // Send to error tracking system
+    sendToErrorTracker(e)
+})
+
+// Route events by severity
+capitan.Observe(func(ctx context.Context, e *capitan.Event) {
+    switch e.Severity() {
+    case capitan.SeverityError:
+        sendToAlertingSystem(e)
+    case capitan.SeverityWarn:
+        sendToMonitoringDashboard(e)
+    case capitan.SeverityInfo:
+        sendToMetricsCollector(e)
+    case capitan.SeverityDebug:
+        sendToDebugLogs(e)
+    }
+})
 ```
 
 ## Observer Pattern

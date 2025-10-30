@@ -71,7 +71,7 @@ func (r *Retry[T]) Process(ctx context.Context, data T) (result T, err error) {
 		attempt := i + 1
 
 		// Emit attempt start signal
-		capitan.Emit(ctx, SignalRetryAttemptStart,
+		capitan.Info(ctx, SignalRetryAttemptStart,
 			FieldName.Field(name),
 			FieldAttempt.Field(attempt),
 			FieldMaxAttempts.Field(maxAttempts),
@@ -88,7 +88,7 @@ func (r *Retry[T]) Process(ctx context.Context, data T) (result T, err error) {
 		lastResult = result
 
 		// Emit attempt fail signal
-		capitan.Emit(ctx, SignalRetryAttemptFail,
+		capitan.Warn(ctx, SignalRetryAttemptFail,
 			FieldName.Field(name),
 			FieldAttempt.Field(attempt),
 			FieldMaxAttempts.Field(maxAttempts),
@@ -110,7 +110,7 @@ func (r *Retry[T]) Process(ctx context.Context, data T) (result T, err error) {
 	}
 
 	// All attempts failed - emit exhausted signal
-	capitan.Emit(ctx, SignalRetryExhausted,
+	capitan.Error(ctx, SignalRetryExhausted,
 		FieldName.Field(name),
 		FieldMaxAttempts.Field(maxAttempts),
 		FieldError.Field(lastErr.Error()),
