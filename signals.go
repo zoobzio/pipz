@@ -2,39 +2,90 @@ package pipz
 
 import "github.com/zoobzio/capitan"
 
-// Signal constants for pipz connector events.
+// Signal definitions for pipz connector events.
 // Signals follow the pattern: <connector-type>.<event>.
-const (
+var (
 	// CircuitBreaker signals.
-	SignalCircuitBreakerOpened   capitan.Signal = "circuitbreaker.opened"
-	SignalCircuitBreakerClosed   capitan.Signal = "circuitbreaker.closed"
-	SignalCircuitBreakerHalfOpen capitan.Signal = "circuitbreaker.half-open"
-	SignalCircuitBreakerRejected capitan.Signal = "circuitbreaker.rejected"
+	SignalCircuitBreakerOpened = capitan.NewSignal(
+		"circuitbreaker.opened",
+		"Circuit breaker has transitioned to open state due to exceeding failure threshold",
+	)
+	SignalCircuitBreakerClosed = capitan.NewSignal(
+		"circuitbreaker.closed",
+		"Circuit breaker has transitioned to closed state after successful recovery",
+	)
+	SignalCircuitBreakerHalfOpen = capitan.NewSignal(
+		"circuitbreaker.half-open",
+		"Circuit breaker has transitioned to half-open state to test if the issue has resolved",
+	)
+	SignalCircuitBreakerRejected = capitan.NewSignal(
+		"circuitbreaker.rejected",
+		"Circuit breaker rejected a request because it is in open state",
+	)
 
 	// RateLimiter signals.
-	SignalRateLimiterThrottled capitan.Signal = "ratelimiter.throttled"
-	SignalRateLimiterDropped   capitan.Signal = "ratelimiter.dropped"
-	SignalRateLimiterAllowed   capitan.Signal = "ratelimiter.allowed"
+	SignalRateLimiterThrottled = capitan.NewSignal(
+		"ratelimiter.throttled",
+		"Rate limiter delayed a request to comply with rate limits",
+	)
+	SignalRateLimiterDropped = capitan.NewSignal(
+		"ratelimiter.dropped",
+		"Rate limiter rejected a request because rate limit was exceeded and drop mode is enabled",
+	)
+	SignalRateLimiterAllowed = capitan.NewSignal(
+		"ratelimiter.allowed",
+		"Rate limiter allowed a request to proceed",
+	)
 
 	// WorkerPool signals.
-	SignalWorkerPoolSaturated capitan.Signal = "workerpool.saturated"
-	SignalWorkerPoolAcquired  capitan.Signal = "workerpool.acquired"
-	SignalWorkerPoolReleased  capitan.Signal = "workerpool.released"
+	SignalWorkerPoolSaturated = capitan.NewSignal(
+		"workerpool.saturated",
+		"Worker pool has reached maximum capacity and is waiting for available workers",
+	)
+	SignalWorkerPoolAcquired = capitan.NewSignal(
+		"workerpool.acquired",
+		"Worker pool acquired a worker slot for processing",
+	)
+	SignalWorkerPoolReleased = capitan.NewSignal(
+		"workerpool.released",
+		"Worker pool released a worker slot after processing completed",
+	)
 
 	// Retry signals.
-	SignalRetryAttemptStart capitan.Signal = "retry.attempt-start"
-	SignalRetryAttemptFail  capitan.Signal = "retry.attempt-fail"
-	SignalRetryExhausted    capitan.Signal = "retry.exhausted"
+	SignalRetryAttemptStart = capitan.NewSignal(
+		"retry.attempt-start",
+		"Retry connector is starting an execution attempt",
+	)
+	SignalRetryAttemptFail = capitan.NewSignal(
+		"retry.attempt-fail",
+		"Retry connector attempt failed and will be retried if attempts remain",
+	)
+	SignalRetryExhausted = capitan.NewSignal(
+		"retry.exhausted",
+		"Retry connector has exhausted all retry attempts and is failing",
+	)
 
 	// Fallback signals.
-	SignalFallbackAttempt capitan.Signal = "fallback.attempt"
-	SignalFallbackFailed  capitan.Signal = "fallback.failed"
+	SignalFallbackAttempt = capitan.NewSignal(
+		"fallback.attempt",
+		"Fallback connector is attempting to execute a processor in the fallback chain",
+	)
+	SignalFallbackFailed = capitan.NewSignal(
+		"fallback.failed",
+		"Fallback connector exhausted all processors without success",
+	)
 
 	// Timeout signals.
-	SignalTimeoutTriggered capitan.Signal = "timeout.triggered"
+	SignalTimeoutTriggered = capitan.NewSignal(
+		"timeout.triggered",
+		"Timeout connector canceled execution because the deadline was exceeded",
+	)
 
 	// Backoff signals.
-	SignalBackoffWaiting capitan.Signal = "backoff.waiting"
+	SignalBackoffWaiting = capitan.NewSignal(
+		"backoff.waiting",
+		"Backoff connector is delaying before the next execution attempt",
+	)
 )
 
 // Common field keys using capitan primitive types.
