@@ -188,6 +188,7 @@ var (
 	// Added: Sprint 9 - Sequential was taking 350ms!.
 	CacheInvalidation = pipz.NewConcurrent[ProfileUpdate](
 		ConnectorCacheInvalidation,
+		nil, // No reducer needed - fire and forget
 		InvalidateCDN,     // ~200ms
 		InvalidateRedis,   // ~50ms
 		InvalidateVarnish, // ~100ms
@@ -252,6 +253,7 @@ var (
 	// Added: Sprint 11 - Don't wait 2.3s sequentially!
 	NotificationsConcurrent = pipz.NewConcurrent[ProfileUpdate](
 		ConnectorNotifications,
+		nil, // No reducer needed - fire and forget
 		SendEmail,   // ~1s
 		SendSMS,     // ~800ms
 		PostWebhook, // ~500ms

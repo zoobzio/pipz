@@ -206,6 +206,7 @@ var (
 	// Performance gain: 60% faster checkout!.
 	NotificationBroadcast = pipz.NewConcurrent[Order](
 		ConnectorNotificationBroadcast,
+		nil, // No reducer needed - fire and forget
 		SendOrderEmail,  // ~1s.
 		SendOrderSMS,    // ~500ms.
 		UpdateAnalytics, // ~200ms.
@@ -432,6 +433,7 @@ var (
 	// Added: Sprint 6 - Comprehensive notifications.
 	CompleteNotifications = pipz.NewConcurrent[Order](
 		ConnectorCompleteNotifications,
+		nil, // No reducer needed - fire and forget
 		SendOrderEmail,
 		SendOrderSMS,
 		UpdateAnalytics,
