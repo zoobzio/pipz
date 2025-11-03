@@ -199,6 +199,7 @@ func BenchmarkRealisticDataProcessing(b *testing.B) {
 	b.Run("Concurrent_Processing_Simple_Integer", func(b *testing.B) {
 		// Simple concurrent processing
 		concurrent := pipz.NewConcurrent("concurrent-simple",
+			nil,
 			pipz.Transform("proc1", func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 }),
 			pipz.Transform("proc2", func(_ context.Context, n ClonableInt) ClonableInt { return n + 10 }),
 			pipz.Transform("proc3", func(_ context.Context, n ClonableInt) ClonableInt { return n - 5 }),
@@ -220,6 +221,7 @@ func BenchmarkRealisticDataProcessing(b *testing.B) {
 	b.Run("Concurrent_Processing_Realistic_Data", func(b *testing.B) {
 		// Realistic concurrent processing
 		concurrent := pipz.NewConcurrent("concurrent-realistic",
+			nil,
 			pipz.Transform("validate_address", func(_ context.Context, u User) User {
 				// Simulate address validation
 				if u.Metadata == nil {

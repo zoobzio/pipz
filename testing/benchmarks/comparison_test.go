@@ -370,6 +370,7 @@ func BenchmarkConcurrentPatterns(b *testing.B) {
 
 	b.Run("Pipz_Concurrent", func(b *testing.B) {
 		concurrent := pipz.NewConcurrent("concurrent",
+			nil,
 			pipz.Transform("validate", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
 				if p.Priority < 0 {
 					p.Priority = 0

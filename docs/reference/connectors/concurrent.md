@@ -5,7 +5,11 @@ Runs multiple processors in parallel with isolated data copies.
 ## Function Signature
 
 ```go
-func NewConcurrent[T Cloner[T]](name Name, processors ...Chainable[T]) *Concurrent[T]
+func NewConcurrent[T Cloner[T]](
+    name Name,
+    reducer func(original T, results map[Name]T, errors map[Name]error) T,
+    processors ...Chainable[T],
+) *Concurrent[T]
 ```
 
 ## Type Constraints
@@ -20,6 +24,7 @@ func NewConcurrent[T Cloner[T]](name Name, processors ...Chainable[T]) *Concurre
 ## Parameters
 
 - `name` (`Name`) - Identifier for the connector used in debugging
+- `reducer` - Optional function to aggregate results; if `nil`, returns original input unchanged
 - `processors` - Variable number of processors to run concurrently
 
 ## Returns
@@ -32,11 +37,15 @@ Returns a `*Concurrent[T]` that implements `Chainable[T]`.
 - **Data isolation** - Each processor receives a clone of the input
 - **Non-failing** - Individual failures don't stop other processors
 - **Wait for all** - Waits for all processors to complete
-- **Returns original** - Always returns the original input data
+- **Two modes**:
+  - **Without reducer** (`nil`) - Returns the original input unchanged
+  - **With reducer** - Collects all results and errors, then calls reducer to produce final output
 - **Context preservation** - Passes original context to all processors, preserving distributed tracing and context values
 - **Cancellation support** - Parent context cancellation affects all child processors
 
-## Example
+## Examples
+
+### Without Reducer (Side Effects)
 
 ```go
 // Define a type that implements Cloner
@@ -58,8 +67,9 @@ func (u User) Clone() User {
     }
 }
 
-// Create concurrent processor
+// Create concurrent processor without reducer
 notifications := pipz.NewConcurrent("notify-all",
+    nil, // No reducer - just run side effects
     pipz.Effect("email", sendEmailNotification),
     pipz.Effect("sms", sendSMSNotification),
     pipz.Effect("push", sendPushNotification),
@@ -74,32 +84,74 @@ pipeline := pipz.NewSequence[User]("user-update",
 )
 ```
 
+### With Reducer (Aggregate Results)
+
+```go
+type PriceCheck struct {
+    ProductID string
+    BestPrice float64
+}
+
+func (p PriceCheck) Clone() PriceCheck {
+    return p
+}
+
+// Reducer function to find the best price
+reducer := func(original PriceCheck, results map[Name]PriceCheck, errors map[Name]error) PriceCheck {
+    bestPrice := original.BestPrice
+    for _, result := range results {
+        if result.BestPrice > 0 && result.BestPrice < bestPrice {
+            bestPrice = result.BestPrice
+        }
+    }
+    return PriceCheck{
+        ProductID: original.ProductID,
+        BestPrice: bestPrice,
+    }
+}
+
+// Check prices from multiple vendors concurrently
+priceChecker := pipz.NewConcurrent("check-prices",
+    reducer,
+    pipz.Transform("amazon", checkAmazonPrice),
+    pipz.Transform("walmart", checkWalmartPrice),
+    pipz.Transform("target", checkTargetPrice),
+)
+
+// Returns PriceCheck with the lowest price found
+result, _ := priceChecker.Process(ctx, PriceCheck{ProductID: "abc123", BestPrice: 999.99})
+```
+
 ## When to Use
 
 Use `Concurrent` when:
 - Operations are **independent and can run in parallel**
 - You want to fire multiple actions simultaneously
 - Side effects can run in parallel (notifications, logging)
+- You need to aggregate results from multiple parallel sources
 - Individual failures shouldn't affect others
 - You need to notify multiple systems
 - Performance benefit from parallelization
+- You want to collect data from multiple APIs concurrently
 
 ## When NOT to Use
 
 Don't use `Concurrent` when:
-- You need the result from processors (always returns original)
 - Operations must run in order (use `Sequence`)
 - Type doesn't implement `Cloner[T]` (compilation error)
 - You need to stop on first error (all run to completion)
 - Operations share state or resources (race conditions)
-- You need fastest result (use `Race`)
+- You need fastest result only (use `Race`)
 
 ## Error Handling
+
+### Without Reducer
 
 Concurrent continues even if some processors fail:
 
 ```go
 concurrent := pipz.NewConcurrent("multi-save",
+    nil, // No reducer
     pipz.Apply("primary", saveToPrimary),    // Might fail
     pipz.Apply("backup", saveToBackup),      // Still runs
     pipz.Effect("cache", updateCache),       // Still runs
@@ -111,6 +163,27 @@ result, err := concurrent.Process(ctx, data)
 // result is the original data
 ```
 
+### With Reducer
+
+Errors are collected in the `errors` map passed to the reducer:
+
+```go
+reducer := func(original Data, results map[Name]Data, errors map[Name]error) Data {
+    if len(errors) > 0 {
+        // Handle errors - maybe log them or set a flag
+        for name, err := range errors {
+            log.Printf("processor %s failed: %v", name, err)
+        }
+    }
+    // Merge successful results
+    merged := original
+    for _, result := range results {
+        merged = mergeData(merged, result)
+    }
+    return merged
+}
+```
+
 ## Performance Considerations
 
 - Creates one goroutine per processor
@@ -120,9 +193,12 @@ result, err := concurrent.Process(ctx, data)
 
 ## Common Patterns
 
+### Side Effects Pattern (No Reducer)
+
 ```go
 // Parallel notifications
 userNotifications := pipz.NewConcurrent("notifications",
+    nil, // No reducer needed
     pipz.Effect("email", sendWelcomeEmail),
     pipz.Effect("sms", sendWelcomeSMS),
     pipz.Effect("crm", updateCRM),
@@ -131,6 +207,7 @@ userNotifications := pipz.NewConcurrent("notifications",
 
 // Parallel data distribution
 distribute := pipz.NewConcurrent("distribute",
+    nil,
     pipz.Apply("elasticsearch", indexInElastic),
     pipz.Apply("redis", cacheInRedis),
     pipz.Apply("s3", uploadToS3),
@@ -142,6 +219,7 @@ processOrder := pipz.NewSequence[Order]("order-flow",
     pipz.Apply("validate", validateOrder),
     pipz.Apply("payment", processPayment),
     pipz.NewConcurrent("post-payment",
+        nil,
         pipz.Effect("inventory", updateInventory),
         pipz.Effect("shipping", createShippingLabel),
         pipz.Effect("email", sendConfirmation),
@@ -150,12 +228,55 @@ processOrder := pipz.NewSequence[Order]("order-flow",
 )
 ```
 
+### Aggregation Pattern (With Reducer)
+
+```go
+// Merge enrichment data from multiple sources
+type Product struct {
+    ID          string
+    Name        string
+    Description string
+    Reviews     []Review
+    Inventory   int
+    Price       float64
+}
+
+enrichReducer := func(original Product, results map[Name]Product, errors map[Name]error) Product {
+    enriched := original
+
+    // Merge reviews from review service
+    if r, ok := results["reviews"]; ok {
+        enriched.Reviews = r.Reviews
+    }
+
+    // Merge inventory from warehouse service
+    if inv, ok := results["inventory"]; ok {
+        enriched.Inventory = inv.Inventory
+    }
+
+    // Merge pricing from pricing service
+    if price, ok := results["pricing"]; ok {
+        enriched.Price = price.Price
+    }
+
+    return enriched
+}
+
+enrichProduct := pipz.NewConcurrent("enrich-product",
+    enrichReducer,
+    pipz.Transform("reviews", fetchReviews),
+    pipz.Transform("inventory", fetchInventory),
+    pipz.Transform("pricing", fetchPricing),
+)
+```
+
 ## Gotchas
 
-### ❌ Don't forget Concurrent doesn't return results
+### ❌ Don't forget to use reducer if you need results
 ```go
-// WRONG - Expecting modified data
+// WRONG - Expecting modified data without reducer
 concurrent := pipz.NewConcurrent("modify",
+    nil, // No reducer!
     pipz.Transform("double", func(ctx context.Context, n int) int {
         return n * 2 // Result is discarded!
     }),
@@ -164,10 +285,32 @@ result, _ := concurrent.Process(ctx, 5)
 // result is still 5, not 10!
 ```
 
-### ✅ Use for side effects only
+### ✅ Use reducer when you need results
+```go
+// RIGHT - Reducer aggregates results
+reducer := func(original int, results map[Name]int, errors map[Name]error) int {
+    sum := original
+    for _, v := range results {
+        sum += v
+    }
+    return sum
+}
+
+concurrent := pipz.NewConcurrent("sum",
+    reducer,
+    pipz.Transform("double", func(ctx context.Context, n int) int {
+        return n * 2
+    }),
+)
+result, _ := concurrent.Process(ctx, 5)
+// result is now 15 (5 + 10)
+```
+
+### ✅ Or use nil reducer for side effects only
 ```go
 // RIGHT - Side effects, not transformations
 concurrent := pipz.NewConcurrent("effects",
+    nil,
     pipz.Effect("log", logData),
     pipz.Effect("metrics", updateMetrics),
 )

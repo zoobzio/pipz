@@ -6,10 +6,13 @@ import (
 )
 
 // Concurrent runs all processors in parallel with the original context preserved.
-// Unlike fire-and-forget operations, this connector passes the original context
-// directly to each processor, preserving distributed tracing information, spans,
-// and other context values. Each processor receives a deep copy of the input,
-// ensuring complete isolation. The original input is always returned unchanged.
+// This connector passes the original context directly to each processor, preserving
+// distributed tracing information, spans, and other context values. Each processor
+// receives a deep copy of the input, ensuring complete isolation.
+//
+// Concurrent supports two modes:
+//   - Without reducer (nil): Returns the original input unchanged after all processors complete
+//   - With reducer: Collects all results and errors, then calls the reducer function to produce the final output
 //
 // The input type T must implement the Cloner[T] interface to provide efficient,
 // type-safe copying without reflection. This ensures predictable performance and
@@ -20,23 +23,24 @@ import (
 //   - All processors to respect the original context's cancellation
 //   - To wait for all processors to complete before continuing
 //   - Multiple side effects to happen simultaneously
+//   - To aggregate results from parallel operations (with reducer)
 //
 // Common use cases:
 //   - Sending traced notifications to multiple channels
 //   - Updating multiple external systems with trace context
 //   - Parallel logging with trace IDs preserved
-//   - Triggering workflows that need distributed tracing
+//   - Fetching data from multiple sources and merging results
 //   - Operations that must all complete or be canceled together
 //
 // Important characteristics:
 //   - Input type must implement Cloner[T] interface
 //   - All processors run regardless of individual failures
-//   - Original input always returned (processors can't modify it)
 //   - Context cancellation immediately affects all processors
 //   - Preserves trace context and spans for distributed tracing
 //   - Waits for all processors to complete
+//   - Reducer receives map[Name]T for results and map[Name]error for errors
 //
-// Example:
+// Example without reducer (side effects):
 //
 //	type Order struct {
 //	    ID     string
@@ -55,21 +59,57 @@ import (
 //	}
 //
 //	concurrent := pipz.NewConcurrent(
+//	    "notify-order",
+//	    nil, // no reducer, just run side effects
 //	    sendEmailNotification,
 //	    sendSMSNotification,
 //	    updateInventorySystem,
 //	    logToAnalytics,
 //	)
+//
+// Example with reducer (aggregate results):
+//
+//	type PriceCheck struct {
+//	    ProductID string
+//	    BestPrice float64
+//	}
+//
+//	func (p PriceCheck) Clone() PriceCheck {
+//	    return p
+//	}
+//
+//	reducer := func(original PriceCheck, results map[Name]PriceCheck, errors map[Name]error) PriceCheck {
+//	    bestPrice := original.BestPrice
+//	    for _, result := range results {
+//	        if result.BestPrice < bestPrice {
+//	            bestPrice = result.BestPrice
+//	        }
+//	    }
+//	    return PriceCheck{ProductID: original.ProductID, BestPrice: bestPrice}
+//	}
+//
+//	concurrent := pipz.NewConcurrent(
+//	    "check-prices",
+//	    reducer,
+//	    checkAmazon,
+//	    checkWalmart,
+//	    checkTarget,
+//	)
 type Concurrent[T Cloner[T]] struct {
 	name       Name
 	processors []Chainable[T]
+	reducer    func(original T, results map[Name]T, errors map[Name]error) T
 	mu         sync.RWMutex
 }
 
 // NewConcurrent creates a new Concurrent connector.
-func NewConcurrent[T Cloner[T]](name Name, processors ...Chainable[T]) *Concurrent[T] {
+// If reducer is nil, the original input is returned unchanged.
+// If reducer is provided, it receives the original input, all processor results,
+// and any errors, allowing you to aggregate or merge results into a new T.
+func NewConcurrent[T Cloner[T]](name Name, reducer func(original T, results map[Name]T, errors map[Name]error) T, processors ...Chainable[T]) *Concurrent[T] {
 	return &Concurrent[T]{
 		name:       name,
+		reducer:    reducer,
 		processors: processors,
 	}
 }
@@ -90,6 +130,15 @@ func (c *Concurrent[T]) Process(ctx context.Context, input T) (result T, err err
 	var wg sync.WaitGroup
 	wg.Add(len(processors))
 
+	// Collect results if reducer is provided
+	var resultsMu sync.Mutex
+	var results map[Name]T
+	var errors map[Name]error
+	if c.reducer != nil {
+		results = make(map[Name]T, len(processors))
+		errors = make(map[Name]error, len(processors))
+	}
+
 	// Process all with the original context to preserve tracing
 	for _, processor := range processors {
 		go func(p Chainable[T]) {
@@ -107,8 +156,19 @@ func (c *Concurrent[T]) Process(ctx context.Context, input T) (result T, err err
 			// Create an isolated copy using the Clone method
 			inputCopy := input.Clone()
 
-			// Process with the context (errors intentionally ignored in fire-and-forget)
-			_, _ = p.Process(ctx, inputCopy) //nolint:errcheck
+			// Process with the context
+			res, err := p.Process(ctx, inputCopy)
+
+			// Collect results if reducer is provided
+			if c.reducer != nil {
+				resultsMu.Lock()
+				if err != nil {
+					errors[p.Name()] = err
+				} else {
+					results[p.Name()] = res
+				}
+				resultsMu.Unlock()
+			}
 		}(processor)
 	}
 
@@ -122,9 +182,16 @@ func (c *Concurrent[T]) Process(ctx context.Context, input T) (result T, err err
 	select {
 	case <-done:
 		// All processors completed
+		if c.reducer != nil {
+			return c.reducer(input, results, errors), nil
+		}
 		return input, nil
 	case <-ctx.Done():
-		// Context canceled - return without error as processors run independently
+		// Context canceled
+		if c.reducer != nil {
+			// Call reducer with whatever results we have so far
+			return c.reducer(input, results, errors), nil
+		}
 		return input, nil
 	}
 }

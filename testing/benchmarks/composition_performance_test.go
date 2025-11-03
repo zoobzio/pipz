@@ -127,6 +127,7 @@ func BenchmarkBranchingPatterns(b *testing.B) {
 
 	b.Run("Concurrent_Four_Branches", func(b *testing.B) {
 		pipeline := pipz.NewConcurrent("concurrent",
+			nil,
 			double, add10, subtract5, multiply3,
 		)
 
@@ -197,7 +198,7 @@ func BenchmarkBranchingPatterns(b *testing.B) {
 		seq1 := pipz.NewSequence("seq1", double, add10)
 		seq2 := pipz.NewSequence("seq2", subtract5, multiply3)
 
-		pipeline := pipz.NewConcurrent("nested", seq1, seq2)
+		pipeline := pipz.NewConcurrent("nested", nil, seq1, seq2)
 
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -213,7 +214,7 @@ func BenchmarkBranchingPatterns(b *testing.B) {
 
 	b.Run("Nested_Concurrent_In_Sequential", func(b *testing.B) {
 		// Sequential pipeline with concurrent step in the middle
-		concurrent := pipz.NewConcurrent("middle", double, add10)
+		concurrent := pipz.NewConcurrent("middle", nil, double, add10)
 
 		pipeline := pipz.NewSequence("nested",
 			subtract5,
@@ -679,7 +680,7 @@ func BenchmarkScalabilityPatterns(b *testing.B) {
 					})
 			}
 
-			pipeline := pipz.NewConcurrent("concurrent", processors...)
+			pipeline := pipz.NewConcurrent("concurrent", nil, processors...)
 			data := ClonableInt(42)
 
 			b.ResetTimer()

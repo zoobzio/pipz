@@ -219,7 +219,7 @@ func BenchmarkConnectors(b *testing.B) {
 	})
 
 	b.Run("Concurrent_Two", func(b *testing.B) {
-		concurrent := pipz.NewConcurrent("concurrent", validate, enrich)
+		concurrent := pipz.NewConcurrent("concurrent", nil, validate, enrich)
 		b.ResetTimer()
 		b.ReportAllocs()
 
