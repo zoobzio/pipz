@@ -311,7 +311,7 @@ func handleRequest(req Request) Response {
 }
 ```
 
-### ✅ Use singleton circuit breakers
+### ✅ Create once, reuse
 ```go
 // RIGHT - Shared state across requests
 var apiBreaker = pipz.NewCircuitBreaker("api", apiCall, 5, time.Minute)

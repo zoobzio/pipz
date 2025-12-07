@@ -25,8 +25,8 @@ const (
 //   - Half-Open: Testing state, limited requests to check if service recovered
 //
 // CRITICAL: CircuitBreaker is a STATEFUL connector that tracks failure counts across requests.
-// You MUST create it as a package-level variable (singleton) to maintain state.
-// Creating a new CircuitBreaker for each request means it will NEVER open!
+// Create it once and reuse it - do NOT create a new CircuitBreaker for each request,
+// as that would reset the failure count and the circuit would never open.
 //
 // ❌ WRONG - Creating per request (never opens):
 //
@@ -35,7 +35,7 @@ const (
 //	    return breaker.Process(ctx, req)  // Always closed, failure count always 0
 //	}
 //
-// ✅ RIGHT - Package-level singleton:
+// ✅ RIGHT - Create once, reuse:
 //
 //	var apiBreaker = pipz.NewCircuitBreaker("api", apiProcessor, 5, 30*time.Second)
 //
@@ -56,7 +56,7 @@ const (
 //
 // Best Practices:
 //   - Use const names for all processors/connectors (see best-practices.md)
-//   - Declare CircuitBreakers as package-level vars
+//   - Create CircuitBreakers once and reuse them (e.g., as struct fields or package variables)
 //   - Set thresholds based on service characteristics
 //   - Combine with RateLimiter for comprehensive protection
 //   - Monitor circuit state for operational awareness
@@ -70,7 +70,7 @@ const (
 //	    ProcessorAPICall         = "api-call"
 //	)
 //
-//	// Create breakers as package-level singletons
+//	// Create breakers once and reuse
 //	var (
 //	    // External API - fail fast, longer recovery
 //	    apiBreaker = pipz.NewCircuitBreaker(

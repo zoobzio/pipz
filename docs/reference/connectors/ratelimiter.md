@@ -249,7 +249,7 @@ func handleRequest(req Request) Response {
 }
 ```
 
-### ✅ Use singleton rate limiters
+### ✅ Create once, reuse
 ```go
 // RIGHT - Shared limiter for all requests
 var apiLimiter = pipz.NewRateLimiter("api", 100, 10)

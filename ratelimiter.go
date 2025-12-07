@@ -24,8 +24,8 @@ const (
 // for protecting external APIs, databases, and other rate-sensitive resources.
 //
 // CRITICAL: RateLimiter is a STATEFUL connector that maintains an internal token bucket.
-// You MUST create it as a package-level variable (singleton) to share state across requests.
-// Creating a new RateLimiter for each request defeats the purpose entirely!
+// Create it once and reuse it - do NOT create a new RateLimiter for each request,
+// as that would reset the token bucket and rate limiting would not work.
 //
 // ❌ WRONG - Creating per request (useless):
 //
@@ -34,7 +34,7 @@ const (
 //	    return limiter.Process(ctx, req)                // Always allows through
 //	}
 //
-// ✅ RIGHT - Package-level singleton:
+// ✅ RIGHT - Create once, reuse:
 //
 //	var apiLimiter = pipz.NewRateLimiter("api", 100, 10)  // Shared instance
 //
@@ -55,7 +55,7 @@ const (
 //
 // Best Practices:
 //   - Use const names for all processors/connectors (see best-practices.md)
-//   - Declare RateLimiters as package-level vars
+//   - Create RateLimiters once and reuse them (e.g., as struct fields or package variables)
 //   - Configure limits based on actual downstream capacity
 //   - Layer multiple limiters for complex scenarios (global → service → endpoint)
 //
@@ -67,7 +67,7 @@ const (
 //	    ConnectorGlobalLimiter = "global-limiter"
 //	)
 //
-//	// Create limiters as package-level singletons
+//	// Create limiters once and reuse
 //	var (
 //	    // Global rate limit for entire system
 //	    globalLimiter = pipz.NewRateLimiter(ConnectorGlobalLimiter, 10000, 1000)
