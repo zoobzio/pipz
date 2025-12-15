@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/zoobzio/capitan"
 )
 
 // TestData implements Cloner for testing.
@@ -364,4 +366,126 @@ func TestConcurrent(t *testing.T) {
 		}
 	})
 
+}
+
+func TestConcurrentClose(t *testing.T) {
+	t.Run("Closes All Children", func(t *testing.T) {
+		p1 := newTrackingProcessor[TestData]("p1")
+		p2 := newTrackingProcessor[TestData]("p2")
+
+		c := NewConcurrent("test", nil, p1, p2)
+		err := c.Close()
+
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+		if p1.CloseCalls() != 1 || p2.CloseCalls() != 1 {
+			t.Error("expected all processors to be closed")
+		}
+	})
+
+	t.Run("Aggregates Errors", func(t *testing.T) {
+		p1 := newTrackingProcessor[TestData]("p1").WithCloseError(errors.New("p1 error"))
+		p2 := newTrackingProcessor[TestData]("p2").WithCloseError(errors.New("p2 error"))
+
+		c := NewConcurrent("test", nil, p1, p2)
+		err := c.Close()
+
+		if err == nil {
+			t.Error("expected error")
+		}
+		if p1.CloseCalls() != 1 || p2.CloseCalls() != 1 {
+			t.Error("expected all processors to be closed")
+		}
+	})
+
+	t.Run("Idempotency", func(t *testing.T) {
+		p := newTrackingProcessor[TestData]("p")
+		c := NewConcurrent("test", nil, p)
+
+		_ = c.Close()
+		_ = c.Close()
+
+		if p.CloseCalls() != 1 {
+			t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+		}
+	})
+}
+
+func TestConcurrentSignals(t *testing.T) {
+	t.Run("Emits Completed Signal", func(t *testing.T) {
+		var signalReceived bool
+		var signalName string
+		var signalProcessorCount int
+		var signalErrorCount int
+		var signalDuration float64
+
+		listener := capitan.Hook(SignalConcurrentCompleted, func(_ context.Context, e *capitan.Event) {
+			signalReceived = true
+			signalName, _ = FieldName.From(e)
+			signalProcessorCount, _ = FieldProcessorCount.From(e)
+			signalErrorCount, _ = FieldErrorCount.From(e)
+			signalDuration, _ = FieldDuration.From(e)
+		})
+		defer listener.Close()
+
+		concurrent := NewConcurrent[TestData]("signal-test-concurrent", nil,
+			Transform("p1", func(_ context.Context, d TestData) TestData { return d }),
+			Transform("p2", func(_ context.Context, d TestData) TestData { return d }),
+		)
+
+		data := TestData{Value: 5}
+		_, err := concurrent.Process(context.Background(), data)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if err := listener.Drain(context.Background()); err != nil {
+			t.Fatalf("drain failed: %v", err)
+		}
+
+		if !signalReceived {
+			t.Error("expected signal to be received")
+		}
+		if signalName != "signal-test-concurrent" {
+			t.Errorf("expected name 'signal-test-concurrent', got %q", signalName)
+		}
+		if signalProcessorCount != 2 {
+			t.Errorf("expected processor_count 2, got %d", signalProcessorCount)
+		}
+		if signalErrorCount != 0 {
+			t.Errorf("expected error_count 0, got %d", signalErrorCount)
+		}
+		if signalDuration <= 0 {
+			t.Error("expected positive duration")
+		}
+	})
+
+	t.Run("Tracks Error Count In Signal", func(t *testing.T) {
+		var signalErrorCount int
+
+		listener := capitan.Hook(SignalConcurrentCompleted, func(_ context.Context, e *capitan.Event) {
+			signalErrorCount, _ = FieldErrorCount.From(e)
+		})
+		defer listener.Close()
+
+		concurrent := NewConcurrent[TestData]("error-count-test", nil,
+			Transform("success", func(_ context.Context, d TestData) TestData { return d }),
+			Apply("fail", func(_ context.Context, _ TestData) (TestData, error) {
+				return TestData{}, errors.New("intentional failure")
+			}),
+		)
+
+		data := TestData{Value: 5}
+		_, _ = concurrent.Process(context.Background(), data)
+
+		if err := listener.Drain(context.Background()); err != nil {
+			t.Fatalf("drain failed: %v", err)
+		}
+
+		if signalErrorCount != 1 {
+			t.Errorf("expected error_count 1, got %d", signalErrorCount)
+		}
+	})
 }

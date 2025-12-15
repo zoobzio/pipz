@@ -495,6 +495,48 @@ func TestCircuitBreaker(t *testing.T) {
 	})
 }
 
+func TestCircuitBreakerClose(t *testing.T) {
+	t.Run("Closes Child Processor", func(t *testing.T) {
+		p := newTrackingProcessor[int]("p")
+
+		cb := NewCircuitBreaker("test", p, 3, time.Second)
+		err := cb.Close()
+
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+		if p.CloseCalls() != 1 {
+			t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+		}
+	})
+
+	t.Run("Propagates Close Error", func(t *testing.T) {
+		p := newTrackingProcessor[int]("p").WithCloseError(errors.New("close error"))
+
+		cb := NewCircuitBreaker("test", p, 3, time.Second)
+		err := cb.Close()
+
+		if err == nil {
+			t.Error("expected error")
+		}
+		if p.CloseCalls() != 1 {
+			t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+		}
+	})
+
+	t.Run("Idempotency", func(t *testing.T) {
+		p := newTrackingProcessor[int]("p")
+		cb := NewCircuitBreaker("test", p, 3, time.Second)
+
+		_ = cb.Close()
+		_ = cb.Close()
+
+		if p.CloseCalls() != 1 {
+			t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+		}
+	})
+}
+
 func BenchmarkCircuitBreaker(b *testing.B) {
 	b.Run("Closed State", func(b *testing.B) {
 		processor := Transform("test", func(_ context.Context, n int) int { return n * 2 })
@@ -552,6 +594,48 @@ func BenchmarkCircuitBreaker(b *testing.B) {
 			if i%100 == 0 {
 				clock.Advance(60 * time.Millisecond)
 			}
+		}
+	})
+}
+
+func TestCircuitBreakerGuardClauses(t *testing.T) {
+	processor := Transform("test", func(_ context.Context, n int) int { return n })
+
+	t.Run("NewCircuitBreaker clamps failureThreshold", func(t *testing.T) {
+		breaker := NewCircuitBreaker("test", processor, 0, time.Second)
+		if threshold := breaker.GetFailureThreshold(); threshold != 1 {
+			t.Errorf("expected threshold clamped to 1, got %d", threshold)
+		}
+
+		breaker2 := NewCircuitBreaker("test", processor, -5, time.Second)
+		if threshold := breaker2.GetFailureThreshold(); threshold != 1 {
+			t.Errorf("expected threshold clamped to 1, got %d", threshold)
+		}
+	})
+
+	t.Run("SetFailureThreshold clamps to 1", func(t *testing.T) {
+		breaker := NewCircuitBreaker("test", processor, 5, time.Second)
+		breaker.SetFailureThreshold(0)
+		if threshold := breaker.GetFailureThreshold(); threshold != 1 {
+			t.Errorf("expected threshold clamped to 1, got %d", threshold)
+		}
+
+		breaker.SetFailureThreshold(-10)
+		if threshold := breaker.GetFailureThreshold(); threshold != 1 {
+			t.Errorf("expected threshold clamped to 1, got %d", threshold)
+		}
+	})
+
+	t.Run("SetSuccessThreshold clamps to 1", func(t *testing.T) {
+		breaker := NewCircuitBreaker("test", processor, 5, time.Second)
+		breaker.SetSuccessThreshold(0)
+		if threshold := breaker.GetSuccessThreshold(); threshold != 1 {
+			t.Errorf("expected threshold clamped to 1, got %d", threshold)
+		}
+
+		breaker.SetSuccessThreshold(-10)
+		if threshold := breaker.GetSuccessThreshold(); threshold != 1 {
+			t.Errorf("expected threshold clamped to 1, got %d", threshold)
 		}
 	})
 }

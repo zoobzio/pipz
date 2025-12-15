@@ -42,6 +42,8 @@ type Timeout[T any] struct {
 	name      Name
 	duration  time.Duration
 	mu        sync.RWMutex
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // NewTimeout creates a new Timeout connector.
@@ -186,7 +188,13 @@ func (t *Timeout[T]) getClock() clockz.Clock {
 	return t.clock
 }
 
-// Close gracefully shuts down the timeout connector.
-func (*Timeout[T]) Close() error {
-	return nil
+// Close gracefully shuts down the timeout connector and its child processor.
+// Close is idempotent - multiple calls return the same result.
+func (t *Timeout[T]) Close() error {
+	t.closeOnce.Do(func() {
+		t.mu.RLock()
+		defer t.mu.RUnlock()
+		t.closeErr = t.processor.Close()
+	})
+	return t.closeErr
 }

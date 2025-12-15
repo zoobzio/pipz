@@ -247,6 +247,48 @@ func TestRetry(t *testing.T) {
 	})
 }
 
+func TestRetryClose(t *testing.T) {
+	t.Run("Closes Child Processor", func(t *testing.T) {
+		p := newTrackingProcessor[int]("p")
+
+		r := NewRetry("test", p, 3)
+		err := r.Close()
+
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+		if p.CloseCalls() != 1 {
+			t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+		}
+	})
+
+	t.Run("Propagates Close Error", func(t *testing.T) {
+		p := newTrackingProcessor[int]("p").WithCloseError(errors.New("close error"))
+
+		r := NewRetry("test", p, 3)
+		err := r.Close()
+
+		if err == nil {
+			t.Error("expected error")
+		}
+		if p.CloseCalls() != 1 {
+			t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+		}
+	})
+
+	t.Run("Idempotency", func(t *testing.T) {
+		p := newTrackingProcessor[int]("p")
+		r := NewRetry("test", p, 3)
+
+		_ = r.Close()
+		_ = r.Close()
+
+		if p.CloseCalls() != 1 {
+			t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+		}
+	})
+}
+
 func TestRetryContextCancellationBetweenAttempts(t *testing.T) {
 	t.Run("Context Cancellation Between Retry Attempts", func(t *testing.T) {
 		// This test covers lines 74-84 in retry.go where context is checked between attempts

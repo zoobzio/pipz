@@ -43,6 +43,8 @@ type Fallback[T any] struct {
 	name       Name
 	processors []Chainable[T]
 	mu         sync.RWMutex
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 // NewFallback creates a new Fallback connector that tries processors in order.
@@ -185,9 +187,22 @@ func (f *Fallback[T]) Name() Name {
 	return f.name
 }
 
-// Close gracefully shuts down the connector.
-func (*Fallback[T]) Close() error {
-	return nil
+// Close gracefully shuts down the connector and all its child processors.
+// Close is idempotent - multiple calls return the same result.
+func (f *Fallback[T]) Close() error {
+	f.closeOnce.Do(func() {
+		f.mu.RLock()
+		defer f.mu.RUnlock()
+
+		var errs []error
+		for i := len(f.processors) - 1; i >= 0; i-- {
+			if err := f.processors[i].Close(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		f.closeErr = errors.Join(errs...)
+	})
+	return f.closeErr
 }
 
 // GetProcessors returns a copy of all processors in order.

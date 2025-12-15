@@ -110,6 +110,8 @@ type CircuitBreaker[T any] struct {
 	successThreshold int
 	failures         int
 	successes        int
+	closeOnce        sync.Once
+	closeErr         error
 }
 
 // NewCircuitBreaker creates a new CircuitBreaker connector.
@@ -372,7 +374,13 @@ func (cb *CircuitBreaker[T]) Name() Name {
 	return cb.name
 }
 
-// Close gracefully shuts down the connector.
-func (*CircuitBreaker[T]) Close() error {
-	return nil
+// Close gracefully shuts down the connector and its child processor.
+// Close is idempotent - multiple calls return the same result.
+func (cb *CircuitBreaker[T]) Close() error {
+	cb.closeOnce.Do(func() {
+		cb.mu.Lock()
+		defer cb.mu.Unlock()
+		cb.closeErr = cb.processor.Close()
+	})
+	return cb.closeErr
 }

@@ -38,9 +38,6 @@ jobs:
       
     - name: Run unit tests with race detection
       run: go test -v -race -timeout=5m ./...
-      
-    - name: Test examples
-      run: make test-examples
 
   # Integration tests - component interaction verification
   integration-tests:
@@ -188,54 +185,6 @@ jobs:
           coverage.out
           coverage.html
 
-  # End-to-end verification using examples
-  e2e-examples:
-    name: E2E Examples
-    runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests]
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Go ${{ env.GO_VERSION }}
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ env.GO_VERSION }}
-        
-    - name: Cache Go modules
-      uses: actions/cache@v4
-      with:
-        path: ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-${{ env.GO_VERSION }}-
-          
-    - name: Download dependencies for examples
-      run: |
-        for dir in examples/*/; do
-          if [ -f "$dir/go.mod" ]; then
-            echo "Downloading dependencies for $dir"
-            (cd "$dir" && go mod download)
-          fi
-        done
-        
-    - name: Build all examples
-      run: |
-        for dir in examples/*/; do
-          if [ -f "$dir/main.go" ]; then
-            echo "Building $dir"
-            (cd "$dir" && go build -v .)
-          fi
-        done
-        
-    - name: Run examples with timeout
-      run: |
-        for dir in examples/*/; do
-          if [ -f "$dir/main.go" ]; then
-            echo "Running $dir"
-            (cd "$dir" && timeout 30s go run . || echo "Example completed or timed out safely")
-          fi
-        done
-
   # Security scanning
   security:
     name: Security Scan
@@ -276,7 +225,7 @@ jobs:
   ci-complete:
     name: CI Complete
     runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests, benchmarks, reliability-tests, quality, e2e-examples, security]
+    needs: [unit-tests, integration-tests, benchmarks, reliability-tests, quality, security]
     if: always()
     steps:
     - name: Check all jobs status
@@ -299,10 +248,6 @@ jobs:
         fi
         if [[ "${{ needs.quality.result }}" != "success" ]]; then
           echo "Code quality checks failed"
-          exit 1
-        fi
-        if [[ "${{ needs.e2e-examples.result }}" != "success" ]]; then
-          echo "E2E examples failed"
           exit 1
         fi
         if [[ "${{ needs.security.result }}" != "success" ]]; then

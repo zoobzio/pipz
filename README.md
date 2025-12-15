@@ -20,7 +20,8 @@ At its core, pipz is built on a single, simple interface:
 ```go
 type Chainable[T any] interface {
     Process(context.Context, T) (T, error)
-    Name() string
+    Name() Name
+    Close() error
 }
 ```
 
@@ -256,26 +257,12 @@ if err != nil {
 
 ## Documentation
 
-📚 **[Full Documentation](./docs/README.md)**
+📚 **[Full Documentation](./docs/1.overview.md)**
 
-- [Introduction](./docs/learn/introduction.md) - Why pipz and core philosophy
-- [Quick Start Guide](./docs/tutorials/quickstart.md) - Build your first pipeline
-- [Concepts](./docs/learn/core-concepts.md) - Deep dive into processors and connectors
-- [Examples](./examples/) - Real-world implementations and patterns
-- [API Reference](./docs/reference/) - Complete API documentation
-
-## Examples
-
-The [`examples/`](./examples/) directory contains complete, runnable examples:
-
-- **[Order Processing](./examples/order-processing/)** - E-commerce order processing from MVP to enterprise scale
-- **[User Profile Update](./examples/user-profile-update/)** - Complex multi-step operations with external services
-- **[Customer Support](./examples/customer-support/)** - Intelligent ticket routing and prioritization
-- **[Event Orchestration](./examples/event-orchestration/)** - Event routing with compliance and safety measures
-- **[Shipping Fulfillment](./examples/shipping-fulfillment/)** - Multi-provider shipping with smart carrier selection
-
-Each example includes comprehensive tests, detailed documentation, and demonstrates real-world patterns.
-
+- [Introduction](./docs/2.learn/2.introduction.md) - Why pipz and core philosophy
+- [Quick Start](./docs/2.learn/1.quickstart.md) - Build your first pipeline
+- [Core Concepts](./docs/2.learn/3.core-concepts.md) - Deep dive into processors and connectors
+- [API Reference](./docs/5.reference/) - Complete API documentation
 
 ## Performance
 

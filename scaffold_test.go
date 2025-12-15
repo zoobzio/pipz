@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/zoobzio/capitan"
 )
 
 func TestScaffold(t *testing.T) {
@@ -217,5 +219,91 @@ func TestScaffold(t *testing.T) {
 		// The panic happens in a background goroutine, so we can't directly test it
 		// But we can verify that the main process completes successfully
 		// This test ensures panic recovery in the main process works correctly
+	})
+}
+
+func TestScaffoldClose(t *testing.T) {
+	t.Run("Closes All Children", func(t *testing.T) {
+		p1 := newTrackingProcessor[TestData]("p1")
+		p2 := newTrackingProcessor[TestData]("p2")
+
+		s := NewScaffold("test", p1, p2)
+		err := s.Close()
+
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+		if p1.CloseCalls() != 1 || p2.CloseCalls() != 1 {
+			t.Error("expected all processors to be closed")
+		}
+	})
+
+	t.Run("Aggregates Errors", func(t *testing.T) {
+		p1 := newTrackingProcessor[TestData]("p1").WithCloseError(errors.New("p1 error"))
+		p2 := newTrackingProcessor[TestData]("p2").WithCloseError(errors.New("p2 error"))
+
+		s := NewScaffold("test", p1, p2)
+		err := s.Close()
+
+		if err == nil {
+			t.Error("expected error")
+		}
+		if p1.CloseCalls() != 1 || p2.CloseCalls() != 1 {
+			t.Error("expected all processors to be closed")
+		}
+	})
+
+	t.Run("Idempotency", func(t *testing.T) {
+		p := newTrackingProcessor[TestData]("p")
+		s := NewScaffold("test", p)
+
+		_ = s.Close()
+		_ = s.Close()
+
+		if p.CloseCalls() != 1 {
+			t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+		}
+	})
+}
+
+func TestScaffoldSignals(t *testing.T) {
+	t.Run("Emits Dispatched Signal", func(t *testing.T) {
+		var signalReceived bool
+		var signalName string
+		var signalProcessorCount int
+
+		listener := capitan.Hook(SignalScaffoldDispatched, func(_ context.Context, e *capitan.Event) {
+			signalReceived = true
+			signalName, _ = FieldName.From(e)
+			signalProcessorCount, _ = FieldProcessorCount.From(e)
+		})
+		defer listener.Close()
+
+		scaffold := NewScaffold[TestData]("signal-test-scaffold",
+			Effect("task1", func(_ context.Context, _ TestData) error { return nil }),
+			Effect("task2", func(_ context.Context, _ TestData) error { return nil }),
+			Effect("task3", func(_ context.Context, _ TestData) error { return nil }),
+		)
+
+		data := TestData{Value: 5}
+		_, err := scaffold.Process(context.Background(), data)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if err := listener.Drain(context.Background()); err != nil {
+			t.Fatalf("drain failed: %v", err)
+		}
+
+		if !signalReceived {
+			t.Error("expected signal to be received")
+		}
+		if signalName != "signal-test-scaffold" {
+			t.Errorf("expected name 'signal-test-scaffold', got %q", signalName)
+		}
+		if signalProcessorCount != 3 {
+			t.Errorf("expected processor_count 3, got %d", signalProcessorCount)
+		}
 	})
 }

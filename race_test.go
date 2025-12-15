@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zoobzio/capitan"
 )
 
 func TestRace(t *testing.T) {
@@ -266,4 +268,134 @@ func TestRace(t *testing.T) {
 		}
 	})
 
+}
+
+func TestRaceClose(t *testing.T) {
+	t.Run("Closes All Children", func(t *testing.T) {
+		p1 := newTrackingProcessor[TestData]("p1")
+		p2 := newTrackingProcessor[TestData]("p2")
+
+		r := NewRace("test", p1, p2)
+		err := r.Close()
+
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+		if p1.CloseCalls() != 1 || p2.CloseCalls() != 1 {
+			t.Error("expected all processors to be closed")
+		}
+	})
+
+	t.Run("Aggregates Errors", func(t *testing.T) {
+		p1 := newTrackingProcessor[TestData]("p1").WithCloseError(errors.New("p1 error"))
+		p2 := newTrackingProcessor[TestData]("p2").WithCloseError(errors.New("p2 error"))
+
+		r := NewRace("test", p1, p2)
+		err := r.Close()
+
+		if err == nil {
+			t.Error("expected error")
+		}
+		if p1.CloseCalls() != 1 || p2.CloseCalls() != 1 {
+			t.Error("expected all processors to be closed")
+		}
+	})
+
+	t.Run("Idempotency", func(t *testing.T) {
+		p := newTrackingProcessor[TestData]("p")
+		r := NewRace("test", p)
+
+		_ = r.Close()
+		_ = r.Close()
+
+		if p.CloseCalls() != 1 {
+			t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+		}
+	})
+}
+
+func TestRaceSignals(t *testing.T) {
+	t.Run("Emits Winner Signal On Success", func(t *testing.T) {
+		var signalReceived bool
+		var signalName string
+		var signalWinnerName string
+		var signalDuration float64
+
+		listener := capitan.Hook(SignalRaceWinner, func(_ context.Context, e *capitan.Event) {
+			signalReceived = true
+			signalName, _ = FieldName.From(e)
+			signalWinnerName, _ = FieldWinnerName.From(e)
+			signalDuration, _ = FieldDuration.From(e)
+		})
+		defer listener.Close()
+
+		fast := Transform("fast-winner", func(_ context.Context, d TestData) TestData {
+			d.Value = 100
+			return d
+		})
+		slow := Apply("slow-loser", func(_ context.Context, d TestData) (TestData, error) {
+			time.Sleep(50 * time.Millisecond)
+			d.Value = 200
+			return d, nil
+		})
+
+		race := NewRace("signal-test-race", fast, slow)
+		data := TestData{Value: 5}
+
+		_, err := race.Process(context.Background(), data)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if err := listener.Drain(context.Background()); err != nil {
+			t.Fatalf("drain failed: %v", err)
+		}
+
+		if !signalReceived {
+			t.Error("expected signal to be received")
+		}
+		if signalName != "signal-test-race" {
+			t.Errorf("expected name 'signal-test-race', got %q", signalName)
+		}
+		if signalWinnerName != "fast-winner" {
+			t.Errorf("expected winner_name 'fast-winner', got %q", signalWinnerName)
+		}
+		if signalDuration <= 0 {
+			t.Error("expected positive duration")
+		}
+	})
+
+	t.Run("Does Not Emit Signal When All Fail", func(t *testing.T) {
+		var signalReceived bool
+
+		listener := capitan.Hook(SignalRaceWinner, func(_ context.Context, _ *capitan.Event) {
+			signalReceived = true
+		})
+		defer listener.Close()
+
+		fail1 := Apply("fail1", func(_ context.Context, _ TestData) (TestData, error) {
+			return TestData{}, errors.New("fail1")
+		})
+		fail2 := Apply("fail2", func(_ context.Context, _ TestData) (TestData, error) {
+			return TestData{}, errors.New("fail2")
+		})
+
+		race := NewRace("signal-fail-race", fail1, fail2)
+		data := TestData{Value: 5}
+
+		_, err := race.Process(context.Background(), data)
+
+		if err == nil {
+			t.Fatal("expected error")
+		}
+
+		if err := listener.Drain(context.Background()); err != nil {
+			t.Fatalf("drain failed: %v", err)
+		}
+
+		if signalReceived {
+			t.Error("signal should not be emitted when all processors fail")
+		}
+	})
 }

@@ -40,6 +40,8 @@ type Retry[T any] struct {
 	name        Name
 	maxAttempts int
 	mu          sync.RWMutex
+	closeOnce   sync.Once
+	closeErr    error
 }
 
 // NewRetry creates a new Retry connector.
@@ -160,7 +162,13 @@ func (r *Retry[T]) Name() Name {
 	return r.name
 }
 
-// Close gracefully shuts down the connector.
-func (*Retry[T]) Close() error {
-	return nil
+// Close gracefully shuts down the connector and its child processor.
+// Close is idempotent - multiple calls return the same result.
+func (r *Retry[T]) Close() error {
+	r.closeOnce.Do(func() {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		r.closeErr = r.processor.Close()
+	})
+	return r.closeErr
 }

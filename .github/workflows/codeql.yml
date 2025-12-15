@@ -57,12 +57,7 @@ jobs:
     #   run: |
     #     go mod download
     #     go build -v ./...
-    #     for dir in examples/*/; do
-    #       if [ -f "$dir/go.mod" ]; then
-    #         (cd "$dir" && go build -v ./...)
-    #       fi
-    #     done
-    
+
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3
       with:

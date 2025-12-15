@@ -716,3 +716,41 @@ func BenchmarkRateLimiter(b *testing.B) {
 		}
 	})
 }
+
+func TestRateLimiterEdgeCases(t *testing.T) {
+	t.Run("Zero Rate", func(t *testing.T) {
+		// Zero rate should effectively block forever after initial burst is consumed
+		limiter := NewRateLimiter[int]("zero-rate", 0, 1)
+
+		// First call succeeds (uses the initial token)
+		_, err := limiter.Process(context.Background(), 42)
+		if err != nil {
+			t.Errorf("first call should succeed: %v", err)
+		}
+
+		// Second call should block forever (zero rate means no refill)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		defer cancel()
+
+		_, err = limiter.Process(ctx, 42)
+		// Should timeout because zero rate means infinite wait
+		if err == nil {
+			t.Error("expected timeout error with zero rate")
+		}
+	})
+
+	t.Run("Infinite Rate", func(t *testing.T) {
+		// Infinite rate should allow all requests immediately
+		limiter := NewRateLimiter[int]("infinite-rate", math.Inf(1), 1)
+
+		for i := 0; i < 100; i++ {
+			result, err := limiter.Process(context.Background(), i)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if result != i {
+				t.Errorf("expected %d, got %d", i, result)
+			}
+		}
+	})
+}

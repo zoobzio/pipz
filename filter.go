@@ -5,6 +5,8 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/zoobzio/capitan"
 )
 
 // Filter creates a conditional processor that either continues the pipeline unchanged
@@ -55,6 +57,8 @@ type Filter[T any] struct {
 	condition func(context.Context, T) bool
 	name      Name
 	mu        sync.RWMutex
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // NewFilter creates a new Filter connector with the given condition and processor.
@@ -79,6 +83,12 @@ func (f *Filter[T]) Process(ctx context.Context, data T) (result T, err error) {
 
 	// Evaluate condition
 	conditionMet := condition(ctx, data)
+
+	// Emit evaluated signal
+	capitan.Info(ctx, SignalFilterEvaluated,
+		FieldName.Field(string(f.name)),
+		FieldPassed.Field(conditionMet),
+	)
 
 	if !conditionMet {
 		// Condition false - pass through unchanged
@@ -146,7 +156,13 @@ func (f *Filter[T]) Name() Name {
 	return f.name
 }
 
-// Close gracefully shuts down the connector.
-func (*Filter[T]) Close() error {
-	return nil
+// Close gracefully shuts down the connector and its child processor.
+// Close is idempotent - multiple calls return the same result.
+func (f *Filter[T]) Close() error {
+	f.closeOnce.Do(func() {
+		f.mu.RLock()
+		defer f.mu.RUnlock()
+		f.closeErr = f.processor.Close()
+	})
+	return f.closeErr
 }

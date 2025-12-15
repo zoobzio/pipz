@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zoobzio/capitan"
 )
 
 func TestContest(t *testing.T) {
@@ -456,6 +458,147 @@ func TestContest(t *testing.T) {
 
 		if result.Value != 100 {
 			t.Errorf("expected normal processor result 100, got %d", result.Value)
+		}
+	})
+}
+
+func TestContestClose(t *testing.T) {
+	t.Run("Closes All Children", func(t *testing.T) {
+		p1 := newTrackingProcessor[TestData]("p1")
+		p2 := newTrackingProcessor[TestData]("p2")
+
+		c := NewContest("test", func(_ context.Context, _ TestData) bool { return true }, p1, p2)
+		err := c.Close()
+
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+		if p1.CloseCalls() != 1 || p2.CloseCalls() != 1 {
+			t.Error("expected all processors to be closed")
+		}
+	})
+
+	t.Run("Aggregates Errors", func(t *testing.T) {
+		p1 := newTrackingProcessor[TestData]("p1").WithCloseError(errors.New("p1 error"))
+		p2 := newTrackingProcessor[TestData]("p2").WithCloseError(errors.New("p2 error"))
+
+		c := NewContest("test", func(_ context.Context, _ TestData) bool { return true }, p1, p2)
+		err := c.Close()
+
+		if err == nil {
+			t.Error("expected error")
+		}
+		if p1.CloseCalls() != 1 || p2.CloseCalls() != 1 {
+			t.Error("expected all processors to be closed")
+		}
+	})
+
+	t.Run("Idempotency", func(t *testing.T) {
+		p := newTrackingProcessor[TestData]("p")
+		c := NewContest("test", func(_ context.Context, _ TestData) bool { return true }, p)
+
+		_ = c.Close()
+		_ = c.Close()
+
+		if p.CloseCalls() != 1 {
+			t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+		}
+	})
+}
+
+func TestContestSignals(t *testing.T) {
+	t.Run("Emits Winner Signal When Condition Met", func(t *testing.T) {
+		var signalReceived bool
+		var signalName string
+		var signalWinnerName string
+		var signalDuration float64
+
+		listener := capitan.Hook(SignalContestWinner, func(_ context.Context, e *capitan.Event) {
+			signalReceived = true
+			signalName, _ = FieldName.From(e)
+			signalWinnerName, _ = FieldWinnerName.From(e)
+			signalDuration, _ = FieldDuration.From(e)
+		})
+		defer listener.Close()
+
+		// Condition: value must be > 50
+		condition := func(_ context.Context, d TestData) bool {
+			return d.Value > 50
+		}
+
+		winner := Transform("the-winner", func(_ context.Context, d TestData) TestData {
+			d.Value = 100
+			return d
+		})
+		loser := Transform("the-loser", func(_ context.Context, d TestData) TestData {
+			d.Value = 10 // Doesn't meet condition
+			return d
+		})
+
+		contest := NewContest("signal-test-contest", condition, winner, loser)
+		data := TestData{Value: 5}
+
+		_, err := contest.Process(context.Background(), data)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if err := listener.Drain(context.Background()); err != nil {
+			t.Fatalf("drain failed: %v", err)
+		}
+
+		if !signalReceived {
+			t.Error("expected signal to be received")
+		}
+		if signalName != "signal-test-contest" {
+			t.Errorf("expected name 'signal-test-contest', got %q", signalName)
+		}
+		if signalWinnerName != "the-winner" {
+			t.Errorf("expected winner_name 'the-winner', got %q", signalWinnerName)
+		}
+		if signalDuration <= 0 {
+			t.Error("expected positive duration")
+		}
+	})
+
+	t.Run("Does Not Emit Signal When No Winner", func(t *testing.T) {
+		var signalReceived bool
+
+		listener := capitan.Hook(SignalContestWinner, func(_ context.Context, _ *capitan.Event) {
+			signalReceived = true
+		})
+		defer listener.Close()
+
+		// Condition that can never be met
+		condition := func(_ context.Context, d TestData) bool {
+			return d.Value > 1000
+		}
+
+		p1 := Transform("p1", func(_ context.Context, d TestData) TestData {
+			d.Value = 10
+			return d
+		})
+		p2 := Transform("p2", func(_ context.Context, d TestData) TestData {
+			d.Value = 20
+			return d
+		})
+
+		contest := NewContest("signal-no-winner", condition, p1, p2)
+		data := TestData{Value: 5}
+
+		_, err := contest.Process(context.Background(), data)
+
+		if err == nil {
+			t.Fatal("expected error when no winner")
+		}
+
+		if err := listener.Drain(context.Background()); err != nil {
+			t.Fatalf("drain failed: %v", err)
+		}
+
+		if signalReceived {
+			t.Error("signal should not be emitted when no winner")
 		}
 	})
 }

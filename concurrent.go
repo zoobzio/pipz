@@ -2,7 +2,12 @@ package pipz
 
 import (
 	"context"
+	"errors"
 	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/zoobzio/capitan"
 )
 
 // Concurrent runs all processors in parallel with the original context preserved.
@@ -100,6 +105,8 @@ type Concurrent[T Cloner[T]] struct {
 	processors []Chainable[T]
 	reducer    func(original T, results map[Name]T, errors map[Name]error) T
 	mu         sync.RWMutex
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 // NewConcurrent creates a new Concurrent connector.
@@ -118,6 +125,8 @@ func NewConcurrent[T Cloner[T]](name Name, reducer func(original T, results map[
 func (c *Concurrent[T]) Process(ctx context.Context, input T) (result T, err error) {
 	defer recoverFromPanic(&result, &err, c.name, input)
 
+	start := time.Now()
+
 	c.mu.RLock()
 	processors := make([]Chainable[T], len(c.processors))
 	copy(processors, c.processors)
@@ -133,11 +142,14 @@ func (c *Concurrent[T]) Process(ctx context.Context, input T) (result T, err err
 	// Collect results if reducer is provided
 	var resultsMu sync.Mutex
 	var results map[Name]T
-	var errors map[Name]error
+	var errs map[Name]error
 	if c.reducer != nil {
 		results = make(map[Name]T, len(processors))
-		errors = make(map[Name]error, len(processors))
+		errs = make(map[Name]error, len(processors))
 	}
+
+	// Track error count for signal (atomic for safe concurrent access)
+	var errorCount atomic.Int32
 
 	// Process all with the original context to preserve tracing
 	for _, processor := range processors {
@@ -163,11 +175,14 @@ func (c *Concurrent[T]) Process(ctx context.Context, input T) (result T, err err
 			if c.reducer != nil {
 				resultsMu.Lock()
 				if err != nil {
-					errors[p.Name()] = err
+					errs[p.Name()] = err
+					errorCount.Add(1)
 				} else {
 					results[p.Name()] = res
 				}
 				resultsMu.Unlock()
+			} else if err != nil {
+				errorCount.Add(1)
 			}
 		}(processor)
 	}
@@ -181,16 +196,30 @@ func (c *Concurrent[T]) Process(ctx context.Context, input T) (result T, err err
 
 	select {
 	case <-done:
-		// All processors completed
+		// All processors completed - emit signal
+		capitan.Info(ctx, SignalConcurrentCompleted,
+			FieldName.Field(string(c.name)),
+			FieldProcessorCount.Field(len(processors)),
+			FieldErrorCount.Field(int(errorCount.Load())),
+			FieldDuration.Field(time.Since(start).Seconds()),
+		)
+
 		if c.reducer != nil {
-			return c.reducer(input, results, errors), nil
+			return c.reducer(input, results, errs), nil
 		}
 		return input, nil
 	case <-ctx.Done():
-		// Context canceled
+		// Context canceled - emit signal with current state
+		capitan.Info(ctx, SignalConcurrentCompleted,
+			FieldName.Field(string(c.name)),
+			FieldProcessorCount.Field(len(processors)),
+			FieldErrorCount.Field(int(errorCount.Load())),
+			FieldDuration.Field(time.Since(start).Seconds()),
+		)
+
 		if c.reducer != nil {
 			// Call reducer with whatever results we have so far
-			return c.reducer(input, results, errors), nil
+			return c.reducer(input, results, errs), nil
 		}
 		return input, nil
 	}
@@ -248,7 +277,20 @@ func (c *Concurrent[T]) Name() Name {
 	return c.name
 }
 
-// Close gracefully shuts down the connector.
-func (*Concurrent[T]) Close() error {
-	return nil
+// Close gracefully shuts down the connector and all its child processors.
+// Close is idempotent - multiple calls return the same result.
+func (c *Concurrent[T]) Close() error {
+	c.closeOnce.Do(func() {
+		c.mu.RLock()
+		defer c.mu.RUnlock()
+
+		var errs []error
+		for i := len(c.processors) - 1; i >= 0; i-- {
+			if err := c.processors[i].Close(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		c.closeErr = errors.Join(errs...)
+	})
+	return c.closeErr
 }

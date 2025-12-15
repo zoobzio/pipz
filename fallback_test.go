@@ -495,6 +495,50 @@ func TestFallback(t *testing.T) {
 		}
 	})
 
+	t.Run("Close Tests", func(t *testing.T) {
+		t.Run("Closes All Children", func(t *testing.T) {
+			p1 := newTrackingProcessor[int]("p1")
+			p2 := newTrackingProcessor[int]("p2")
+
+			f := NewFallback("test", p1, p2)
+			err := f.Close()
+
+			if err != nil {
+				t.Errorf("expected no error, got %v", err)
+			}
+			if p1.CloseCalls() != 1 || p2.CloseCalls() != 1 {
+				t.Error("expected all processors to be closed")
+			}
+		})
+
+		t.Run("Aggregates Errors", func(t *testing.T) {
+			p1 := newTrackingProcessor[int]("p1").WithCloseError(errors.New("p1 error"))
+			p2 := newTrackingProcessor[int]("p2").WithCloseError(errors.New("p2 error"))
+
+			f := NewFallback("test", p1, p2)
+			err := f.Close()
+
+			if err == nil {
+				t.Error("expected error")
+			}
+			if p1.CloseCalls() != 1 || p2.CloseCalls() != 1 {
+				t.Error("expected all processors to be closed")
+			}
+		})
+
+		t.Run("Idempotency", func(t *testing.T) {
+			p := newTrackingProcessor[int]("p")
+			f := NewFallback("test", p)
+
+			_ = f.Close()
+			_ = f.Close()
+
+			if p.CloseCalls() != 1 {
+				t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+			}
+		})
+	})
+
 	// High-value coverage improvement tests targeting specific execution paths
 	t.Run("Non-Pipeline Error Wrapping Coverage", func(t *testing.T) {
 		// Test lines 97-102: non-pipeline error wrapping when all processors fail

@@ -387,6 +387,48 @@ func TestTimeout(t *testing.T) {
 		}
 	})
 
+	t.Run("Close Tests", func(t *testing.T) {
+		t.Run("Closes Child Processor", func(t *testing.T) {
+			p := newTrackingProcessor[int]("p")
+
+			to := NewTimeout("test", p, 100*time.Millisecond)
+			err := to.Close()
+
+			if err != nil {
+				t.Errorf("expected no error, got %v", err)
+			}
+			if p.CloseCalls() != 1 {
+				t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+			}
+		})
+
+		t.Run("Propagates Close Error", func(t *testing.T) {
+			p := newTrackingProcessor[int]("p").WithCloseError(errors.New("close error"))
+
+			to := NewTimeout("test", p, 100*time.Millisecond)
+			err := to.Close()
+
+			if err == nil {
+				t.Error("expected error")
+			}
+			if p.CloseCalls() != 1 {
+				t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+			}
+		})
+
+		t.Run("Idempotency", func(t *testing.T) {
+			p := newTrackingProcessor[int]("p")
+			to := NewTimeout("test", p, 100*time.Millisecond)
+
+			_ = to.Close()
+			_ = to.Close()
+
+			if p.CloseCalls() != 1 {
+				t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+			}
+		})
+	})
+
 	t.Run("Does not emit hook on cancellation", func(t *testing.T) {
 		var mu sync.Mutex
 		var triggered bool

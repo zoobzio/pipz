@@ -38,30 +38,19 @@ jobs:
         # Core library coverage
         echo "=== Testing core library ==="
         go test -v -race -coverprofile=coverage-core.out -covermode=atomic \
-          -coverpkg=github.com/zoobzio/pipz $(go list ./... | grep -v '/examples/')
-        
+          -coverpkg=github.com/zoobzio/pipz ./...
+
         # Generate coverage report
         go tool cover -func=coverage-core.out > coverage-summary.txt
         echo "Core Coverage Summary:"
         tail -1 coverage-summary.txt
-        
+
         # Generate HTML report
         go tool cover -html=coverage-core.out -o coverage-core.html
-        
+
         # Convert to Cobertura format for better PR integration
         gocover-cobertura < coverage-core.out > coverage-core.xml
-    
-    - name: Test examples (verification only)
-      run: |
-        echo "=== Testing examples (no coverage tracking) ==="
-        for dir in examples/*/; do
-          if [ -f "$dir/go.mod" ]; then
-            example_name=$(basename "$dir")
-            echo "Testing $example_name"
-            (cd "$dir" && go test -v -race ./... || true)
-          fi
-        done
-    
+
     - name: Generate final coverage reports
       run: |
         # Use only core coverage for final reports since examples are separate modules

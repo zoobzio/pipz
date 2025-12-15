@@ -86,6 +86,54 @@ var (
 		"backoff.waiting",
 		"Backoff connector is delaying before the next execution attempt",
 	)
+
+	// Sequence signals.
+	SignalSequenceCompleted = capitan.NewSignal(
+		"sequence.completed",
+		"Sequence connector completed processing all processors successfully",
+	)
+
+	// Concurrent signals.
+	SignalConcurrentCompleted = capitan.NewSignal(
+		"concurrent.completed",
+		"Concurrent connector completed all parallel processors",
+	)
+
+	// Race signals.
+	SignalRaceWinner = capitan.NewSignal(
+		"race.winner",
+		"Race connector determined a winner from parallel processors",
+	)
+
+	// Contest signals.
+	SignalContestWinner = capitan.NewSignal(
+		"contest.winner",
+		"Contest connector found a result meeting the condition",
+	)
+
+	// Scaffold signals.
+	SignalScaffoldDispatched = capitan.NewSignal(
+		"scaffold.dispatched",
+		"Scaffold connector dispatched processors for background execution",
+	)
+
+	// Switch signals.
+	SignalSwitchRouted = capitan.NewSignal(
+		"switch.routed",
+		"Switch connector routed data to a processor based on condition",
+	)
+
+	// Filter signals.
+	SignalFilterEvaluated = capitan.NewSignal(
+		"filter.evaluated",
+		"Filter connector evaluated condition and determined whether to process",
+	)
+
+	// Handle signals.
+	SignalHandleErrorHandled = capitan.NewSignal(
+		"handle.error-handled",
+		"Handle connector processed an error through the error handler",
+	)
 )
 
 // Common field keys using capitan primitive types.
@@ -131,4 +179,20 @@ var (
 	// Backoff fields.
 	FieldDelay     = capitan.NewFloat64Key("delay")      // Current backoff delay in seconds
 	FieldNextDelay = capitan.NewFloat64Key("next_delay") // Next delay if this attempt fails in seconds
+
+	// Sequence fields.
+	FieldProcessorCount = capitan.NewIntKey("processor_count") // Number of processors in chain
+
+	// Concurrent fields.
+	FieldErrorCount = capitan.NewIntKey("error_count") // Number of errors from parallel execution
+
+	// Race/Contest fields.
+	FieldWinnerName = capitan.NewStringKey("winner_name") // Name of winning processor
+
+	// Switch fields.
+	FieldRouteKey = capitan.NewStringKey("route_key") // Key used for routing
+	FieldMatched  = capitan.NewBoolKey("matched")     // Whether a route was matched
+
+	// Filter fields.
+	FieldPassed = capitan.NewBoolKey("passed") // Whether filter condition passed
 )

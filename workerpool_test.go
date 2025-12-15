@@ -11,6 +11,11 @@ import (
 	"github.com/zoobzio/clockz"
 )
 
+// clonableInt is a simple int type that implements Cloner for testing WorkerPool.
+type clonableInt int
+
+func (c clonableInt) Clone() clonableInt { return c }
+
 func TestWorkerPool(t *testing.T) {
 	t.Run("Runs All Processors", func(t *testing.T) {
 		var counter int32
@@ -698,4 +703,81 @@ func BenchmarkWorkerPool(b *testing.B) {
 		}
 	})
 
+}
+
+func TestWorkerPoolClose(t *testing.T) {
+	t.Run("Closes All Children", func(t *testing.T) {
+		p1 := newTrackingProcessor[TestData]("p1")
+		p2 := newTrackingProcessor[TestData]("p2")
+
+		w := NewWorkerPool("test", 2, p1, p2)
+		err := w.Close()
+
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+		if p1.CloseCalls() != 1 || p2.CloseCalls() != 1 {
+			t.Error("expected all processors to be closed")
+		}
+	})
+
+	t.Run("Aggregates Errors", func(t *testing.T) {
+		p1 := newTrackingProcessor[TestData]("p1").WithCloseError(errors.New("p1 error"))
+		p2 := newTrackingProcessor[TestData]("p2").WithCloseError(errors.New("p2 error"))
+
+		w := NewWorkerPool("test", 2, p1, p2)
+		err := w.Close()
+
+		if err == nil {
+			t.Error("expected error")
+		}
+		if p1.CloseCalls() != 1 || p2.CloseCalls() != 1 {
+			t.Error("expected all processors to be closed")
+		}
+	})
+
+	t.Run("Idempotency", func(t *testing.T) {
+		p := newTrackingProcessor[TestData]("p")
+		w := NewWorkerPool("test", 2, p)
+
+		_ = w.Close()
+		_ = w.Close()
+
+		if p.CloseCalls() != 1 {
+			t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+		}
+	})
+}
+
+func TestWorkerPoolDefaultClock(t *testing.T) {
+	// Test that WorkerPool works without setting a custom clock
+	processor := Transform("test", func(_ context.Context, n clonableInt) clonableInt { return n * 2 })
+	wp := NewWorkerPool("test", 2, processor)
+
+	// Process should use the default real clock
+	result, err := wp.Process(context.Background(), clonableInt(5))
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if result != 5 { // Original value returned since WorkerPool doesn't aggregate results
+		t.Errorf("expected 5, got %d", result)
+	}
+}
+
+func TestWorkerPoolNilClock(t *testing.T) {
+	// Test that WorkerPool handles nil clock gracefully (falls back to RealClock)
+	processor := Transform("test", func(_ context.Context, n clonableInt) clonableInt { return n * 2 })
+	wp := NewWorkerPool("test", 2, processor)
+
+	// Explicitly set clock to nil
+	wp.WithClock(nil)
+
+	// Process should still work using the default real clock
+	result, err := wp.Process(context.Background(), clonableInt(5))
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if result != 5 { // Original value returned
+		t.Errorf("expected 5, got %d", result)
+	}
 }

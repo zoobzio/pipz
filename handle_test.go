@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/zoobzio/capitan"
 )
 
 func TestHandle(t *testing.T) {
@@ -693,4 +695,131 @@ func (p *plainErrorProcessorHandle[T]) Name() Name {
 
 func (*plainErrorProcessorHandle[T]) Close() error {
 	return nil
+}
+
+func TestHandleClose(t *testing.T) {
+	t.Run("Closes Both Processors", func(t *testing.T) {
+		p := newTrackingProcessor[int]("processor")
+		h := newTrackingProcessor[*Error[int]]("handler")
+
+		handle := NewHandle("test", p, h)
+		err := handle.Close()
+
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+		if p.CloseCalls() != 1 {
+			t.Errorf("expected processor close call, got %d", p.CloseCalls())
+		}
+		if h.CloseCalls() != 1 {
+			t.Errorf("expected handler close call, got %d", h.CloseCalls())
+		}
+	})
+
+	t.Run("Aggregates Errors", func(t *testing.T) {
+		p := newTrackingProcessor[int]("processor").WithCloseError(errors.New("p error"))
+		h := newTrackingProcessor[*Error[int]]("handler").WithCloseError(errors.New("h error"))
+
+		handle := NewHandle("test", p, h)
+		err := handle.Close()
+
+		if err == nil {
+			t.Error("expected error")
+		}
+		if p.CloseCalls() != 1 || h.CloseCalls() != 1 {
+			t.Error("expected all processors to be closed")
+		}
+	})
+
+	t.Run("Idempotency", func(t *testing.T) {
+		p := newTrackingProcessor[int]("processor")
+		h := newTrackingProcessor[*Error[int]]("handler")
+		handle := NewHandle("test", p, h)
+
+		_ = handle.Close()
+		_ = handle.Close()
+
+		if p.CloseCalls() != 1 {
+			t.Errorf("expected 1 processor close call, got %d", p.CloseCalls())
+		}
+		if h.CloseCalls() != 1 {
+			t.Errorf("expected 1 handler close call, got %d", h.CloseCalls())
+		}
+	})
+}
+
+func TestHandleSignals(t *testing.T) {
+	t.Run("Emits Error Handled Signal On Failure", func(t *testing.T) {
+		var signalReceived bool
+		var signalName string
+		var signalError string
+
+		listener := capitan.Hook(SignalHandleErrorHandled, func(_ context.Context, e *capitan.Event) {
+			signalReceived = true
+			signalName, _ = FieldName.From(e)
+			signalError, _ = FieldError.From(e)
+		})
+		defer listener.Close()
+
+		failingProcessor := Apply("failing", func(_ context.Context, _ int) (int, error) {
+			return 0, errors.New("intentional failure")
+		})
+		errorHandler := Effect("handler", func(_ context.Context, _ *Error[int]) error {
+			return nil
+		})
+
+		handle := NewHandle("signal-test-handle", failingProcessor, errorHandler)
+
+		_, err := handle.Process(context.Background(), 5)
+
+		if err == nil {
+			t.Fatal("expected error")
+		}
+
+		if err := listener.Drain(context.Background()); err != nil {
+			t.Fatalf("drain failed: %v", err)
+		}
+
+		if !signalReceived {
+			t.Error("expected signal to be received")
+		}
+		if signalName != "signal-test-handle" {
+			t.Errorf("expected name 'signal-test-handle', got %q", signalName)
+		}
+		if signalError != "intentional failure" {
+			t.Errorf("expected error 'intentional failure', got %q", signalError)
+		}
+	})
+
+	t.Run("Does Not Emit Signal On Success", func(t *testing.T) {
+		var signalReceived bool
+
+		listener := capitan.Hook(SignalHandleErrorHandled, func(_ context.Context, _ *capitan.Event) {
+			signalReceived = true
+		})
+		defer listener.Close()
+
+		successProcessor := Transform("success", func(_ context.Context, n int) int {
+			return n * 2
+		})
+		errorHandler := Effect("handler", func(_ context.Context, _ *Error[int]) error {
+			return nil
+		})
+
+		handle := NewHandle("signal-success-handle", successProcessor, errorHandler)
+
+		_, err := handle.Process(context.Background(), 5)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if err := listener.Drain(context.Background()); err != nil {
+			t.Fatalf("drain failed: %v", err)
+		}
+
+		if signalReceived {
+			t.Error("signal should not be emitted on success")
+		}
+	})
 }

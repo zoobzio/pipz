@@ -5,6 +5,8 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/zoobzio/capitan"
 )
 
 // Handle provides error observation and handling for processors.
@@ -50,6 +52,8 @@ type Handle[T any] struct {
 	errorHandler Chainable[*Error[T]]
 	name         Name
 	mu           sync.RWMutex
+	closeOnce    sync.Once
+	closeErr     error
 }
 
 // NewHandle creates a new Handle connector.
@@ -78,6 +82,13 @@ func (h *Handle[T]) Process(ctx context.Context, input T) (result T, err error) 
 		if errors.As(err, &pipeErr) {
 			// Prepend this handle's name to the path
 			pipeErr.Path = append([]Name{h.name}, pipeErr.Path...)
+
+			// Emit error handled signal
+			capitan.Warn(ctx, SignalHandleErrorHandled,
+				FieldName.Field(string(h.name)),
+				FieldError.Field(pipeErr.Err.Error()),
+			)
+
 			// Process the error through the error handler
 			_, _ = errorHandler.Process(ctx, pipeErr) //nolint:errcheck // Handler errors are recorded but don't affect flow
 			// Always pass through the original error
@@ -92,6 +103,13 @@ func (h *Handle[T]) Process(ctx context.Context, input T) (result T, err error) 
 			Err:       err,
 			Path:      []Name{h.name, processorName},
 		}
+
+		// Emit error handled signal
+		capitan.Warn(ctx, SignalHandleErrorHandled,
+			FieldName.Field(string(h.name)),
+			FieldError.Field(err.Error()),
+		)
+
 		_, _ = errorHandler.Process(ctx, wrappedErr) //nolint:errcheck // Handler errors are recorded but don't affect flow
 		// Always pass through the original error
 		return result, err
@@ -136,7 +154,21 @@ func (h *Handle[T]) GetErrorHandler() Chainable[*Error[T]] {
 	return h.errorHandler
 }
 
-// Close gracefully shuts down the connector.
-func (*Handle[T]) Close() error {
-	return nil
+// Close gracefully shuts down the connector and its child processors.
+// Close is idempotent - multiple calls return the same result.
+func (h *Handle[T]) Close() error {
+	h.closeOnce.Do(func() {
+		h.mu.RLock()
+		defer h.mu.RUnlock()
+
+		var errs []error
+		if err := h.processor.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		if err := h.errorHandler.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		h.closeErr = errors.Join(errs...)
+	})
+	return h.closeErr
 }

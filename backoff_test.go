@@ -320,6 +320,48 @@ func TestBackoff(t *testing.T) {
 		}
 	})
 
+	t.Run("Close Tests", func(t *testing.T) {
+		t.Run("Closes Child Processor", func(t *testing.T) {
+			p := newTrackingProcessor[int]("p")
+
+			b := NewBackoff("test", p, 3, 10*time.Millisecond)
+			err := b.Close()
+
+			if err != nil {
+				t.Errorf("expected no error, got %v", err)
+			}
+			if p.CloseCalls() != 1 {
+				t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+			}
+		})
+
+		t.Run("Propagates Close Error", func(t *testing.T) {
+			p := newTrackingProcessor[int]("p").WithCloseError(errors.New("close error"))
+
+			b := NewBackoff("test", p, 3, 10*time.Millisecond)
+			err := b.Close()
+
+			if err == nil {
+				t.Error("expected error")
+			}
+			if p.CloseCalls() != 1 {
+				t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+			}
+		})
+
+		t.Run("Idempotency", func(t *testing.T) {
+			p := newTrackingProcessor[int]("p")
+			b := NewBackoff("test", p, 3, 10*time.Millisecond)
+
+			_ = b.Close()
+			_ = b.Close()
+
+			if p.CloseCalls() != 1 {
+				t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+			}
+		})
+	})
+
 	t.Run("No hook on final attempt", func(t *testing.T) {
 		var mu sync.Mutex
 		var eventCount int

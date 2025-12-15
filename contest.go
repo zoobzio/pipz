@@ -2,9 +2,12 @@ package pipz
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/zoobzio/capitan"
 )
 
 // Contest runs all processors in parallel and returns the first result that
@@ -51,6 +54,8 @@ type Contest[T Cloner[T]] struct {
 	condition  func(context.Context, T) bool
 	processors []Chainable[T]
 	mu         sync.RWMutex
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 // NewContest creates a new Contest connector with the specified winning condition.
@@ -67,6 +72,8 @@ func NewContest[T Cloner[T]](name Name, condition func(context.Context, T) bool,
 // Process implements the Chainable interface.
 func (c *Contest[T]) Process(ctx context.Context, input T) (result T, err error) {
 	defer recoverFromPanic(&result, &err, c.name, input)
+
+	start := time.Now()
 
 	c.mu.RLock()
 	processors := make([]Chainable[T], len(c.processors))
@@ -101,6 +108,7 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (result T, err error)
 		data T
 		err  error
 		idx  int
+		name Name
 	}
 
 	resultCh := make(chan contestResult, len(processors))
@@ -118,7 +126,7 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (result T, err error)
 			// Process
 			data, processErr := p.Process(contestCtx, inputCopy)
 			select {
-			case resultCh <- contestResult{data: data, err: processErr, idx: idx}:
+			case resultCh <- contestResult{data: data, err: processErr, idx: idx, name: p.Name()}:
 			case <-contestCtx.Done():
 			}
 		}(i, processor)
@@ -138,6 +146,14 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (result T, err error)
 				if condition(ctx, res.data) {
 					// Winner! Cancel other goroutines and return
 					cancel()
+
+					// Emit winner signal
+					capitan.Info(ctx, SignalContestWinner,
+						FieldName.Field(string(c.name)),
+						FieldWinnerName.Field(string(res.name)),
+						FieldDuration.Field(time.Since(start).Seconds()),
+					)
+
 					return res.data, nil
 				}
 				// Result doesn't meet condition, continue waiting for others
@@ -233,7 +249,20 @@ func (c *Contest[T]) Name() Name {
 	return c.name
 }
 
-// Close gracefully shuts down the connector.
-func (*Contest[T]) Close() error {
-	return nil
+// Close gracefully shuts down the connector and all its child processors.
+// Close is idempotent - multiple calls return the same result.
+func (c *Contest[T]) Close() error {
+	c.closeOnce.Do(func() {
+		c.mu.RLock()
+		defer c.mu.RUnlock()
+
+		var errs []error
+		for i := len(c.processors) - 1; i >= 0; i-- {
+			if err := c.processors[i].Close(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		c.closeErr = errors.Join(errs...)
+	})
+	return c.closeErr
 }

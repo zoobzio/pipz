@@ -3,8 +3,11 @@ package pipz
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
+
+	"github.com/zoobzio/capitan"
 )
 
 // Condition determines routing based on input data.
@@ -72,6 +75,8 @@ type Switch[T any, K comparable] struct {
 	routes    map[K]Chainable[T]
 	name      Name
 	mu        sync.RWMutex
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // NewSwitch creates a new Switch connector with the given condition function.
@@ -94,6 +99,14 @@ func (s *Switch[T, K]) Process(ctx context.Context, data T) (result T, err error
 	route := s.condition(ctx, data)
 
 	processor, exists := s.routes[route]
+
+	// Emit routed signal
+	capitan.Info(ctx, SignalSwitchRouted,
+		FieldName.Field(string(s.name)),
+		FieldRouteKey.Field(fmt.Sprintf("%v", route)),
+		FieldMatched.Field(exists),
+	)
+
 	if !exists {
 		// No route found - pass through
 		return data, nil
@@ -189,7 +202,20 @@ func (s *Switch[T, K]) Name() Name {
 	return s.name
 }
 
-// Close gracefully shuts down the connector.
-func (*Switch[T, K]) Close() error {
-	return nil
+// Close gracefully shuts down the connector and all its route processors.
+// Close is idempotent - multiple calls return the same result.
+func (s *Switch[T, K]) Close() error {
+	s.closeOnce.Do(func() {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+
+		var errs []error
+		for _, processor := range s.routes {
+			if err := processor.Close(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		s.closeErr = errors.Join(errs...)
+	})
+	return s.closeErr
 }

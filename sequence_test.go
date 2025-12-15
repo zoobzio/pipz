@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/zoobzio/capitan"
 )
 
 // Test name constants.
@@ -1173,4 +1175,219 @@ func TestSequenceNameBasedOperationsConcurrency(t *testing.T) {
 		}
 	})
 
+}
+
+func TestSequenceSignals(t *testing.T) {
+	t.Run("Emits Completed Signal On Success", func(t *testing.T) {
+		var signalName string
+		var signalProcessorCount int
+		var signalDuration float64
+
+		listener := capitan.Hook(SignalSequenceCompleted, func(_ context.Context, e *capitan.Event) {
+			signalName, _ = FieldName.From(e)
+			signalProcessorCount, _ = FieldProcessorCount.From(e)
+			signalDuration, _ = FieldDuration.From(e)
+		})
+		defer listener.Close()
+
+		seq := NewSequence[int]("signal-test-seq",
+			Transform("double", func(_ context.Context, n int) int { return n * 2 }),
+			Transform("add-one", func(_ context.Context, n int) int { return n + 1 }),
+		)
+
+		result, err := seq.Process(context.Background(), 5)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result != 11 {
+			t.Errorf("expected 11, got %d", result)
+		}
+
+		if err := listener.Drain(context.Background()); err != nil {
+			t.Fatalf("drain failed: %v", err)
+		}
+
+		if signalName != "signal-test-seq" {
+			t.Errorf("expected name 'signal-test-seq', got %q", signalName)
+		}
+		if signalProcessorCount != 2 {
+			t.Errorf("expected processor_count 2, got %d", signalProcessorCount)
+		}
+		if signalDuration <= 0 {
+			t.Error("expected positive duration")
+		}
+	})
+
+	t.Run("Does Not Emit Signal On Failure", func(t *testing.T) {
+		var signalReceived bool
+
+		listener := capitan.Hook(SignalSequenceCompleted, func(_ context.Context, _ *capitan.Event) {
+			signalReceived = true
+		})
+		defer listener.Close()
+
+		seq := NewSequence[int]("signal-fail-seq",
+			Apply("fail", func(_ context.Context, _ int) (int, error) {
+				return 0, errors.New("intentional failure")
+			}),
+		)
+
+		_, err := seq.Process(context.Background(), 5)
+
+		if err == nil {
+			t.Fatal("expected error")
+		}
+
+		if err := listener.Drain(context.Background()); err != nil {
+			t.Fatalf("drain failed: %v", err)
+		}
+
+		if signalReceived {
+			t.Error("signal should not be emitted on failure")
+		}
+	})
+}
+
+// trackingProcessor tracks Close() calls for testing.
+type trackingProcessor[T any] struct {
+	name       Name
+	closeCalls int32
+	closeErr   error
+}
+
+func newTrackingProcessor[T any](name Name) *trackingProcessor[T] {
+	return &trackingProcessor[T]{name: name}
+}
+
+func (*trackingProcessor[T]) Process(_ context.Context, data T) (T, error) {
+	return data, nil
+}
+
+func (t *trackingProcessor[T]) Name() Name {
+	return t.name
+}
+
+func (t *trackingProcessor[T]) Close() error {
+	t.closeCalls++
+	return t.closeErr
+}
+
+func (t *trackingProcessor[T]) CloseCalls() int {
+	return int(t.closeCalls)
+}
+
+func (t *trackingProcessor[T]) WithCloseError(err error) *trackingProcessor[T] {
+	t.closeErr = err
+	return t
+}
+
+func TestSequenceClose(t *testing.T) {
+	t.Run("Closes All Children", func(t *testing.T) {
+		p1 := newTrackingProcessor[int]("p1")
+		p2 := newTrackingProcessor[int]("p2")
+		p3 := newTrackingProcessor[int]("p3")
+
+		seq := NewSequence("test", p1, p2, p3)
+		err := seq.Close()
+
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+		if p1.CloseCalls() != 1 {
+			t.Errorf("p1: expected 1 close call, got %d", p1.CloseCalls())
+		}
+		if p2.CloseCalls() != 1 {
+			t.Errorf("p2: expected 1 close call, got %d", p2.CloseCalls())
+		}
+		if p3.CloseCalls() != 1 {
+			t.Errorf("p3: expected 1 close call, got %d", p3.CloseCalls())
+		}
+	})
+
+	t.Run("Aggregates Errors", func(t *testing.T) {
+		p1 := newTrackingProcessor[int]("p1").WithCloseError(errors.New("p1 error"))
+		p2 := newTrackingProcessor[int]("p2")
+		p3 := newTrackingProcessor[int]("p3").WithCloseError(errors.New("p3 error"))
+
+		seq := NewSequence("test", p1, p2, p3)
+		err := seq.Close()
+
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+		// All should still be closed even with errors
+		if p1.CloseCalls() != 1 || p2.CloseCalls() != 1 || p3.CloseCalls() != 1 {
+			t.Error("expected all processors to be closed")
+		}
+	})
+
+	t.Run("Empty Sequence", func(t *testing.T) {
+		seq := NewSequence[int]("empty")
+		err := seq.Close()
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+	})
+
+	t.Run("Idempotency", func(t *testing.T) {
+		p := newTrackingProcessor[int]("p")
+		seq := NewSequence("test", p)
+
+		// Call Close multiple times
+		err1 := seq.Close()
+		err2 := seq.Close()
+		err3 := seq.Close()
+
+		if err1 != nil || err2 != nil || err3 != nil {
+			t.Error("expected no errors")
+		}
+		if p.CloseCalls() != 1 {
+			t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+		}
+	})
+
+	t.Run("Idempotency With Error", func(t *testing.T) {
+		p := newTrackingProcessor[int]("p").WithCloseError(errors.New("close error"))
+		seq := NewSequence("test", p)
+
+		err1 := seq.Close()
+		err2 := seq.Close()
+
+		// Both calls should return the same error
+		if err1 == nil || err2 == nil {
+			t.Error("expected error on both calls")
+		}
+		if err1.Error() != err2.Error() {
+			t.Error("expected same error on both calls")
+		}
+		if p.CloseCalls() != 1 {
+			t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+		}
+	})
+
+	t.Run("Nested Close", func(t *testing.T) {
+		// Test that Close propagates through nested structures
+		inner1 := newTrackingProcessor[int]("inner1")
+		inner2 := newTrackingProcessor[int]("inner2")
+		innerSeq := NewSequence("inner", inner1, inner2)
+
+		outer1 := newTrackingProcessor[int]("outer1")
+		outerSeq := NewSequence[int]("outer", outer1, innerSeq)
+
+		err := outerSeq.Close()
+
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+		if outer1.CloseCalls() != 1 {
+			t.Errorf("outer1: expected 1 close call, got %d", outer1.CloseCalls())
+		}
+		if inner1.CloseCalls() != 1 {
+			t.Errorf("inner1: expected 1 close call, got %d", inner1.CloseCalls())
+		}
+		if inner2.CloseCalls() != 1 {
+			t.Errorf("inner2: expected 1 close call, got %d", inner2.CloseCalls())
+		}
+	})
 }

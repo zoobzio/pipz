@@ -2,6 +2,7 @@ package pipz
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -33,6 +34,8 @@ type WorkerPool[T Cloner[T]] struct {
 	timeout    time.Duration // Optional per-task timeout
 	queueSize  int           // Optional queue size (unused but kept for future)
 	clock      clockz.Clock  // Clock for time operations
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 // NewWorkerPool creates a WorkerPool with specified worker count.
@@ -260,7 +263,20 @@ func (w *WorkerPool[T]) getClock() clockz.Clock {
 	return w.clock
 }
 
-// Close gracefully shuts down the worker pool.
-func (*WorkerPool[T]) Close() error {
-	return nil
+// Close gracefully shuts down the worker pool and all its child processors.
+// Close is idempotent - multiple calls return the same result.
+func (w *WorkerPool[T]) Close() error {
+	w.closeOnce.Do(func() {
+		w.mu.RLock()
+		defer w.mu.RUnlock()
+
+		var errs []error
+		for i := len(w.processors) - 1; i >= 0; i-- {
+			if err := w.processors[i].Close(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		w.closeErr = errors.Join(errs...)
+	})
+	return w.closeErr
 }

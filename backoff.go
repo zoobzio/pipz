@@ -36,6 +36,8 @@ type Backoff[T any] struct {
 	baseDelay   time.Duration
 	mu          sync.RWMutex
 	maxAttempts int
+	closeOnce   sync.Once
+	closeErr    error
 }
 
 // NewBackoff creates a new Backoff connector.
@@ -166,9 +168,15 @@ func (b *Backoff[T]) Name() Name {
 	return b.name
 }
 
-// Close gracefully shuts down the connector.
-func (*Backoff[T]) Close() error {
-	return nil
+// Close gracefully shuts down the connector and its child processor.
+// Close is idempotent - multiple calls return the same result.
+func (b *Backoff[T]) Close() error {
+	b.closeOnce.Do(func() {
+		b.mu.RLock()
+		defer b.mu.RUnlock()
+		b.closeErr = b.processor.Close()
+	})
+	return b.closeErr
 }
 
 // WithClock sets a custom clock for testing.

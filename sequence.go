@@ -7,6 +7,8 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/zoobzio/capitan"
 )
 
 // Sequence modification errors.
@@ -35,6 +37,8 @@ type Sequence[T any] struct {
 	name       Name
 	processors []Chainable[T]
 	mu         sync.RWMutex
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 // NewSequence creates a new Sequence with optional initial processors.
@@ -109,6 +113,8 @@ func (c *Sequence[T]) Register(processors ...Chainable[T]) {
 func (c *Sequence[T]) Process(ctx context.Context, value T) (result T, err error) {
 	defer recoverFromPanic(&result, &err, c.name, value)
 
+	start := time.Now()
+
 	c.mu.RLock()
 	processors := make([]Chainable[T], len(c.processors))
 	copy(processors, c.processors)
@@ -153,6 +159,13 @@ func (c *Sequence[T]) Process(ctx context.Context, value T) (result T, err error
 			}
 		}
 	}
+
+	// Emit completion signal
+	capitan.Info(ctx, SignalSequenceCompleted,
+		FieldName.Field(string(c.name)),
+		FieldProcessorCount.Field(len(processors)),
+		FieldDuration.Field(time.Since(start).Seconds()),
+	)
 
 	return result, nil
 }
@@ -295,7 +308,22 @@ func (c *Sequence[T]) Name() Name {
 	return c.name
 }
 
-// Close gracefully shuts down the connector.
-func (*Sequence[T]) Close() error {
-	return nil
+// Close gracefully shuts down the connector and all its child processors.
+// Processors are closed in reverse order (LIFO) to mirror typical resource cleanup patterns.
+// Close is idempotent - multiple calls return the same result.
+func (c *Sequence[T]) Close() error {
+	c.closeOnce.Do(func() {
+		c.mu.RLock()
+		defer c.mu.RUnlock()
+
+		var errs []error
+		// Close in reverse order (like defer stack)
+		for i := len(c.processors) - 1; i >= 0; i-- {
+			if err := c.processors[i].Close(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		c.closeErr = errors.Join(errs...)
+	})
+	return c.closeErr
 }

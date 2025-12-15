@@ -5,6 +5,8 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/zoobzio/capitan"
 )
 
 func TestSwitch(t *testing.T) {
@@ -293,4 +295,137 @@ func TestSwitch(t *testing.T) {
 		}
 	})
 
+}
+
+func TestSwitchClose(t *testing.T) {
+	t.Run("Closes All Routes", func(t *testing.T) {
+		p1 := newTrackingProcessor[int]("p1")
+		p2 := newTrackingProcessor[int]("p2")
+
+		sw := NewSwitch("test", func(_ context.Context, _ int) string { return "a" })
+		sw.AddRoute("a", p1)
+		sw.AddRoute("b", p2)
+
+		err := sw.Close()
+
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+		if p1.CloseCalls() != 1 || p2.CloseCalls() != 1 {
+			t.Error("expected all routes to be closed")
+		}
+	})
+
+	t.Run("Aggregates Errors", func(t *testing.T) {
+		p1 := newTrackingProcessor[int]("p1").WithCloseError(errors.New("p1 error"))
+		p2 := newTrackingProcessor[int]("p2").WithCloseError(errors.New("p2 error"))
+
+		sw := NewSwitch("test", func(_ context.Context, _ int) string { return "a" })
+		sw.AddRoute("a", p1)
+		sw.AddRoute("b", p2)
+
+		err := sw.Close()
+
+		if err == nil {
+			t.Error("expected error")
+		}
+		if p1.CloseCalls() != 1 || p2.CloseCalls() != 1 {
+			t.Error("expected all routes to be closed")
+		}
+	})
+
+	t.Run("Idempotency", func(t *testing.T) {
+		p := newTrackingProcessor[int]("p")
+		sw := NewSwitch("test", func(_ context.Context, _ int) string { return "a" })
+		sw.AddRoute("a", p)
+
+		_ = sw.Close()
+		_ = sw.Close()
+
+		if p.CloseCalls() != 1 {
+			t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+		}
+	})
+}
+
+func TestSwitchSignals(t *testing.T) {
+	t.Run("Emits Routed Signal With Match", func(t *testing.T) {
+		var signalReceived bool
+		var signalName string
+		var signalRouteKey string
+		var signalMatched bool
+
+		listener := capitan.Hook(SignalSwitchRouted, func(_ context.Context, e *capitan.Event) {
+			signalReceived = true
+			signalName, _ = FieldName.From(e)
+			signalRouteKey, _ = FieldRouteKey.From(e)
+			signalMatched, _ = FieldMatched.From(e)
+		})
+		defer listener.Close()
+
+		sw := NewSwitch("signal-test-switch", func(_ context.Context, n int) string {
+			if n > 10 {
+				return "high"
+			}
+			return "low"
+		})
+		sw.AddRoute("high", Transform("double", func(_ context.Context, n int) int { return n * 2 }))
+		sw.AddRoute("low", Transform("half", func(_ context.Context, n int) int { return n / 2 }))
+
+		_, err := sw.Process(context.Background(), 20)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if err := listener.Drain(context.Background()); err != nil {
+			t.Fatalf("drain failed: %v", err)
+		}
+
+		if !signalReceived {
+			t.Error("expected signal to be received")
+		}
+		if signalName != "signal-test-switch" {
+			t.Errorf("expected name 'signal-test-switch', got %q", signalName)
+		}
+		if signalRouteKey != "high" {
+			t.Errorf("expected route_key 'high', got %q", signalRouteKey)
+		}
+		if !signalMatched {
+			t.Error("expected matched to be true")
+		}
+	})
+
+	t.Run("Emits Routed Signal Without Match", func(t *testing.T) {
+		var signalMatched bool
+		var signalReceived bool
+
+		listener := capitan.Hook(SignalSwitchRouted, func(_ context.Context, e *capitan.Event) {
+			signalReceived = true
+			signalMatched, _ = FieldMatched.From(e)
+		})
+		defer listener.Close()
+
+		sw := NewSwitch("signal-no-match", func(_ context.Context, _ int) string {
+			return "unknown"
+		})
+		sw.AddRoute("known", Transform("double", func(_ context.Context, n int) int { return n * 2 }))
+
+		_, err := sw.Process(context.Background(), 5)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if err := listener.Drain(context.Background()); err != nil {
+			t.Fatalf("drain failed: %v", err)
+		}
+
+		if !signalReceived {
+			t.Error("expected signal to be received")
+		}
+		if signalMatched {
+			t.Error("expected matched to be false")
+		}
+	})
 }

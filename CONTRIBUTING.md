@@ -71,14 +71,6 @@ New connectors should:
 - Include tests for error cases
 - Document behavior clearly
 
-#### Examples
-
-New examples should:
-- Solve a real-world problem
-- Include tests and benchmarks
-- Have a descriptive README
-- Follow the existing structure
-
 ## Pull Request Process
 
 1. **Keep PRs focused** - One feature/fix per PR
@@ -111,8 +103,6 @@ pipz/
 ├── *.go              # Core library files
 ├── *_test.go         # Tests
 ├── *_bench_test.go   # Benchmarks
-├── examples/         # Example implementations
-│   └── */           # Individual examples
 ├── docs/            # Documentation
 └── cmd/             # Command-line tools
 ```

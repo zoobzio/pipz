@@ -14,30 +14,6 @@ builds:
   # Skip building binaries for the main library since it's a library package
   - skip: true
 
-# Optional: Build example binaries as demonstration assets
-# Uncomment if you want to include example binaries in releases
-# builds:
-#   - id: order-processing
-#     main: ./examples/order-processing/main.go
-#     binary: order-processing-example
-#     goos:
-#       - linux
-#       - darwin
-#       - windows
-#     goarch:
-#       - amd64
-#       - arm64
-#   - id: customer-support
-#     main: ./examples/customer-support/main.go
-#     binary: customer-support-example
-#     goos:
-#       - linux
-#       - darwin
-#       - windows
-#     goarch:
-#       - amd64
-#       - arm64
-
 # Archive configuration
 archives:
   - id: source
@@ -50,7 +26,6 @@ archives:
       - "README.md"
       - "Makefile"
       - "docs/**/*"
-      - "examples/**/*"
       - ".golangci.yml"
     name_template: "{{ .ProjectName }}_{{ .Version }}_source"
 
@@ -137,10 +112,9 @@ release:
   # Custom release footer
   footer: |
     ---
-    
+
     **Full Documentation:** https://github.com/zoobzio/pipz/tree/v{{ .Version }}/docs
-    **Examples:** https://github.com/zoobzio/pipz/tree/v{{ .Version }}/examples
-    
+
     Thanks to all contributors!
 
 # Announce releases (optional)

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/zoobzio/capitan"
 )
 
 func TestFilter_NewFilter(t *testing.T) {
@@ -431,6 +433,121 @@ func TestFilter_ChainableComposition(t *testing.T) {
 
 		if pipzErr.InputData != 42 {
 			t.Errorf("expected input data 42, got %d", pipzErr.InputData)
+		}
+	})
+}
+
+func TestFilterClose(t *testing.T) {
+	t.Run("Closes Child Processor", func(t *testing.T) {
+		p := newTrackingProcessor[int]("p")
+
+		f := NewFilter("test", func(_ context.Context, _ int) bool { return true }, p)
+		err := f.Close()
+
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+		if p.CloseCalls() != 1 {
+			t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+		}
+	})
+
+	t.Run("Propagates Close Error", func(t *testing.T) {
+		p := newTrackingProcessor[int]("p").WithCloseError(errors.New("close error"))
+
+		f := NewFilter("test", func(_ context.Context, _ int) bool { return true }, p)
+		err := f.Close()
+
+		if err == nil {
+			t.Error("expected error")
+		}
+		if p.CloseCalls() != 1 {
+			t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+		}
+	})
+
+	t.Run("Idempotency", func(t *testing.T) {
+		p := newTrackingProcessor[int]("p")
+		f := NewFilter("test", func(_ context.Context, _ int) bool { return true }, p)
+
+		_ = f.Close()
+		_ = f.Close()
+
+		if p.CloseCalls() != 1 {
+			t.Errorf("expected 1 close call, got %d", p.CloseCalls())
+		}
+	})
+}
+
+func TestFilterSignals(t *testing.T) {
+	t.Run("Emits Evaluated Signal When Passed", func(t *testing.T) {
+		var signalReceived bool
+		var signalName string
+		var signalPassed bool
+
+		listener := capitan.Hook(SignalFilterEvaluated, func(_ context.Context, e *capitan.Event) {
+			signalReceived = true
+			signalName, _ = FieldName.From(e)
+			signalPassed, _ = FieldPassed.From(e)
+		})
+		defer listener.Close()
+
+		filter := NewFilter("signal-test-filter",
+			func(_ context.Context, n int) bool { return n > 5 },
+			Transform("double", func(_ context.Context, n int) int { return n * 2 }),
+		)
+
+		_, err := filter.Process(context.Background(), 10)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if err := listener.Drain(context.Background()); err != nil {
+			t.Fatalf("drain failed: %v", err)
+		}
+
+		if !signalReceived {
+			t.Error("expected signal to be received")
+		}
+		if signalName != "signal-test-filter" {
+			t.Errorf("expected name 'signal-test-filter', got %q", signalName)
+		}
+		if !signalPassed {
+			t.Error("expected passed to be true")
+		}
+	})
+
+	t.Run("Emits Evaluated Signal When Not Passed", func(t *testing.T) {
+		var signalReceived bool
+		var signalPassed bool
+
+		listener := capitan.Hook(SignalFilterEvaluated, func(_ context.Context, e *capitan.Event) {
+			signalReceived = true
+			signalPassed, _ = FieldPassed.From(e)
+		})
+		defer listener.Close()
+
+		filter := NewFilter("signal-skip-filter",
+			func(_ context.Context, n int) bool { return n > 100 },
+			Transform("double", func(_ context.Context, n int) int { return n * 2 }),
+		)
+
+		_, err := filter.Process(context.Background(), 5)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if err := listener.Drain(context.Background()); err != nil {
+			t.Fatalf("drain failed: %v", err)
+		}
+
+		if !signalReceived {
+			t.Error("expected signal to be received")
+		}
+		if signalPassed {
+			t.Error("expected passed to be false")
 		}
 	})
 }

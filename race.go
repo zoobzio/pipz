@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/zoobzio/capitan"
 )
 
 // Race runs all processors in parallel and returns the result of the first
@@ -48,6 +50,8 @@ type Race[T Cloner[T]] struct {
 	name       Name
 	processors []Chainable[T]
 	mu         sync.RWMutex
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 // NewRace creates a new Race connector.
@@ -61,6 +65,8 @@ func NewRace[T Cloner[T]](name Name, processors ...Chainable[T]) *Race[T] {
 // Process implements the Chainable interface.
 func (r *Race[T]) Process(ctx context.Context, input T) (result T, err error) {
 	defer recoverFromPanic(&result, &err, r.name, input)
+
+	start := time.Now()
 
 	r.mu.RLock()
 	processors := make([]Chainable[T], len(r.processors))
@@ -83,6 +89,7 @@ func (r *Race[T]) Process(ctx context.Context, input T) (result T, err error) {
 		data T
 		err  error
 		idx  int
+		name Name
 	}
 
 	resultCh := make(chan raceResult, len(processors))
@@ -100,7 +107,7 @@ func (r *Race[T]) Process(ctx context.Context, input T) (result T, err error) {
 			// Process
 			data, err := p.Process(raceCtx, inputCopy)
 			select {
-			case resultCh <- raceResult{data: data, err: err, idx: idx}:
+			case resultCh <- raceResult{data: data, err: err, idx: idx, name: p.Name()}:
 			case <-raceCtx.Done():
 			}
 		}(i, processor)
@@ -114,6 +121,14 @@ func (r *Race[T]) Process(ctx context.Context, input T) (result T, err error) {
 			if res.err == nil {
 				// First success wins
 				cancel() // Cancel other goroutines
+
+				// Emit winner signal
+				capitan.Info(ctx, SignalRaceWinner,
+					FieldName.Field(string(r.name)),
+					FieldWinnerName.Field(string(res.name)),
+					FieldDuration.Field(time.Since(start).Seconds()),
+				)
+
 				return res.data, nil
 			}
 			lastErr = res.err
@@ -194,7 +209,20 @@ func (r *Race[T]) Name() Name {
 	return r.name
 }
 
-// Close gracefully shuts down the connector.
-func (*Race[T]) Close() error {
-	return nil
+// Close gracefully shuts down the connector and all its child processors.
+// Close is idempotent - multiple calls return the same result.
+func (r *Race[T]) Close() error {
+	r.closeOnce.Do(func() {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+
+		var errs []error
+		for i := len(r.processors) - 1; i >= 0; i-- {
+			if err := r.processors[i].Close(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		r.closeErr = errors.Join(errs...)
+	})
+	return r.closeErr
 }

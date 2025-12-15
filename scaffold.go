@@ -2,7 +2,10 @@ package pipz
 
 import (
 	"context"
+	"errors"
 	"sync"
+
+	"github.com/zoobzio/capitan"
 )
 
 // Scaffold runs all processors in parallel with context isolation for true fire-and-forget behavior.
@@ -50,6 +53,8 @@ type Scaffold[T Cloner[T]] struct {
 	name       Name
 	processors []Chainable[T]
 	mu         sync.RWMutex
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 // NewScaffold creates a new Scaffold connector.
@@ -89,6 +94,12 @@ func (s *Scaffold[T]) Process(ctx context.Context, input T) (result T, err error
 			}
 		}(processor)
 	}
+
+	// Emit dispatched signal
+	capitan.Info(ctx, SignalScaffoldDispatched,
+		FieldName.Field(string(s.name)),
+		FieldProcessorCount.Field(len(processors)),
+	)
 
 	// Return immediately without waiting
 	return input, nil
@@ -146,7 +157,20 @@ func (s *Scaffold[T]) Name() Name {
 	return s.name
 }
 
-// Close gracefully shuts down any resources.
-func (*Scaffold[T]) Close() error {
-	return nil
+// Close gracefully shuts down the connector and all its child processors.
+// Close is idempotent - multiple calls return the same result.
+func (s *Scaffold[T]) Close() error {
+	s.closeOnce.Do(func() {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+
+		var errs []error
+		for i := len(s.processors) - 1; i >= 0; i-- {
+			if err := s.processors[i].Close(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		s.closeErr = errors.Join(errs...)
+	})
+	return s.closeErr
 }

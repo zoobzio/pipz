@@ -151,11 +151,6 @@ func (r *RateLimiter[T]) calculateWaitTime() time.Duration {
 		return time.Duration(math.MaxInt64)
 	}
 
-	// Handle infinite rate - no wait
-	if math.IsInf(r.rate, 1) {
-		return 0
-	}
-
 	// Calculate time needed for next token
 	needed := 1.0 - r.tokens
 	if needed <= 0 {
