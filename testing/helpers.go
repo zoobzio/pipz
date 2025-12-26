@@ -38,6 +38,7 @@ import (
 type MockProcessor[T any] struct { //nolint:govet // fieldalignment: Test helper struct optimized for functionality over memory efficiency
 	t           *testing.T
 	name        string
+	identity    pipz.Identity
 	callCount   int64
 	lastInput   T
 	returnVal   T
@@ -62,6 +63,7 @@ func NewMockProcessor[T any](t *testing.T, name string) *MockProcessor[T] {
 	return &MockProcessor[T]{
 		t:          t,
 		name:       name,
+		identity:   pipz.NewIdentity(name, "mock processor for testing"),
 		maxHistory: 100, // Keep last 100 calls by default
 	}
 }
@@ -109,9 +111,17 @@ func (m *MockProcessor[T]) WithHistorySize(size int) *MockProcessor[T] {
 	return m
 }
 
-// Name returns the name of the mock processor.
-func (m *MockProcessor[T]) Name() pipz.Name {
-	return pipz.Name(m.name)
+// Identity returns the identity of the mock processor.
+func (m *MockProcessor[T]) Identity() pipz.Identity {
+	return m.identity
+}
+
+// Schema returns a Node representing this processor in the pipeline schema.
+func (m *MockProcessor[T]) Schema() pipz.Node {
+	return pipz.Node{
+		Identity: m.identity,
+		Type:     "mock",
+	}
 }
 
 // Close returns nil for mock processors.
@@ -246,6 +256,7 @@ func AssertProcessedBetween[T any](t *testing.T, mock *MockProcessor[T], minCall
 // It wraps another processor and randomly introduces failures based on configured rates.
 type ChaosProcessor[T any] struct { //nolint:govet // fieldalignment: Test helper struct optimized for functionality over memory efficiency
 	name         string
+	identity     pipz.Identity
 	wrapped      pipz.Chainable[T]
 	failureRate  float64
 	latencyMin   time.Duration
@@ -287,6 +298,7 @@ func NewChaosProcessor[T any](name string, wrapped pipz.Chainable[T], config Cha
 
 	return &ChaosProcessor[T]{
 		name:        name,
+		identity:    pipz.NewIdentity(name, "chaos processor for testing"),
 		wrapped:     wrapped,
 		failureRate: config.FailureRate,
 		latencyMin:  config.LatencyMin,
@@ -297,9 +309,17 @@ func NewChaosProcessor[T any](name string, wrapped pipz.Chainable[T], config Cha
 	}
 }
 
-// Name returns the name of the chaos processor.
-func (c *ChaosProcessor[T]) Name() pipz.Name {
-	return pipz.Name(c.name)
+// Identity returns the identity of the chaos processor.
+func (c *ChaosProcessor[T]) Identity() pipz.Identity {
+	return c.identity
+}
+
+// Schema returns a Node representing this processor in the pipeline schema.
+func (c *ChaosProcessor[T]) Schema() pipz.Node {
+	return pipz.Node{
+		Identity: c.identity,
+		Type:     "chaos",
+	}
 }
 
 // Close returns nil for chaos processors.

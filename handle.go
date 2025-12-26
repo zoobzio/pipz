@@ -50,16 +50,16 @@ import (
 type Handle[T any] struct {
 	processor    Chainable[T]
 	errorHandler Chainable[*Error[T]]
-	name         Name
+	identity     Identity
 	mu           sync.RWMutex
 	closeOnce    sync.Once
 	closeErr     error
 }
 
 // NewHandle creates a new Handle connector.
-func NewHandle[T any](name Name, processor Chainable[T], errorHandler Chainable[*Error[T]]) *Handle[T] {
+func NewHandle[T any](identity Identity, processor Chainable[T], errorHandler Chainable[*Error[T]]) *Handle[T] {
 	return &Handle[T]{
-		name:         name,
+		identity:     identity,
 		processor:    processor,
 		errorHandler: errorHandler,
 	}
@@ -67,7 +67,7 @@ func NewHandle[T any](name Name, processor Chainable[T], errorHandler Chainable[
 
 // Process implements the Chainable interface.
 func (h *Handle[T]) Process(ctx context.Context, input T) (result T, err error) {
-	defer recoverFromPanic(&result, &err, h.name, input)
+	defer recoverFromPanic(&result, &err, h.identity, input)
 
 	// Take a snapshot of processor and errorHandler to prevent race conditions
 	h.mu.RLock()
@@ -80,12 +80,13 @@ func (h *Handle[T]) Process(ctx context.Context, input T) (result T, err error) 
 	if err != nil {
 		var pipeErr *Error[T]
 		if errors.As(err, &pipeErr) {
-			// Prepend this handle's name to the path
-			pipeErr.Path = append([]Name{h.name}, pipeErr.Path...)
+			// Prepend this handle's identity to the path
+			pipeErr.Path = append([]Identity{h.identity}, pipeErr.Path...)
 
 			// Emit error handled signal
 			capitan.Warn(ctx, SignalHandleErrorHandled,
-				FieldName.Field(string(h.name)),
+				FieldName.Field(h.identity.Name()),
+				FieldIdentityID.Field(h.identity.ID().String()),
 				FieldError.Field(pipeErr.Err.Error()),
 			)
 
@@ -95,18 +96,19 @@ func (h *Handle[T]) Process(ctx context.Context, input T) (result T, err error) 
 			return result, err
 		}
 		// Handle non-pipeline errors by wrapping them
-		// Use the processor snapshot name to avoid race condition
-		processorName := processor.Name()
+		// Use the processor snapshot identity to avoid race condition
+		processorIdentity := processor.Identity()
 		wrappedErr := &Error[T]{
 			Timestamp: time.Now(),
 			InputData: input,
 			Err:       err,
-			Path:      []Name{h.name, processorName},
+			Path:      []Identity{h.identity, processorIdentity},
 		}
 
 		// Emit error handled signal
 		capitan.Warn(ctx, SignalHandleErrorHandled,
-			FieldName.Field(string(h.name)),
+			FieldName.Field(h.identity.Name()),
+			FieldIdentityID.Field(h.identity.ID().String()),
 			FieldError.Field(err.Error()),
 		)
 
@@ -133,11 +135,26 @@ func (h *Handle[T]) SetErrorHandler(handler Chainable[*Error[T]]) *Handle[T] {
 	return h
 }
 
-// Name returns the name of this connector.
-func (h *Handle[T]) Name() Name {
+// Identity returns the identity of this connector.
+func (h *Handle[T]) Identity() Identity {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return h.name
+	return h.identity
+}
+
+// Schema returns a Node representing this connector in the pipeline schema.
+func (h *Handle[T]) Schema() Node {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	return Node{
+		Identity: h.identity,
+		Type:     "handle",
+		Flow: HandleFlow{
+			Processor:    h.processor.Schema(),
+			ErrorHandler: h.errorHandler.Schema(),
+		},
+	}
 }
 
 // GetProcessor returns the current main processor.

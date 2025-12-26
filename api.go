@@ -18,8 +18,10 @@
 // The library is built around a single, uniform interface:
 //
 //	type Chainable[T any] interface {
-//	    Process(context.Context, T) (T, *Error[T])
-//	    Name() Name
+//	    Process(context.Context, T) (T, error)
+//	    Identity() Identity
+//	    Schema() Node
+//	    Close() error
 //	}
 //
 // Key components:
@@ -41,14 +43,14 @@
 //
 // Transform - Pure transformations that cannot fail:
 //
-//	const DoubleName = pipz.Name("double")
+//	var DoubleName = pipz.NewIdentity("double", "")
 //	double := pipz.Transform(DoubleName, func(_ context.Context, n int) int {
 //	    return n * 2
 //	})
 //
 // Apply - Operations that can fail:
 //
-//	const ParseJSONName = pipz.Name("parse")
+//	var ParseJSONName = pipz.NewIdentity("parse", "")
 //	parseJSON := pipz.Apply(ParseJSONName, func(_ context.Context, s string) (Data, error) {
 //	    var d Data
 //	    return d, json.Unmarshal([]byte(s), &d)
@@ -56,7 +58,7 @@
 //
 // Effect - Side effects without modifying data:
 //
-//	const LoggerName = pipz.Name("log")
+//	var LoggerName = pipz.NewIdentity("log", "")
 //	logger := pipz.Effect(LoggerName, func(_ context.Context, d Data) error {
 //	    log.Printf("Processing: %+v", d)
 //	    return nil
@@ -64,7 +66,7 @@
 //
 // Mutate - Conditional modifications:
 //
-//	const DiscountName = pipz.Name("discount")
+//	var DiscountName = pipz.NewIdentity("discount", "")
 //	discountPremium := pipz.Mutate(DiscountName,
 //	    func(_ context.Context, u User) User { u.Discount = 0.2; return u },
 //	    func(_ context.Context, u User) bool { return u.IsPremium },
@@ -72,7 +74,7 @@
 //
 // Enrich - Optional enhancements that log failures:
 //
-//	const GeoEnrichName = pipz.Name("geo")
+//	var GeoEnrichName = pipz.NewIdentity("geo", "")
 //	addLocation := pipz.Enrich(GeoEnrichName, func(ctx context.Context, u User) (User, error) {
 //	    u.Country = detectCountry(u.IP) // May fail, but won't stop pipeline
 //	    return u, nil
@@ -84,10 +86,10 @@
 //
 // Sequential Processing:
 //
-//	const PipelineName = pipz.Name("pipeline")
+//	var PipelineName = pipz.NewIdentity("pipeline", "")
 //	pipeline := pipz.NewSequence(PipelineName, step1, step2, step3)
 //	// Or build dynamically:
-//	const DynamicName = pipz.Name("dynamic")
+//	var DynamicName = pipz.NewIdentity("dynamic", "")
 //	seq := pipz.NewSequence[T](DynamicName)
 //	seq.Register(step1, step2)
 //	seq.PushTail(step3)  // Add at runtime
@@ -95,39 +97,39 @@
 // Parallel Processing (requires T implements Cloner[T]):
 //
 //	// Run all processors, return original data
-//	const ParallelName = pipz.Name("parallel")
+//	var ParallelName = pipz.NewIdentity("parallel", "")
 //	concurrent := pipz.NewConcurrent(ParallelName, proc1, proc2, proc3)
 //
 //	// Return first successful result
-//	const FastestName = pipz.Name("fastest")
+//	var FastestName = pipz.NewIdentity("fastest", "")
 //	race := pipz.NewRace(FastestName, primary, secondary, tertiary)
 //
 //	// Return first result meeting a condition
-//	const BestName = pipz.Name("best")
+//	var BestName = pipz.NewIdentity("best", "")
 //	contest := pipz.NewContest(BestName, conditionFunc, option1, option2, option3)
 //
 // Error Handling:
 //
 //	// Try fallback on error
-//	const SafeName = pipz.Name("safe")
+//	var SafeName = pipz.NewIdentity("safe", "")
 //	fallback := pipz.NewFallback(SafeName, primary, backup)
 //
 //	// Retry with attempts
-//	const ResilientName = pipz.Name("resilient")
+//	var ResilientName = pipz.NewIdentity("resilient", "")
 //	retry := pipz.NewRetry(ResilientName, processor, 3)
 //
 //	// Retry with exponential backoff
-//	const ApiCallName = pipz.Name("api-call")
+//	var ApiCallName = pipz.NewIdentity("api-call", "")
 //	backoff := pipz.NewBackoff(ApiCallName, processor, 5, time.Second)
 //
 //	// Handle errors without changing data flow
-//	const ObservedName = pipz.Name("observed")
+//	var ObservedName = pipz.NewIdentity("observed", "")
 //	handle := pipz.NewHandle(ObservedName, processor, errorPipeline)
 //
 // Control Flow:
 //
 //	// Route based on conditions
-//	const RouterName = pipz.Name("router")
+//	var RouterName = pipz.NewIdentity("router", "")
 //	router := pipz.NewSwitch(RouterName, func(ctx context.Context, d Data) string {
 //	    if d.Type == "premium" { return "premium-flow" }
 //	    return "standard-flow"
@@ -136,11 +138,11 @@
 //	router.AddRoute("standard-flow", standardProcessor)
 //
 //	// Enforce timeouts
-//	const DeadlineName = pipz.Name("deadline")
+//	var DeadlineName = pipz.NewIdentity("deadline", "")
 //	timeout := pipz.NewTimeout(DeadlineName, processor, 30*time.Second)
 //
 //	// Conditional processing
-//	const FeatureFlagName = pipz.Name("feature-flag")
+//	var FeatureFlagName = pipz.NewIdentity("feature-flag", "")
 //	filter := pipz.NewFilter(FeatureFlagName,
 //	    func(ctx context.Context, u User) bool { return u.BetaEnabled },
 //	    betaProcessor,
@@ -149,12 +151,12 @@
 // Resource Protection:
 //
 //	// Rate limiting
-//	const ApiLimitName = pipz.Name("api-limit")
+//	var ApiLimitName = pipz.NewIdentity("api-limit", "")
 //	rateLimiter := pipz.NewRateLimiter(ApiLimitName, 100, 10) // 100/sec, burst 10
 //	rateLimiter.SetMode("drop") // Or "wait" (default)
 //
 //	// Circuit breaker
-//	const ServiceBreakerName = pipz.Name("service-breaker")
+//	var ServiceBreakerName = pipz.NewIdentity("service-breaker", "")
 //	breaker := pipz.NewCircuitBreaker(ServiceBreakerName, processor, 5, 30*time.Second)
 //
 // # Quick Start
@@ -172,9 +174,9 @@
 //	func main() {
 //	    // Define processor names as constants
 //	    const (
-//	        TrimName = pipz.Name("trim")
-//	        UpperName = pipz.Name("uppercase")
-//	        TextProcessorName = pipz.Name("text-processor")
+//	        TrimName = pipz.NewIdentity("trim", "")
+//	        UpperName = pipz.NewIdentity("uppercase", "")
+//	        TextProcessorName = pipz.NewIdentity("text-processor", "")
 //	    )
 //
 //	    // Create processors
@@ -301,10 +303,10 @@
 // Validation Pipeline:
 //
 //	const (
-//	    ValidationName = pipz.Name("validation")
-//	    RequiredName = pipz.Name("required")
-//	    FormatName = pipz.Name("format")
-//	    SanitizeName = pipz.Name("sanitize")
+//	    ValidationName = pipz.NewIdentity("validation", "")
+//	    RequiredName = pipz.NewIdentity("required", "")
+//	    FormatName = pipz.NewIdentity("format", "")
+//	    SanitizeName = pipz.NewIdentity("sanitize", "")
 //	)
 //
 //	validation := pipz.NewSequence(ValidationName,
@@ -316,9 +318,9 @@
 // API with Retry and Timeout:
 //
 //	const (
-//	    ApiTimeoutName = pipz.Name("api-timeout")
-//	    ApiRetryName = pipz.Name("api-retry")
-//	    FetchName = pipz.Name("fetch")
+//	    ApiTimeoutName = pipz.NewIdentity("api-timeout", "")
+//	    ApiRetryName = pipz.NewIdentity("api-retry", "")
+//	    FetchName = pipz.NewIdentity("fetch", "")
 //	)
 //
 //	apiCall := pipz.NewTimeout(ApiTimeoutName,
@@ -331,7 +333,7 @@
 //
 // Multi-path Processing:
 //
-//	const TypeRouterName = pipz.Name("type-router")
+//	var TypeRouterName = pipz.NewIdentity("type-router", "")
 //	processor := pipz.NewSwitch(TypeRouterName, detectType)
 //	processor.AddRoute("json", jsonProcessor)
 //	processor.AddRoute("xml", xmlProcessor)
@@ -342,7 +344,65 @@ package pipz
 
 import (
 	"context"
+
+	"github.com/google/uuid"
 )
+
+// Identity provides rich metadata for processors and connectors.
+// It replaces the simple Name type with structured identity information
+// that supports debugging, visualization, and profiling.
+//
+// Each Identity has an auto-generated UUID that uniquely identifies the
+// processor or connector instance, enabling correlation between schema
+// definitions and runtime signal events.
+//
+// Example:
+//
+//	var (
+//	    ValidateOrderID = pipz.NewIdentity("validate-order", "Validates order structure")
+//	    EnrichCustomerID = pipz.NewIdentity("enrich-customer", "Adds customer details from CRM")
+//	)
+//
+//	pipeline := pipz.NewSequence(PipelineID,
+//	    pipz.Apply(ValidateOrderID, validateOrder),
+//	    pipz.Enrich(EnrichCustomerID, enrichCustomer),
+//	)
+type Identity struct {
+	id          uuid.UUID
+	name        string
+	description string
+}
+
+// NewIdentity creates a new Identity with an auto-generated UUID.
+// The name should be a short, descriptive identifier (e.g., "validate-order").
+// The description provides additional context for debugging and documentation.
+func NewIdentity(name, description string) Identity {
+	return Identity{
+		id:          uuid.New(),
+		name:        name,
+		description: description,
+	}
+}
+
+// ID returns the unique identifier for this processor or connector.
+func (i Identity) ID() uuid.UUID {
+	return i.id
+}
+
+// Name returns the human-readable name.
+func (i Identity) Name() string {
+	return i.name
+}
+
+// Description returns the optional description.
+func (i Identity) Description() string {
+	return i.description
+}
+
+// String implements fmt.Stringer, returning the name for convenient logging.
+func (i Identity) String() string {
+	return i.name
+}
 
 // Chainable defines the interface for any component that can process
 // values of type T. This interface enables composition of different
@@ -358,49 +418,37 @@ import (
 //   - Type safety through generics (no interface{})
 //   - Error propagation for fail-fast behavior
 //   - Immutable by convention (return modified copies)
-//   - Named components for debugging and monitoring
+//   - Identity-based components for debugging, monitoring, and visualization
 type Chainable[T any] interface {
 	Process(context.Context, T) (T, error)
-	Name() Name
+	Identity() Identity
+	Schema() Node
 	Close() error
 }
 
-// Name is a type alias for processor and connector names.
-// Using this type encourages storing names as constants rather than
-// using inline strings throughout your code.
-//
-// Example:
-//
-//	const (
-//	    ValidateOrderName  Name = "validate-order"
-//	    EnrichCustomerName Name = "enrich-customer"
-//	    ProcessPaymentName Name = "process-payment"
-//	)
-//
-//	validateOrder := pipz.Apply(ValidateOrderName, validateFunc)
-//	enrichCustomer := pipz.Transform(EnrichCustomerName, enrichFunc)
-type Name string
-
-// Processor defines a named processing stage that transforms a value of type T.
-// It contains a descriptive name for debugging and a private function that processes the value.
-// The function receives a context for cancellation and timeout control.
+// Processor defines an identified processing stage that transforms a value of type T.
+// It contains an Identity for debugging and visualization, and a private function
+// that processes the value. The function receives a context for cancellation and
+// timeout control.
 //
 // Processor is the basic building block created by adapter functions like
-// Apply, Transform, Effect, Mutate, and Enrich. The name field is crucial for debugging,
-// appearing in error messages and the Error[T].Path to identify exactly where failures occur.
+// Apply, Transform, Effect, Mutate, and Enrich. The identity field is crucial for
+// debugging, appearing in error messages and the Error[T].Path to identify exactly
+// where failures occur. The identity's UUID enables correlation between schema
+// definitions and runtime signal events.
 //
 // The fn field is intentionally private to ensure processors are only created through
 // the provided adapter functions, maintaining consistent error handling and path tracking.
 //
-// Best practices for processor names:
-//   - Use descriptive, action-oriented names ("validate_email", not "email")
-//   - Include the operation type ("parse_json", "fetch_user", "log_event")
+// Best practices for processor identities:
+//   - Use descriptive, action-oriented names ("validate-email", not "email")
+//   - Include the operation type ("parse-json", "fetch-user", "log-event")
 //   - Keep names concise but meaningful
-//   - Use consistent naming conventions across your application
-//   - Names appear in Error[T].Path for debugging (e.g., ["pipeline", "validate_email"])
+//   - Use descriptions to document the processor's purpose
+//   - Identities appear in Error[T].Path for debugging
 type Processor[T any] struct {
-	fn   func(context.Context, T) (T, error)
-	name Name
+	fn       func(context.Context, T) (T, error)
+	identity Identity
 }
 
 // Process implements the Chainable interface, allowing individual processors
@@ -408,20 +456,28 @@ type Processor[T any] struct {
 //
 // This means a single Processor can be used anywhere a Chainable is expected:
 //
-//	validator := pipz.Effect("validate", validateFunc)
+//	validator := pipz.Effect(ValidateID, validateFunc)
 //	// Can be used directly
 //	result, err := validator.Process(ctx, data)
 //	// Or in connectors
-//	pipeline := pipz.NewSequence("validation").
-//	    Register(validator, transformer).Link()
+//	pipeline := pipz.NewSequence(PipelineID, validator, transformer)
 func (p Processor[T]) Process(ctx context.Context, data T) (result T, err error) {
-	defer recoverFromPanic(&result, &err, p.name, data)
+	defer recoverFromPanic(&result, &err, p.identity, data)
 	return p.fn(ctx, data)
 }
 
-// Name returns the name of the processor for debugging and error reporting.
-func (p Processor[T]) Name() Name {
-	return p.name
+// Identity returns the identity of the processor for debugging and error reporting.
+func (p Processor[T]) Identity() Identity {
+	return p.identity
+}
+
+// Schema returns a Node representing this processor in the pipeline schema.
+// Processors are leaf nodes with type "processor".
+func (p Processor[T]) Schema() Node {
+	return Node{
+		Identity: p.identity,
+		Type:     "processor",
+	}
 }
 
 // Close gracefully shuts down any resources.

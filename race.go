@@ -47,7 +47,7 @@ import (
 //	    fetchFromDatabase,
 //	)
 type Race[T Cloner[T]] struct {
-	name       Name
+	identity   Identity
 	processors []Chainable[T]
 	mu         sync.RWMutex
 	closeOnce  sync.Once
@@ -55,16 +55,16 @@ type Race[T Cloner[T]] struct {
 }
 
 // NewRace creates a new Race connector.
-func NewRace[T Cloner[T]](name Name, processors ...Chainable[T]) *Race[T] {
+func NewRace[T Cloner[T]](identity Identity, processors ...Chainable[T]) *Race[T] {
 	return &Race[T]{
-		name:       name,
+		identity:   identity,
 		processors: processors,
 	}
 }
 
 // Process implements the Chainable interface.
 func (r *Race[T]) Process(ctx context.Context, input T) (result T, err error) {
-	defer recoverFromPanic(&result, &err, r.name, input)
+	defer recoverFromPanic(&result, &err, r.identity, input)
 
 	start := time.Now()
 
@@ -76,7 +76,7 @@ func (r *Race[T]) Process(ctx context.Context, input T) (result T, err error) {
 	if len(processors) == 0 {
 		var zero T
 		return zero, &Error[T]{
-			Path:      []Name{r.name},
+			Path:      []Identity{r.identity},
 			Err:       fmt.Errorf("no processors provided to Race"),
 			InputData: input,
 			Timestamp: time.Now(),
@@ -89,7 +89,7 @@ func (r *Race[T]) Process(ctx context.Context, input T) (result T, err error) {
 		data T
 		err  error
 		idx  int
-		name Name
+		name string
 	}
 
 	resultCh := make(chan raceResult, len(processors))
@@ -107,7 +107,7 @@ func (r *Race[T]) Process(ctx context.Context, input T) (result T, err error) {
 			// Process
 			data, err := p.Process(raceCtx, inputCopy)
 			select {
-			case resultCh <- raceResult{data: data, err: err, idx: idx, name: p.Name()}:
+			case resultCh <- raceResult{data: data, err: err, idx: idx, name: p.Identity().Name()}:
 			case <-raceCtx.Done():
 			}
 		}(i, processor)
@@ -124,8 +124,9 @@ func (r *Race[T]) Process(ctx context.Context, input T) (result T, err error) {
 
 				// Emit winner signal
 				capitan.Info(ctx, SignalRaceWinner,
-					FieldName.Field(string(r.name)),
-					FieldWinnerName.Field(string(res.name)),
+					FieldName.Field(r.identity.Name()),
+					FieldIdentityID.Field(r.identity.ID().String()),
+					FieldWinnerName.Field(res.name),
 					FieldDuration.Field(time.Since(start).Seconds()),
 				)
 
@@ -142,8 +143,8 @@ func (r *Race[T]) Process(ctx context.Context, input T) (result T, err error) {
 	if lastErr != nil {
 		var pipeErr *Error[T]
 		if errors.As(lastErr, &pipeErr) {
-			// Prepend this race's name to the path
-			pipeErr.Path = append([]Name{r.name}, pipeErr.Path...)
+			// Prepend this race's identity to the path
+			pipeErr.Path = append([]Identity{r.identity}, pipeErr.Path...)
 			return input, pipeErr
 		}
 		// Handle non-pipeline errors by wrapping them
@@ -151,7 +152,7 @@ func (r *Race[T]) Process(ctx context.Context, input T) (result T, err error) {
 			Timestamp: time.Now(),
 			InputData: input,
 			Err:       lastErr,
-			Path:      []Name{r.name},
+			Path:      []Identity{r.identity},
 		}
 	}
 	return input, nil
@@ -202,11 +203,28 @@ func (r *Race[T]) SetProcessors(processors ...Chainable[T]) *Race[T] {
 	return r
 }
 
-// Name returns the name of this connector.
-func (r *Race[T]) Name() Name {
+// Identity returns the identity of this connector.
+func (r *Race[T]) Identity() Identity {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.name
+	return r.identity
+}
+
+// Schema returns a Node representing this connector in the pipeline schema.
+func (r *Race[T]) Schema() Node {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	competitors := make([]Node, len(r.processors))
+	for i, proc := range r.processors {
+		competitors[i] = proc.Schema()
+	}
+
+	return Node{
+		Identity: r.identity,
+		Type:     "race",
+		Flow:     RaceFlow{Competitors: competitors},
+	}
 }
 
 // Close gracefully shuts down the connector and all its child processors.

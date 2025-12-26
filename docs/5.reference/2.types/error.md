@@ -23,13 +23,13 @@ Rich error context for pipeline failures with complete debugging information.
 
 ```go
 type Error[T any] struct {
-    Timestamp time.Time  // When the error occurred
-    InputData T          // The data that caused the failure  
-    Err       error      // The underlying error
-    Path      []Name     // Complete processing path to failure point
+    Timestamp time.Time    // When the error occurred
+    InputData T            // The data that caused the failure
+    Err       error        // The underlying error
+    Path      []Identity   // Complete processing path to failure point
     Duration  time.Duration // How long before failure
-    Timeout   bool       // Whether it was a timeout
-    Canceled  bool       // Whether it was canceled
+    Timeout   bool         // Whether it was a timeout
+    Canceled  bool         // Whether it was canceled
 }
 ```
 
@@ -56,9 +56,10 @@ type Error[T any] struct {
 - **Panic Recovery**: When processors panic, this contains a `panicError` type with sanitized panic message and processor name for security
 
 ### Path
-- **Type**: `[]Name`
+- **Type**: `[]Identity`
 - **Purpose**: Complete trace of processors/connectors leading to the failure
 - **Usage**: Pinpoint exactly where in the pipeline the failure occurred
+- **Note**: Each Identity contains both a name and description, providing rich context about each stage in the pipeline
 
 ### Duration
 - **Type**: `time.Duration`
@@ -93,8 +94,18 @@ func (e *Error[T]) Error() string
 
 **Example**:
 ```go
+var (
+    OrderPipelineID  = pipz.NewIdentity("order-pipeline", "Process customer orders")
+    ValidateID       = pipz.NewIdentity("validate", "Validate order fields")
+    CheckInventoryID = pipz.NewIdentity("check-inventory", "Check product availability")
+)
+
 err := &Error[Order]{
-    Path: []Name{"order-pipeline", "validate", "check-inventory"},
+    Path: []Identity{
+        OrderPipelineID,
+        ValidateID,
+        CheckInventoryID,
+    },
     Duration: 250 * time.Millisecond,
     Err: errors.New("item out of stock"),
 }
@@ -122,7 +133,7 @@ if errors.As(err, &pipeErr) {
     // Access Error[T] fields
     fmt.Printf("Failed at: %v\n", pipeErr.Path)
     fmt.Printf("Input data: %+v\n", pipeErr.InputData)
-    
+
     // Check underlying error
     if errors.Is(pipeErr, sql.ErrNoRows) {
         // Handle specific database error
@@ -185,7 +196,9 @@ if err != nil {
 ### Basic Error Handling
 
 ```go
-pipeline := pipz.NewSequence("order-processing",
+var OrderProcessingID = pipz.NewIdentity("order-processing", "Process customer orders")
+
+pipeline := pipz.NewSequence(OrderProcessingID,
     validateOrder,
     checkInventory,
     processPayment,
@@ -215,17 +228,17 @@ func processWithRetry(ctx context.Context, pipeline Chainable[Data], data Data) 
         if err == nil {
             return result, nil
         }
-        
+
         var pipeErr *pipz.Error[Data]
         if !errors.As(err, &pipeErr) {
             return data, err // Not a pipeline error
         }
-        
+
         // Don't retry timeouts or cancellations
         if pipeErr.IsTimeout() || pipeErr.IsCanceled() {
             return data, err
         }
-        
+
         // Retry with exponential backoff
         time.Sleep(time.Duration(attempt+1) * time.Second)
     }
@@ -236,15 +249,17 @@ func processWithRetry(ctx context.Context, pipeline Chainable[Data], data Data) 
 ### Error Monitoring and Alerting
 
 ```go
+var MonitorID = pipz.NewIdentity("monitor", "Monitor pipeline errors")
+
 func monitorPipeline(pipeline Chainable[Request]) Chainable[Request] {
-    return pipz.Handle("monitor", 
+    return pipz.Handle(MonitorID,
         pipeline,
         func(ctx context.Context, req Request, err error) {
             var pipeErr *pipz.Error[Request]
             if !errors.As(err, &pipeErr) {
                 return // Not a pipeline error
             }
-            
+
             // Send to monitoring system
             metrics.RecordError(metrics.ErrorRecord{
                 Path:      pipeErr.Path,
@@ -253,10 +268,10 @@ func monitorPipeline(pipeline Chainable[Request]) Chainable[Request] {
                 Canceled:  pipeErr.IsCanceled(),
                 RequestID: req.ID,
             })
-            
+
             // Alert on critical paths
             if containsPath(pipeErr.Path, "payment") && !pipeErr.IsCanceled() {
-                alerting.SendAlert(alerting.Critical, 
+                alerting.SendAlert(alerting.Critical,
                     fmt.Sprintf("Payment processing failed: %v", pipeErr))
             }
         },
@@ -272,7 +287,7 @@ func debugFailure(err error) {
     if !errors.As(err, &pipeErr) {
         return
     }
-    
+
     fmt.Println("=== Pipeline Failure Debug ===")
     fmt.Printf("Time: %v\n", pipeErr.Timestamp)
     fmt.Printf("Duration: %v\n", pipeErr.Duration)
@@ -281,13 +296,13 @@ func debugFailure(err error) {
     fmt.Printf("Canceled: %v\n", pipeErr.IsCanceled())
     fmt.Printf("Error: %v\n", pipeErr.Err)
     fmt.Printf("Input Data:\n%+v\n", pipeErr.InputData)
-    
+
     // Check for specific error types
     var validationErr *ValidationError
     if errors.As(pipeErr.Err, &validationErr) {
         fmt.Printf("Validation failures: %v\n", validationErr.Fields)
     }
-    
+
     // Check if it was a panic that was automatically recovered
     if strings.Contains(pipeErr.Error(), "panic in processor") {
         fmt.Println("This was a recovered panic (automatically handled by pipz)")
@@ -300,6 +315,8 @@ func debugFailure(err error) {
 ### Creating Custom Errors
 
 ```go
+var ExternalProcessorID = pipz.NewIdentity("external-processor", "Call external API")
+
 // Wrap external errors with context
 func processExternal(ctx context.Context, data Data) (Data, error) {
     result, err := externalAPI.Call(data)
@@ -308,7 +325,7 @@ func processExternal(ctx context.Context, data Data) (Data, error) {
             Timestamp: time.Now(),
             InputData: data,
             Err:       fmt.Errorf("external API failed: %w", err),
-            Path:      []Name{"external-processor"},
+            Path:      []Identity{ExternalProcessorID},
             Duration:  time.Since(start),
             Timeout:   errors.Is(err, context.DeadlineExceeded),
         }
@@ -320,17 +337,22 @@ func processExternal(ctx context.Context, data Data) (Data, error) {
 ### Error Recovery
 
 ```go
+var (
+    WithRecoveryID = pipz.NewIdentity("with-recovery", "Recover from failures")
+    RecoverDataID  = pipz.NewIdentity("recover", "Extract partial data")
+)
+
 // Recover and continue with partial data
-pipeline := pipz.NewFallback("with-recovery",
+pipeline := pipz.NewFallback(WithRecoveryID,
     primaryPipeline,
-    pipz.Apply("recover", func(ctx context.Context, data Data) (Data, error) {
+    pipz.Apply(RecoverDataID, func(ctx context.Context, data Data) (Data, error) {
         // Access the error that caused the fallback
         if err := ctx.Value("error"); err != nil {
             var pipeErr *pipz.Error[Data]
             if errors.As(err.(error), &pipeErr) {
                 // Log the failure path
                 log.Warnf("Primary failed at %v, using fallback", pipeErr.Path)
-                
+
                 // Return partial data from the error
                 return pipeErr.InputData, nil
             }
@@ -410,7 +432,7 @@ if err != nil {
         // Check if this was a recovered panic
         if strings.Contains(pipeErr.Error(), "panic in processor") {
             log.Warn("Processor panicked but was safely recovered")
-            
+
             // The panic message is sanitized for security:
             // - Memory addresses redacted (0x*** instead of 0x1234...)
             // - File paths removed to prevent info leakage

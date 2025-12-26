@@ -19,12 +19,12 @@ Tries a primary processor, falls back to secondary on error.
 ## Function Signature
 
 ```go
-func NewFallback[T any](name Name, primary, fallback Chainable[T]) *Fallback[T]
+func NewFallback[T any](identity Identity, primary, fallback Chainable[T]) *Fallback[T]
 ```
 
 ## Parameters
 
-- `name` (`Name`) - Identifier for the connector used in debugging
+- `identity` (`Identity`) - Identifier with name and description for debugging
 - `primary` - The primary processor to try first
 - `fallback` - The backup processor to use if primary fails
 
@@ -44,27 +44,55 @@ Returns a `*Fallback[T]` that implements `Chainable[T]`.
 
 ```go
 // Payment processing with backup
-payment := pipz.NewFallback("payment",
-    pipz.Apply("stripe", processWithStripe),
-    pipz.Apply("paypal", processWithPayPal),
+var (
+    PaymentID = pipz.NewIdentity("payment", "Process payment with Stripe, fallback to PayPal")
+    StripeID  = pipz.NewIdentity("stripe", "Process with Stripe")
+    PayPalID  = pipz.NewIdentity("paypal", "Process with PayPal")
+)
+
+payment := pipz.NewFallback(
+    PaymentID,
+    pipz.Apply(StripeID, processWithStripe),
+    pipz.Apply(PayPalID, processWithPayPal),
 )
 
 // Database with replica fallback
-saveData := pipz.NewFallback("save",
-    pipz.Apply("primary-db", saveToPrimary),
-    pipz.Apply("replica-db", saveToReplica),
+var (
+    SaveID       = pipz.NewIdentity("save", "Save to primary database, fallback to replica")
+    PrimaryDBID  = pipz.NewIdentity("primary-db", "Save to primary database")
+    ReplicaDBID  = pipz.NewIdentity("replica-db", "Save to replica database")
+)
+
+saveData := pipz.NewFallback(
+    SaveID,
+    pipz.Apply(PrimaryDBID, saveToPrimary),
+    pipz.Apply(ReplicaDBID, saveToReplica),
 )
 
 // API with mock fallback
-fetchWeather := pipz.NewFallback("weather",
-    pipz.Apply("weather-api", fetchFromWeatherAPI),
-    pipz.Apply("mock-data", returnMockWeather),
+var (
+    WeatherID    = pipz.NewIdentity("weather", "Fetch from weather API, fallback to mock data")
+    WeatherAPIID = pipz.NewIdentity("weather-api", "Fetch from weather API")
+    MockDataID   = pipz.NewIdentity("mock-data", "Return mock weather data")
+)
+
+fetchWeather := pipz.NewFallback(
+    WeatherID,
+    pipz.Apply(WeatherAPIID, fetchFromWeatherAPI),
+    pipz.Apply(MockDataID, returnMockWeather),
 )
 
 // Service degradation
-userService := pipz.NewFallback("user-lookup",
-    pipz.Apply("full-profile", fetchFullProfile),
-    pipz.Apply("basic-profile", fetchBasicProfile),
+var (
+    UserLookupID    = pipz.NewIdentity("user-lookup", "Fetch full profile, fallback to basic profile")
+    FullProfileID   = pipz.NewIdentity("full-profile", "Fetch full user profile")
+    BasicProfileID  = pipz.NewIdentity("basic-profile", "Fetch basic user profile")
+)
+
+userService := pipz.NewFallback(
+    UserLookupID,
+    pipz.Apply(FullProfileID, fetchFullProfile),
+    pipz.Apply(BasicProfileID, fetchBasicProfile),
 )
 ```
 
@@ -92,11 +120,18 @@ Don't use `Fallback` when:
 Fallback returns the fallback's error if both fail:
 
 ```go
-fallback := pipz.NewFallback("data-fetch",
-    pipz.Apply("primary", func(ctx context.Context, id string) (Data, error) {
+var (
+    DataFetchID = pipz.NewIdentity("data-fetch", "Fetch data from primary, fallback to backup")
+    PrimaryID   = pipz.NewIdentity("primary", "Fetch from primary source")
+    BackupID    = pipz.NewIdentity("backup", "Fetch from backup source")
+)
+
+fallback := pipz.NewFallback(
+    DataFetchID,
+    pipz.Apply(PrimaryID, func(ctx context.Context, id string) (Data, error) {
         return Data{}, errors.New("primary failed")
     }),
-    pipz.Apply("backup", func(ctx context.Context, id string) (Data, error) {
+    pipz.Apply(BackupID, func(ctx context.Context, id string) (Data, error) {
         return Data{}, errors.New("backup failed")
     }),
 )
@@ -110,25 +145,44 @@ result, err := fallback.Process(ctx, "123")
 ### ❌ Don't use for unrelated operations
 ```go
 // WRONG - These aren't alternatives
-fallback := pipz.NewFallback("unrelated",
-    pipz.Apply("save", saveToDatabase),
-    pipz.Apply("email", sendEmail), // Not a fallback!
+var (
+    UnrelatedID = pipz.NewIdentity("unrelated", "Unrelated operations")
+    SaveID      = pipz.NewIdentity("save", "Save to database")
+    EmailID     = pipz.NewIdentity("email", "Send email")
+)
+
+fallback := pipz.NewFallback(
+    UnrelatedID,
+    pipz.Apply(SaveID, saveToDatabase),
+    pipz.Apply(EmailID, sendEmail), // Not a fallback!
 )
 ```
 
 ### ✅ Use for true alternatives
 ```go
 // RIGHT - Both achieve the same goal
-fallback := pipz.NewFallback("alternatives",
-    pipz.Apply("primary-db", saveToPrimary),
-    pipz.Apply("backup-db", saveToBackup),
+var (
+    AlternativesID = pipz.NewIdentity("alternatives", "Save to primary database with backup fallback")
+    PrimaryDBID    = pipz.NewIdentity("primary-db", "Save to primary database")
+    BackupDBID     = pipz.NewIdentity("backup-db", "Save to backup database")
+)
+
+fallback := pipz.NewFallback(
+    AlternativesID,
+    pipz.Apply(PrimaryDBID, saveToPrimary),
+    pipz.Apply(BackupDBID, saveToBackup),
 )
 ```
 
 ### ❌ Don't ignore primary errors completely
 ```go
 // WRONG - No visibility into primary failures
-fallback := pipz.NewFallback("silent",
+var (
+    SilentID = pipz.NewIdentity("silent", "Silent fallback without monitoring")
+)
+
+fallback := pipz.NewFallback(
+    SilentID,
     primary,
     backup,
 ) // Primary failures are hidden
@@ -137,10 +191,18 @@ fallback := pipz.NewFallback("silent",
 ### ✅ Log primary failures for monitoring
 ```go
 // RIGHT - Track primary failures
-fallback := pipz.NewFallback("monitored",
-    pipz.NewHandle("primary-with-logging",
+var (
+    MonitoredID          = pipz.NewIdentity("monitored", "Fallback with primary failure monitoring")
+    PrimaryWithLoggingID = pipz.NewIdentity("primary-with-logging", "Primary processor with error logging")
+    LogID                = pipz.NewIdentity("log", "Log primary failure")
+)
+
+fallback := pipz.NewFallback(
+    MonitoredID,
+    pipz.NewHandle(
+        PrimaryWithLoggingID,
         primary,
-        pipz.Effect("log", func(ctx context.Context, err *pipz.Error[T]) error {
+        pipz.Effect(LogID, func(ctx context.Context, err *pipz.Error[T]) error {
             log.Printf("Primary failed, using fallback: %v", err)
             metrics.Increment("fallback.triggered")
             return nil
@@ -153,9 +215,15 @@ fallback := pipz.NewFallback("monitored",
 ### ❌ Don't create circular fallback chains
 ```go
 // WRONG - Creates infinite recursion risk
-primary := pipz.NewFallback("primary", processor1, secondary)
-secondary := pipz.NewFallback("secondary", processor2, tertiary)  
-tertiary := pipz.NewFallback("tertiary", processor3, primary) // ← Circular!
+var (
+    PrimaryID   = pipz.NewIdentity("primary", "Primary with fallback")
+    SecondaryID = pipz.NewIdentity("secondary", "Secondary with fallback")
+    TertiaryID  = pipz.NewIdentity("tertiary", "Tertiary with fallback")
+)
+
+primary := pipz.NewFallback(PrimaryID, processor1, secondary)
+secondary := pipz.NewFallback(SecondaryID, processor2, tertiary)
+tertiary := pipz.NewFallback(TertiaryID, processor3, primary) // ← Circular!
 
 // If processor1, processor2, and processor3 all fail:
 // primary → secondary → tertiary → primary → secondary → ...
@@ -165,9 +233,16 @@ tertiary := pipz.NewFallback("tertiary", processor3, primary) // ← Circular!
 ### ✅ Use linear fallback chains instead
 ```go
 // RIGHT - Clear fallback hierarchy
-primary := pipz.NewFallback("primary",
+var (
+    PrimaryID   = pipz.NewIdentity("primary", "Primary processor with secondary and tertiary fallbacks")
+    SecondaryID = pipz.NewIdentity("secondary", "Secondary processor with tertiary fallback")
+)
+
+primary := pipz.NewFallback(
+    PrimaryID,
     processor1,
-    pipz.NewFallback("secondary", 
+    pipz.NewFallback(
+        SecondaryID,
         processor2,
         processor3, // Final fallback - no further chains
     ),
@@ -178,33 +253,66 @@ primary := pipz.NewFallback("primary",
 
 ```go
 // Chained fallbacks for multiple backups
-multiBackup := pipz.NewFallback("multi-backup",
-    pipz.Apply("primary", usePrimary),
-    pipz.NewFallback("backups",
-        pipz.Apply("secondary", useSecondary),
-        pipz.Apply("tertiary", useTertiary),
+var (
+    MultiBackupID = pipz.NewIdentity("multi-backup", "Multi-tier backup with primary, secondary, and tertiary")
+    PrimaryID     = pipz.NewIdentity("primary", "Use primary service")
+    BackupsID     = pipz.NewIdentity("backups", "Secondary and tertiary backup chain")
+    SecondaryID   = pipz.NewIdentity("secondary", "Use secondary service")
+    TertiaryID    = pipz.NewIdentity("tertiary", "Use tertiary service")
+)
+
+multiBackup := pipz.NewFallback(
+    MultiBackupID,
+    pipz.Apply(PrimaryID, usePrimary),
+    pipz.NewFallback(
+        BackupsID,
+        pipz.Apply(SecondaryID, useSecondary),
+        pipz.Apply(TertiaryID, useTertiary),
     ),
 )
 
 // Fallback with retry
-resilientSave := pipz.NewFallback("resilient-save",
-    pipz.NewRetry("primary-retry", saveToPrimary, 3),
-    pipz.NewRetry("backup-retry", saveToBackup, 2),
+var (
+    ResilientSaveID  = pipz.NewIdentity("resilient-save", "Save with retries on primary and backup")
+    PrimaryRetryID   = pipz.NewIdentity("primary-retry", "Retry primary save up to 3 times")
+    BackupRetryID    = pipz.NewIdentity("backup-retry", "Retry backup save up to 2 times")
+)
+
+resilientSave := pipz.NewFallback(
+    ResilientSaveID,
+    pipz.NewRetry(PrimaryRetryID, saveToPrimary, 3),
+    pipz.NewRetry(BackupRetryID, saveToBackup, 2),
 )
 
 // Degraded service
-fullService := pipz.NewFallback("service",
-    pipz.NewTimeout("full-service",
-        pipz.Apply("complete", provideFullService),
+var (
+    ServiceID     = pipz.NewIdentity("service", "Full service with timeout, fallback to degraded")
+    FullServiceID = pipz.NewIdentity("full-service", "Full service with 5 second timeout")
+    CompleteID    = pipz.NewIdentity("complete", "Provide full service")
+    DegradedID    = pipz.NewIdentity("degraded", "Provide degraded service")
+)
+
+fullService := pipz.NewFallback(
+    ServiceID,
+    pipz.NewTimeout(
+        FullServiceID,
+        pipz.Apply(CompleteID, provideFullService),
         5*time.Second,
     ),
-    pipz.Apply("degraded", provideDegradedService),
+    pipz.Apply(DegradedID, provideDegradedService),
 )
 
 // Development fallback
-apiCall := pipz.NewFallback("api",
-    pipz.Apply("real", callRealAPI),
-    pipz.Apply("mock", func(ctx context.Context, req Request) (Response, error) {
+var (
+    APIID  = pipz.NewIdentity("api", "Call real API, fallback to mock in development")
+    RealID = pipz.NewIdentity("real", "Call real API")
+    MockID = pipz.NewIdentity("mock", "Return mock response")
+)
+
+apiCall := pipz.NewFallback(
+    APIID,
+    pipz.Apply(RealID, callRealAPI),
+    pipz.Apply(MockID, func(ctx context.Context, req Request) (Response, error) {
         if os.Getenv("ENV") == "development" {
             return mockResponse(req), nil
         }
@@ -217,24 +325,42 @@ apiCall := pipz.NewFallback("api",
 
 ```go
 // Track fallback usage
-monitoredFallback := pipz.NewFallback("monitored",
-    pipz.Apply("primary", func(ctx context.Context, data Data) (Data, error) {
+var (
+    MonitoredID = pipz.NewIdentity("monitored", "Fallback with metrics tracking")
+    PrimaryID   = pipz.NewIdentity("primary", "Primary service with metrics")
+    FallbackID  = pipz.NewIdentity("fallback", "Fallback service with metrics")
+)
+
+monitoredFallback := pipz.NewFallback(
+    MonitoredID,
+    pipz.Apply(PrimaryID, func(ctx context.Context, data Data) (Data, error) {
         result, err := primaryService(ctx, data)
         if err != nil {
             metrics.Increment("fallback.triggered", "service", "primary")
         }
         return result, err
     }),
-    pipz.Apply("fallback", func(ctx context.Context, data Data) (Data, error) {
+    pipz.Apply(FallbackID, func(ctx context.Context, data Data) (Data, error) {
         metrics.Increment("fallback.used", "service", "backup")
         return backupService(ctx, data)
     }),
 )
 
 // Log fallback activation
-loggedFallback := pipz.NewHandle("logged-fallback",
-    pipz.NewFallback("service", primary, backup),
-    pipz.Effect("log-failure", func(ctx context.Context, err *pipz.Error[Data]) error {
+var (
+    LoggedFallbackID = pipz.NewIdentity("logged-fallback", "Fallback with error logging")
+    ServiceID        = pipz.NewIdentity("service", "Primary and backup service")
+    LogFailureID     = pipz.NewIdentity("log-failure", "Log primary failure")
+)
+
+loggedFallback := pipz.NewHandle(
+    LoggedFallbackID,
+    pipz.NewFallback(
+        ServiceID,
+        primary,
+        backup,
+    ),
+    pipz.Effect(LogFailureID, func(ctx context.Context, err *pipz.Error[Data]) error {
         if strings.Contains(err.Path[len(err.Path)-1], "primary") {
             log.Printf("Primary failed, using fallback: %v", err.Err)
         }
@@ -248,24 +374,45 @@ loggedFallback := pipz.NewHandle("logged-fallback",
 ```go
 // Ensure fallback is truly independent
 // BAD: Fallback might fail for same reason
-badFallback := pipz.NewFallback("bad",
-    pipz.Apply("db-write-1", writeToDatabase),
-    pipz.Apply("db-write-2", writeToSameDatabase), // Same failure mode!
+var (
+    BadID     = pipz.NewIdentity("bad", "Fallback to same database (bad practice)")
+    DBWrite1ID = pipz.NewIdentity("db-write-1", "Write to database")
+    DBWrite2ID = pipz.NewIdentity("db-write-2", "Write to same database")
+)
+
+badFallback := pipz.NewFallback(
+    BadID,
+    pipz.Apply(DBWrite1ID, writeToDatabase),
+    pipz.Apply(DBWrite2ID, writeToSameDatabase), // Same failure mode!
 )
 
 // GOOD: Independent failure modes
-goodFallback := pipz.NewFallback("good",
-    pipz.Apply("database", writeToDatabase),
-    pipz.Apply("file", writeToFile), // Different failure mode
+var (
+    GoodID     = pipz.NewIdentity("good", "Fallback from database to file system")
+    DatabaseID = pipz.NewIdentity("database", "Write to database")
+    FileID     = pipz.NewIdentity("file", "Write to file")
+)
+
+goodFallback := pipz.NewFallback(
+    GoodID,
+    pipz.Apply(DatabaseID, writeToDatabase),
+    pipz.Apply(FileID, writeToFile), // Different failure mode
 )
 
 // Consider data consistency
-transactional := pipz.NewFallback("transaction",
-    pipz.Apply("primary", func(ctx context.Context, tx Transaction) (Transaction, error) {
+var (
+    TransactionID = pipz.NewIdentity("transaction", "ACID transaction with eventual consistency fallback")
+    PrimaryID     = pipz.NewIdentity("primary", "Process with ACID transaction")
+    FallbackID    = pipz.NewIdentity("fallback", "Process with eventual consistency")
+)
+
+transactional := pipz.NewFallback(
+    TransactionID,
+    pipz.Apply(PrimaryID, func(ctx context.Context, tx Transaction) (Transaction, error) {
         // Full ACID transaction
         return processPrimary(ctx, tx)
     }),
-    pipz.Apply("fallback", func(ctx context.Context, tx Transaction) (Transaction, error) {
+    pipz.Apply(FallbackID, func(ctx context.Context, tx Transaction) (Transaction, error) {
         // Ensure fallback maintains consistency
         log.Printf("WARNING: Using eventual consistency fallback for tx %s", tx.ID)
         return processEventually(ctx, tx)

@@ -11,15 +11,15 @@ import (
 func TestApply(t *testing.T) {
 	t.Run("Apply Success", func(t *testing.T) {
 		// Create a parser that can fail
-		parser := Apply("parse_int", func(_ context.Context, s string) (string, error) {
+		parser := Apply(NewIdentity("parse_int", ""), func(_ context.Context, s string) (string, error) {
 			if s == "" {
 				return "", errors.New("empty string")
 			}
 			return s + "_parsed", nil
 		})
 
-		if parser.Name() != "parse_int" {
-			t.Errorf("expected name 'parse_int', got %q", parser.Name())
+		if parser.Identity().Name() != "parse_int" {
+			t.Errorf("expected name 'parse_int', got %q", parser.Identity().Name())
 		}
 
 		result, err := parser.Process(context.Background(), "123")
@@ -33,7 +33,7 @@ func TestApply(t *testing.T) {
 
 	t.Run("Apply Error", func(t *testing.T) {
 		// Create a parser that will fail
-		parser := Apply("parse", func(_ context.Context, s string) (string, error) {
+		parser := Apply(NewIdentity("parse", ""), func(_ context.Context, s string) (string, error) {
 			if s == "" {
 				return "", errors.New("empty string")
 			}
@@ -63,7 +63,7 @@ func TestApply(t *testing.T) {
 			return n + 1, nil
 		}
 
-		processor := Apply("increment", fn)
+		processor := Apply(NewIdentity("increment", ""), fn)
 		result, err := processor.Process(context.Background(), 5)
 
 		if err != nil {
@@ -79,7 +79,7 @@ func TestApply(t *testing.T) {
 
 	t.Run("Apply With Numbers", func(t *testing.T) {
 		// Apply with integer type
-		doubleIfPositive := Apply("double_if_positive", func(_ context.Context, n int) (int, error) {
+		doubleIfPositive := Apply(NewIdentity("double_if_positive", ""), func(_ context.Context, n int) (int, error) {
 			if n < 0 {
 				return 0, errors.New("negative number")
 			}
@@ -110,7 +110,7 @@ func TestApply(t *testing.T) {
 	})
 
 	t.Run("Apply With Validation", func(t *testing.T) {
-		validator := Apply("validate_length", func(_ context.Context, s string) (string, error) {
+		validator := Apply(NewIdentity("validate_length", ""), func(_ context.Context, s string) (string, error) {
 			if len(s) < 3 {
 				return "", fmt.Errorf("string too short: %d chars", len(s))
 			}
@@ -143,7 +143,7 @@ func TestApply(t *testing.T) {
 
 	t.Run("Apply panic recovery", func(t *testing.T) {
 		// Create an Apply that panics
-		panicApply := Apply("panic_apply", func(_ context.Context, n int) (int, error) {
+		panicApply := Apply(NewIdentity("panic_apply", ""), func(_ context.Context, n int) (int, error) {
 			if n == 42 {
 				panic("the answer panics")
 			}

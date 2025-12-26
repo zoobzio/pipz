@@ -15,7 +15,7 @@ func TestEnrich(t *testing.T) {
 		}
 
 		// Simulate successful enrichment
-		const addCustomerName Name = "add_customer_name"
+		var addCustomerName = NewIdentity("add_customer_name", "")
 		enricher := Enrich(addCustomerName, func(_ context.Context, o Order) (Order, error) {
 			// Simulate DB lookup
 			if o.CustomerID == "123" {
@@ -42,7 +42,7 @@ func TestEnrich(t *testing.T) {
 		}
 
 		// Simulate enrichment that fails
-		const addPrice Name = "add_price"
+		var addPrice = NewIdentity("add_price", "")
 		enricher := Enrich(addPrice, func(_ context.Context, p Product) (Product, error) {
 			// Simulate external service failure
 			return p, errors.New("price service unavailable")
@@ -67,7 +67,7 @@ func TestEnrich(t *testing.T) {
 		}
 
 		callCount := 0
-		const addWeather Name = "add_weather"
+		var addWeather = NewIdentity("add_weather", "")
 		weatherService := Enrich(addWeather, func(_ context.Context, e Event) (Event, error) {
 			callCount++
 			// Fail every other call
@@ -104,7 +104,7 @@ func TestEnrich(t *testing.T) {
 	})
 
 	t.Run("Enrich panic recovery", func(t *testing.T) {
-		panicEnrich := Enrich("panic_enrich", func(_ context.Context, _ string) (string, error) {
+		panicEnrich := Enrich(NewIdentity("panic_enrich", ""), func(_ context.Context, _ string) (string, error) {
 			panic("enrich panic")
 		})
 

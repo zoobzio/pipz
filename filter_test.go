@@ -11,12 +11,12 @@ import (
 
 func TestFilter_NewFilter(t *testing.T) {
 	condition := func(_ context.Context, data int) bool { return data > 5 }
-	processor := Transform("double", func(_ context.Context, data int) int { return data * 2 })
+	processor := Transform(NewIdentity("double", ""), func(_ context.Context, data int) int { return data * 2 })
 
-	filter := NewFilter("test-filter", condition, processor)
+	filter := NewFilter(NewIdentity("test-filter", "test filter"), condition, processor)
 
-	if filter.Name() != "test-filter" {
-		t.Errorf("Expected name 'test-filter', got %s", filter.Name())
+	if filter.Identity().Name() != "test-filter" {
+		t.Errorf("Expected name 'test-filter', got %s", filter.Identity().Name())
 	}
 
 	if filter.Condition() == nil {
@@ -30,8 +30,8 @@ func TestFilter_NewFilter(t *testing.T) {
 
 func TestFilter_Process_ConditionTrue(t *testing.T) {
 	condition := func(_ context.Context, data int) bool { return data > 5 }
-	processor := Transform("double", func(_ context.Context, data int) int { return data * 2 })
-	filter := NewFilter("test-filter", condition, processor)
+	processor := Transform(NewIdentity("double", ""), func(_ context.Context, data int) int { return data * 2 })
+	filter := NewFilter(NewIdentity("test-filter", "test filter"), condition, processor)
 
 	result, err := filter.Process(context.Background(), 10)
 
@@ -46,8 +46,8 @@ func TestFilter_Process_ConditionTrue(t *testing.T) {
 
 func TestFilter_Process_ConditionFalse(t *testing.T) {
 	condition := func(_ context.Context, data int) bool { return data > 5 }
-	processor := Transform("double", func(_ context.Context, data int) int { return data * 2 })
-	filter := NewFilter("test-filter", condition, processor)
+	processor := Transform(NewIdentity("double", ""), func(_ context.Context, data int) int { return data * 2 })
+	filter := NewFilter(NewIdentity("test-filter", "test filter"), condition, processor)
 
 	result, err := filter.Process(context.Background(), 3)
 
@@ -62,10 +62,10 @@ func TestFilter_Process_ConditionFalse(t *testing.T) {
 
 func TestFilter_Process_ProcessorError(t *testing.T) {
 	condition := func(_ context.Context, data string) bool { return len(data) > 3 }
-	processor := Apply("fail", func(_ context.Context, _ string) (string, error) {
+	processor := Apply(NewIdentity("fail", ""), func(_ context.Context, _ string) (string, error) {
 		return "", errors.New("processing failed")
 	})
-	filter := NewFilter("test-filter", condition, processor)
+	filter := NewFilter(NewIdentity("test-filter", "test filter"), condition, processor)
 
 	result, err := filter.Process(context.Background(), "test")
 
@@ -83,11 +83,11 @@ func TestFilter_Process_ProcessorError(t *testing.T) {
 			t.Errorf("Expected error path length 2, got %d", len(pipeErr.Path))
 		}
 
-		if pipeErr.Path[0] != "test-filter" {
+		if pipeErr.Path[0].Name() != "test-filter" {
 			t.Errorf("Expected first path element 'test-filter', got %s", pipeErr.Path[0])
 		}
 
-		if pipeErr.Path[1] != "fail" {
+		if pipeErr.Path[1].Name() != "fail" {
 			t.Errorf("Expected second path element 'fail', got %s", pipeErr.Path[1])
 		}
 	} else {
@@ -96,8 +96,8 @@ func TestFilter_Process_ProcessorError(t *testing.T) {
 }
 
 func TestFilter_SetCondition(t *testing.T) {
-	filter := NewFilter("test", func(_ context.Context, data int) bool { return data > 5 },
-		Transform("noop", func(_ context.Context, data int) int { return data }))
+	filter := NewFilter(NewIdentity("test", ""), func(_ context.Context, data int) bool { return data > 5 },
+		Transform(NewIdentity("noop", ""), func(_ context.Context, data int) int { return data }))
 
 	newCondition := func(_ context.Context, data int) bool { return data < 5 }
 	filter.SetCondition(newCondition)
@@ -121,10 +121,10 @@ func TestFilter_SetCondition(t *testing.T) {
 }
 
 func TestFilter_SetProcessor(t *testing.T) {
-	filter := NewFilter("test", func(_ context.Context, data int) bool { return data > 5 },
-		Transform("old", func(_ context.Context, data int) int { return data * 2 }))
+	filter := NewFilter(NewIdentity("test", ""), func(_ context.Context, data int) bool { return data > 5 },
+		Transform(NewIdentity("old", ""), func(_ context.Context, data int) int { return data * 2 }))
 
-	newProcessor := Transform("new", func(_ context.Context, data int) int { return data * 3 })
+	newProcessor := Transform(NewIdentity("new", ""), func(_ context.Context, data int) int { return data * 3 })
 	filter.SetProcessor(newProcessor)
 
 	result, err := filter.Process(context.Background(), 10)
@@ -137,9 +137,9 @@ func TestFilter_SetProcessor(t *testing.T) {
 }
 
 func TestFilter_ConcurrentAccess(t *testing.T) {
-	filter := NewFilter("concurrent-test",
+	filter := NewFilter(NewIdentity("concurrent-test", "concurrent test filter"),
 		func(_ context.Context, data int) bool { return data > 0 },
-		Transform("increment", func(_ context.Context, data int) int { return data + 1 }))
+		Transform(NewIdentity("increment", ""), func(_ context.Context, data int) int { return data + 1 }))
 
 	done := make(chan bool)
 
@@ -170,7 +170,7 @@ func TestFilter_ConcurrentAccess(t *testing.T) {
 
 	go func() {
 		defer func() { done <- true }()
-		filter.SetProcessor(Transform("double", func(_ context.Context, data int) int { return data * 2 }))
+		filter.SetProcessor(Transform(NewIdentity("double", ""), func(_ context.Context, data int) int { return data * 2 }))
 	}()
 
 	// Wait for all goroutines
@@ -181,7 +181,7 @@ func TestFilter_ConcurrentAccess(t *testing.T) {
 
 func TestFilter_WithTimeout(t *testing.T) {
 	condition := func(_ context.Context, data int) bool { return data > 0 }
-	processor := Apply("slow", func(ctx context.Context, data int) (int, error) {
+	processor := Apply(NewIdentity("slow", ""), func(ctx context.Context, data int) (int, error) {
 		select {
 		case <-time.After(100 * time.Millisecond):
 			return data * 2, nil
@@ -189,7 +189,7 @@ func TestFilter_WithTimeout(t *testing.T) {
 			return data, ctx.Err()
 		}
 	})
-	filter := NewFilter("timeout-test", condition, processor)
+	filter := NewFilter(NewIdentity("timeout-test", "timeout test filter"), condition, processor)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -216,7 +216,7 @@ func TestFilter_WithTimeout(t *testing.T) {
 
 func TestFilter_WithCancellation(t *testing.T) {
 	condition := func(_ context.Context, data int) bool { return data > 0 }
-	processor := Apply("cancelable", func(ctx context.Context, data int) (int, error) {
+	processor := Apply(NewIdentity("cancelable", ""), func(ctx context.Context, data int) (int, error) {
 		select {
 		case <-time.After(100 * time.Millisecond):
 			return data * 2, nil
@@ -224,7 +224,7 @@ func TestFilter_WithCancellation(t *testing.T) {
 			return data, ctx.Err()
 		}
 	})
-	filter := NewFilter("cancel-test", condition, processor)
+	filter := NewFilter(NewIdentity("cancel-test", "cancel test filter"), condition, processor)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -260,12 +260,12 @@ func TestFilter_FeatureFlagExample(t *testing.T) {
 		BetaEnabled bool
 	}
 
-	betaProcessor := Transform("beta-feature", func(_ context.Context, user User) User {
+	betaProcessor := Transform(NewIdentity("beta-feature", ""), func(_ context.Context, user User) User {
 		user.Data = "BETA:" + user.Data
 		return user
 	})
 
-	featureFlag := NewFilter("feature-flag",
+	featureFlag := NewFilter(NewIdentity("feature-flag", "feature flag filter"),
 		func(_ context.Context, user User) bool {
 			return user.BetaEnabled
 		},
@@ -301,7 +301,7 @@ func TestFilter_ConditionalValidationExample(t *testing.T) {
 		Validated    bool
 	}
 
-	premiumValidation := Apply("premium-validation", func(_ context.Context, order Order) (Order, error) {
+	premiumValidation := Apply(NewIdentity("premium-validation", ""), func(_ context.Context, order Order) (Order, error) {
 		if order.Amount > 10000 {
 			return order, errors.New("amount exceeds premium limit")
 		}
@@ -309,7 +309,7 @@ func TestFilter_ConditionalValidationExample(t *testing.T) {
 		return order, nil
 	})
 
-	validatePremium := NewFilter("premium-filter",
+	validatePremium := NewFilter(NewIdentity("premium-filter", "premium filter"),
 		func(_ context.Context, order Order) bool {
 			return order.CustomerTier == "premium"
 		},
@@ -354,14 +354,14 @@ func TestFilter_ConditionalValidationExample(t *testing.T) {
 
 func TestFilter_ChainableComposition(t *testing.T) {
 	// Test that Filter can be used in sequences and other connectors
-	doubler := Transform("double", func(_ context.Context, data int) int { return data * 2 })
-	filter := NewFilter("even-only",
+	doubler := Transform(NewIdentity("double", ""), func(_ context.Context, data int) int { return data * 2 })
+	filter := NewFilter(NewIdentity("even-only", "even only filter"),
 		func(_ context.Context, data int) bool { return data%2 == 0 },
 		doubler)
 
-	adder := Transform("add-ten", func(_ context.Context, data int) int { return data + 10 })
+	adder := Transform(NewIdentity("add-ten", ""), func(_ context.Context, data int) int { return data + 10 })
 
-	sequence := NewSequence("test-sequence", filter, adder)
+	sequence := NewSequence(NewIdentity("test-sequence", "test sequence"), filter, adder)
 
 	// Test even number (filter applies)
 	result, err := sequence.Process(context.Background(), 4)
@@ -386,9 +386,9 @@ func TestFilter_ChainableComposition(t *testing.T) {
 		panicCondition := func(_ context.Context, _ int) bool {
 			panic("filter condition panic")
 		}
-		processor := Transform("processor", func(_ context.Context, data int) int { return data * 2 })
+		processor := Transform(NewIdentity("processor", ""), func(_ context.Context, data int) int { return data * 2 })
 
-		filter := NewFilter("panic_filter", panicCondition, processor)
+		filter := NewFilter(NewIdentity("panic_filter", "panic filter"), panicCondition, processor)
 		result, err := filter.Process(context.Background(), 42)
 
 		if result != 0 {
@@ -400,7 +400,7 @@ func TestFilter_ChainableComposition(t *testing.T) {
 			t.Fatal("expected pipz.Error")
 		}
 
-		if pipzErr.Path[0] != "panic_filter" {
+		if pipzErr.Path[0].Name() != "panic_filter" {
 			t.Errorf("expected path to start with 'panic_filter', got %v", pipzErr.Path)
 		}
 
@@ -411,11 +411,11 @@ func TestFilter_ChainableComposition(t *testing.T) {
 
 	t.Run("Filter processor panic recovery", func(t *testing.T) {
 		condition := func(_ context.Context, _ int) bool { return true }
-		panicProcessor := Transform("panic_processor", func(_ context.Context, _ int) int {
+		panicProcessor := Transform(NewIdentity("panic_processor", ""), func(_ context.Context, _ int) int {
 			panic("filter processor panic")
 		})
 
-		filter := NewFilter("panic_filter", condition, panicProcessor)
+		filter := NewFilter(NewIdentity("panic_filter", "panic filter"), condition, panicProcessor)
 		result, err := filter.Process(context.Background(), 42)
 
 		if result != 0 {
@@ -427,7 +427,7 @@ func TestFilter_ChainableComposition(t *testing.T) {
 			t.Fatal("expected pipz.Error")
 		}
 
-		if pipzErr.Path[0] != "panic_filter" {
+		if pipzErr.Path[0].Name() != "panic_filter" {
 			t.Errorf("expected path to start with 'panic_filter', got %v", pipzErr.Path)
 		}
 
@@ -439,9 +439,9 @@ func TestFilter_ChainableComposition(t *testing.T) {
 
 func TestFilterClose(t *testing.T) {
 	t.Run("Closes Child Processor", func(t *testing.T) {
-		p := newTrackingProcessor[int]("p")
+		p := newTrackingProcessor[int](NewIdentity("p", ""))
 
-		f := NewFilter("test", func(_ context.Context, _ int) bool { return true }, p)
+		f := NewFilter(NewIdentity("test", ""), func(_ context.Context, _ int) bool { return true }, p)
 		err := f.Close()
 
 		if err != nil {
@@ -453,9 +453,9 @@ func TestFilterClose(t *testing.T) {
 	})
 
 	t.Run("Propagates Close Error", func(t *testing.T) {
-		p := newTrackingProcessor[int]("p").WithCloseError(errors.New("close error"))
+		p := newTrackingProcessor[int](NewIdentity("p", "")).WithCloseError(errors.New("close error"))
 
-		f := NewFilter("test", func(_ context.Context, _ int) bool { return true }, p)
+		f := NewFilter(NewIdentity("test", ""), func(_ context.Context, _ int) bool { return true }, p)
 		err := f.Close()
 
 		if err == nil {
@@ -467,8 +467,8 @@ func TestFilterClose(t *testing.T) {
 	})
 
 	t.Run("Idempotency", func(t *testing.T) {
-		p := newTrackingProcessor[int]("p")
-		f := NewFilter("test", func(_ context.Context, _ int) bool { return true }, p)
+		p := newTrackingProcessor[int](NewIdentity("p", ""))
+		f := NewFilter(NewIdentity("test", ""), func(_ context.Context, _ int) bool { return true }, p)
 
 		_ = f.Close()
 		_ = f.Close()
@@ -492,9 +492,9 @@ func TestFilterSignals(t *testing.T) {
 		})
 		defer listener.Close()
 
-		filter := NewFilter("signal-test-filter",
+		filter := NewFilter(NewIdentity("signal-test-filter", "signal test filter"),
 			func(_ context.Context, n int) bool { return n > 5 },
-			Transform("double", func(_ context.Context, n int) int { return n * 2 }),
+			Transform(NewIdentity("double", ""), func(_ context.Context, n int) int { return n * 2 }),
 		)
 
 		_, err := filter.Process(context.Background(), 10)
@@ -528,9 +528,9 @@ func TestFilterSignals(t *testing.T) {
 		})
 		defer listener.Close()
 
-		filter := NewFilter("signal-skip-filter",
+		filter := NewFilter(NewIdentity("signal-skip-filter", "signal skip filter"),
 			func(_ context.Context, n int) bool { return n > 100 },
-			Transform("double", func(_ context.Context, n int) int { return n * 2 }),
+			Transform(NewIdentity("double", ""), func(_ context.Context, n int) int { return n * 2 }),
 		)
 
 		_, err := filter.Process(context.Background(), 5)
@@ -548,6 +548,30 @@ func TestFilterSignals(t *testing.T) {
 		}
 		if signalPassed {
 			t.Error("expected passed to be false")
+		}
+	})
+
+	t.Run("Schema", func(t *testing.T) {
+		proc := Transform(NewIdentity("inner-proc", ""), func(_ context.Context, n int) int { return n })
+		condition := func(_ context.Context, n int) bool { return n > 0 }
+
+		filter := NewFilter(NewIdentity("test-filter", "Filter connector"), condition, proc)
+
+		schema := filter.Schema()
+
+		if schema.Identity.Name() != "test-filter" {
+			t.Errorf("Schema Identity.Name() = %v, want %v", schema.Identity.Name(), "test-filter")
+		}
+		if schema.Type != "filter" {
+			t.Errorf("Schema Type = %v, want %v", schema.Type, "filter")
+		}
+
+		flow, ok := FilterKey.From(schema)
+		if !ok {
+			t.Fatal("Expected FilterFlow")
+		}
+		if flow.Processor.Identity.Name() != "inner-proc" {
+			t.Errorf("Flow.Processor.Identity.Name() = %v, want %v", flow.Processor.Identity.Name(), "inner-proc")
 		}
 	})
 }

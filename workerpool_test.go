@@ -21,20 +21,20 @@ func TestWorkerPool(t *testing.T) {
 		var counter int32
 		data := TestData{Value: 1, Counter: &counter}
 
-		p1 := Effect("inc1", func(_ context.Context, d TestData) error {
+		p1 := Effect(NewIdentity("inc1", ""), func(_ context.Context, d TestData) error {
 			atomic.AddInt32(d.Counter, 1)
 			return nil
 		})
-		p2 := Effect("inc2", func(_ context.Context, d TestData) error {
+		p2 := Effect(NewIdentity("inc2", ""), func(_ context.Context, d TestData) error {
 			atomic.AddInt32(d.Counter, 10)
 			return nil
 		})
-		p3 := Effect("inc3", func(_ context.Context, d TestData) error {
+		p3 := Effect(NewIdentity("inc3", ""), func(_ context.Context, d TestData) error {
 			atomic.AddInt32(d.Counter, 100)
 			return nil
 		})
 
-		pool := NewWorkerPool("test-pool", 2, p1, p2, p3)
+		pool := NewWorkerPool(NewIdentity("test-pool", ""), 2, p1, p2, p3)
 		result, err := pool.Process(context.Background(), data)
 
 		if err != nil {
@@ -59,7 +59,7 @@ func TestWorkerPool(t *testing.T) {
 		var mu sync.Mutex
 
 		makeProcessor := func(_ int) Chainable[TestData] {
-			return Effect("proc", func(_ context.Context, _ TestData) error {
+			return Effect(NewIdentity("proc", ""), func(_ context.Context, _ TestData) error {
 				// Track concurrent workers
 				current := atomic.AddInt32(&activeWorkers, 1)
 
@@ -84,7 +84,7 @@ func TestWorkerPool(t *testing.T) {
 			processors = append(processors, makeProcessor(i))
 		}
 
-		pool := NewWorkerPool("test-pool", workers, processors...)
+		pool := NewWorkerPool(NewIdentity("test-pool", ""), workers, processors...)
 		data := TestData{Value: 1}
 
 		_, err := pool.Process(context.Background(), data)
@@ -119,7 +119,7 @@ func TestWorkerPool(t *testing.T) {
 		var measurementsMu sync.Mutex
 
 		makeProcessor := func(_ int) Chainable[TestData] {
-			return Effect("proc", func(_ context.Context, _ TestData) error {
+			return Effect(NewIdentity("proc", ""), func(_ context.Context, _ TestData) error {
 				// Signal first processor to start measurements
 				startOnce.Do(func() { close(startChan) })
 
@@ -143,7 +143,7 @@ func TestWorkerPool(t *testing.T) {
 			processors[i] = makeProcessor(i)
 		}
 
-		pool := NewWorkerPool("semaphore-test", workers, processors...)
+		pool := NewWorkerPool(NewIdentity("semaphore-test", ""), workers, processors...)
 
 		go func() {
 			<-startChan
@@ -192,19 +192,19 @@ func TestWorkerPool(t *testing.T) {
 	t.Run("Error Handling", func(t *testing.T) {
 		testErr := errors.New("test error")
 
-		successProcessor := Effect("success", func(_ context.Context, d TestData) error {
+		successProcessor := Effect(NewIdentity("success", ""), func(_ context.Context, d TestData) error {
 			atomic.AddInt32(d.Counter, 1)
 			return nil
 		})
 
-		errorProcessor := Effect("error", func(_ context.Context, _ TestData) error {
+		errorProcessor := Effect(NewIdentity("error", ""), func(_ context.Context, _ TestData) error {
 			return testErr
 		})
 
 		var counter int32
 		data := TestData{Value: 1, Counter: &counter}
 
-		pool := NewWorkerPool("error-test", 2, successProcessor, errorProcessor, successProcessor)
+		pool := NewWorkerPool(NewIdentity("error-test", ""), 2, successProcessor, errorProcessor, successProcessor)
 		result, err := pool.Process(context.Background(), data)
 
 		if err == nil {
@@ -224,7 +224,7 @@ func TestWorkerPool(t *testing.T) {
 			if !errors.Is(pipzErr.Err, testErr) {
 				t.Errorf("expected wrapped test error, got %v", pipzErr.Err)
 			}
-			if len(pipzErr.Path) == 0 || pipzErr.Path[0] != "error-test" {
+			if len(pipzErr.Path) == 0 || pipzErr.Path[0].Name() != "error-test" {
 				t.Errorf("expected path with 'error-test', got %v", pipzErr.Path)
 			}
 		}
@@ -243,7 +243,7 @@ func TestWorkerPool(t *testing.T) {
 	t.Run("Context Cancellation", func(t *testing.T) {
 		var started, canceled int32
 
-		blocker := Effect("block", func(ctx context.Context, _ TestData) error {
+		blocker := Effect(NewIdentity("block", ""), func(ctx context.Context, _ TestData) error {
 			atomic.AddInt32(&started, 1)
 			select {
 			case <-time.After(200 * time.Millisecond):
@@ -254,7 +254,7 @@ func TestWorkerPool(t *testing.T) {
 			}
 		})
 
-		pool := NewWorkerPool("cancel-test", 2, blocker, blocker, blocker)
+		pool := NewWorkerPool(NewIdentity("cancel-test", ""), 2, blocker, blocker, blocker)
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
 
@@ -284,7 +284,7 @@ func TestWorkerPool(t *testing.T) {
 	})
 
 	t.Run("Empty Processors", func(t *testing.T) {
-		pool := NewWorkerPool[TestData]("empty", 5)
+		pool := NewWorkerPool[TestData](NewIdentity("empty", ""), 5)
 		data := TestData{Value: 42}
 
 		result, err := pool.Process(context.Background(), data)
@@ -297,7 +297,7 @@ func TestWorkerPool(t *testing.T) {
 	})
 
 	t.Run("Worker Count Configuration", func(t *testing.T) {
-		pool := NewWorkerPool[TestData]("config-test", 3)
+		pool := NewWorkerPool[TestData](NewIdentity("config-test", ""), 3)
 
 		if pool.GetWorkerCount() != 3 {
 			t.Errorf("expected worker count 3, got %d", pool.GetWorkerCount())
@@ -328,12 +328,12 @@ func TestWorkerPool(t *testing.T) {
 		var activeChecks []int
 		var mu sync.Mutex
 
-		blocker := Effect("block", func(_ context.Context, _ TestData) error {
+		blocker := Effect(NewIdentity("block", ""), func(_ context.Context, _ TestData) error {
 			<-proceedChan // Wait for signal
 			return nil
 		})
 
-		pool := NewWorkerPool("active-test", workers, blocker, blocker, blocker, blocker, blocker)
+		pool := NewWorkerPool(NewIdentity("active-test", ""), workers, blocker, blocker, blocker, blocker, blocker)
 
 		// Start processing in background
 		done := make(chan error, 1)
@@ -394,11 +394,11 @@ func TestWorkerPool(t *testing.T) {
 	})
 
 	t.Run("Configuration Methods", func(t *testing.T) {
-		p1 := Transform("p1", func(_ context.Context, d TestData) TestData { return d })
-		p2 := Transform("p2", func(_ context.Context, d TestData) TestData { return d })
-		p3 := Transform("p3", func(_ context.Context, d TestData) TestData { return d })
+		p1 := Transform(NewIdentity("p1", ""), func(_ context.Context, d TestData) TestData { return d })
+		p2 := Transform(NewIdentity("p2", ""), func(_ context.Context, d TestData) TestData { return d })
+		p3 := Transform(NewIdentity("p3", ""), func(_ context.Context, d TestData) TestData { return d })
 
-		pool := NewWorkerPool("test", 2, p1, p2)
+		pool := NewWorkerPool(NewIdentity("test", ""), 2, p1, p2)
 
 		if pool.Len() != 2 {
 			t.Errorf("expected 2 processors, got %d", pool.Len())
@@ -429,15 +429,15 @@ func TestWorkerPool(t *testing.T) {
 	})
 
 	t.Run("Name Method", func(t *testing.T) {
-		pool := NewWorkerPool[TestData]("my-worker-pool", 3)
-		if pool.Name() != "my-worker-pool" {
-			t.Errorf("expected 'my-worker-pool', got %q", pool.Name())
+		pool := NewWorkerPool[TestData](NewIdentity("my-worker-pool", ""), 3)
+		if pool.Identity().Name() != "my-worker-pool" {
+			t.Errorf("expected 'my-worker-pool', got %q", pool.Identity().Name())
 		}
 	})
 
 	t.Run("Remove Out of Bounds", func(t *testing.T) {
-		p1 := Transform("p1", func(_ context.Context, d TestData) TestData { return d })
-		pool := NewWorkerPool("test", 2, p1)
+		p1 := Transform(NewIdentity("p1", ""), func(_ context.Context, d TestData) TestData { return d })
+		pool := NewWorkerPool(NewIdentity("test", ""), 2, p1)
 
 		// Test negative index
 		err := pool.Remove(-1)
@@ -462,7 +462,7 @@ func TestWorkerPool(t *testing.T) {
 		var executed int32
 
 		// Processor that respects context cancellation for timeout
-		slowProcessor := Effect("slow", func(ctx context.Context, _ TestData) error {
+		slowProcessor := Effect(NewIdentity("slow", ""), func(ctx context.Context, _ TestData) error {
 			atomic.AddInt32(&executed, 1)
 			select {
 			case <-time.After(100 * time.Millisecond):
@@ -472,7 +472,7 @@ func TestWorkerPool(t *testing.T) {
 			}
 		})
 
-		pool := NewWorkerPool("timeout-test", 2, slowProcessor, slowProcessor)
+		pool := NewWorkerPool(NewIdentity("timeout-test", ""), 2, slowProcessor, slowProcessor)
 		pool.WithTimeout(50 * time.Millisecond)
 
 		start := time.Now()
@@ -496,19 +496,19 @@ func TestWorkerPool(t *testing.T) {
 	})
 
 	t.Run("Zero Workers Default", func(t *testing.T) {
-		pool := NewWorkerPool[TestData]("zero-test", 0)
+		pool := NewWorkerPool[TestData](NewIdentity("zero-test", ""), 0)
 		if pool.GetWorkerCount() != 1 {
 			t.Errorf("expected default worker count 1 for zero input, got %d", pool.GetWorkerCount())
 		}
 
-		pool2 := NewWorkerPool[TestData]("negative-test", -5)
+		pool2 := NewWorkerPool[TestData](NewIdentity("negative-test", ""), -5)
 		if pool2.GetWorkerCount() != 1 {
 			t.Errorf("expected default worker count 1 for negative input, got %d", pool2.GetWorkerCount())
 		}
 	})
 
 	t.Run("Thread Safety", func(_ *testing.T) {
-		pool := NewWorkerPool[TestData]("thread-test", 5)
+		pool := NewWorkerPool[TestData](NewIdentity("thread-test", ""), 5)
 
 		var wg sync.WaitGroup
 
@@ -517,14 +517,14 @@ func TestWorkerPool(t *testing.T) {
 			wg.Add(1)
 			go func(_ int) {
 				defer wg.Done()
-				p := Transform("proc", func(_ context.Context, d TestData) TestData { return d })
+				p := Transform(NewIdentity("proc", ""), func(_ context.Context, d TestData) TestData { return d })
 				pool.Add(p)
 
 				if pool.Len() > 0 {
 					_ = pool.Remove(0) //nolint:errcheck // May fail in concurrent access, that's expected
 				}
 
-				_ = pool.Name()
+				_ = pool.Identity().Name()
 				_ = pool.GetWorkerCount()
 				_ = pool.GetActiveWorkers()
 			}(i)
@@ -548,7 +548,7 @@ func TestWorkerPool(t *testing.T) {
 		var executed int32
 
 		// Processor that waits for fake clock advancement
-		slowProcessor := Effect("slow", func(ctx context.Context, _ TestData) error {
+		slowProcessor := Effect(NewIdentity("slow", ""), func(ctx context.Context, _ TestData) error {
 			atomic.AddInt32(&executed, 1)
 			select {
 			case <-clock.After(100 * time.Millisecond):
@@ -558,7 +558,7 @@ func TestWorkerPool(t *testing.T) {
 			}
 		})
 
-		pool := NewWorkerPool("timeout-test", 2, slowProcessor, slowProcessor).
+		pool := NewWorkerPool(NewIdentity("timeout-test", ""), 2, slowProcessor, slowProcessor).
 			WithTimeout(50 * time.Millisecond).
 			WithClock(clock)
 
@@ -606,15 +606,15 @@ func TestWorkerPool(t *testing.T) {
 		var counter int32
 		data := TestData{Value: 1, Counter: &counter}
 
-		panicProcessor := Effect("panic_processor", func(_ context.Context, _ TestData) error {
+		panicProcessor := Effect(NewIdentity("panic_processor", ""), func(_ context.Context, _ TestData) error {
 			panic("workerpool processor panic")
 		})
-		successProcessor := Effect("success_processor", func(_ context.Context, d TestData) error {
+		successProcessor := Effect(NewIdentity("success_processor", ""), func(_ context.Context, d TestData) error {
 			atomic.AddInt32(d.Counter, 10)
 			return nil
 		})
 
-		pool := NewWorkerPool("panic_pool", 2, panicProcessor, successProcessor, successProcessor)
+		pool := NewWorkerPool(NewIdentity("panic_pool", ""), 2, panicProcessor, successProcessor, successProcessor)
 		result, err := pool.Process(context.Background(), data)
 
 		// Should return original data on error
@@ -627,7 +627,7 @@ func TestWorkerPool(t *testing.T) {
 			t.Fatal("expected pipz.Error")
 		}
 
-		if pipzErr.Path[0] != "panic_pool" {
+		if pipzErr.Path[0].Name() != "panic_pool" {
 			t.Errorf("expected path to start with 'panic_pool', got %v", pipzErr.Path)
 		}
 
@@ -649,14 +649,14 @@ func TestWorkerPool(t *testing.T) {
 
 // Benchmark tests for performance verification.
 func BenchmarkWorkerPool(b *testing.B) {
-	processor := Transform("bench", func(_ context.Context, d TestData) TestData {
+	processor := Transform(NewIdentity("bench", ""), func(_ context.Context, d TestData) TestData {
 		// Simulate minimal work
 		d.Value++
 		return d
 	})
 
 	b.Run("SingleWorker", func(b *testing.B) {
-		pool := NewWorkerPool("bench-1", 1, processor)
+		pool := NewWorkerPool(NewIdentity("bench-1", ""), 1, processor)
 		data := TestData{Value: 1}
 
 		b.ResetTimer()
@@ -671,7 +671,7 @@ func BenchmarkWorkerPool(b *testing.B) {
 			processors[i] = processor
 		}
 
-		pool := NewWorkerPool("bench-multi", 4, processors...)
+		pool := NewWorkerPool(NewIdentity("bench-multi", ""), 4, processors...)
 		data := TestData{Value: 1}
 
 		b.ResetTimer()
@@ -688,13 +688,13 @@ func BenchmarkWorkerPool(b *testing.B) {
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_ = NewWorkerPool("bench-create", 3, processors...)
+			_ = NewWorkerPool(NewIdentity("bench-create", ""), 3, processors...)
 		}
 	})
 
 	b.Run("SemaphoreOverhead", func(b *testing.B) {
-		fastProcessor := Effect("fast", func(_ context.Context, _ TestData) error { return nil })
-		pool := NewWorkerPool("overhead", 100, fastProcessor) // High worker limit
+		fastProcessor := Effect(NewIdentity("fast", ""), func(_ context.Context, _ TestData) error { return nil })
+		pool := NewWorkerPool(NewIdentity("overhead", ""), 100, fastProcessor) // High worker limit
 		data := TestData{Value: 1}
 
 		b.ResetTimer()
@@ -707,10 +707,10 @@ func BenchmarkWorkerPool(b *testing.B) {
 
 func TestWorkerPoolClose(t *testing.T) {
 	t.Run("Closes All Children", func(t *testing.T) {
-		p1 := newTrackingProcessor[TestData]("p1")
-		p2 := newTrackingProcessor[TestData]("p2")
+		p1 := newTrackingProcessor[TestData](NewIdentity("p1", ""))
+		p2 := newTrackingProcessor[TestData](NewIdentity("p2", ""))
 
-		w := NewWorkerPool("test", 2, p1, p2)
+		w := NewWorkerPool(NewIdentity("test", ""), 2, p1, p2)
 		err := w.Close()
 
 		if err != nil {
@@ -722,10 +722,10 @@ func TestWorkerPoolClose(t *testing.T) {
 	})
 
 	t.Run("Aggregates Errors", func(t *testing.T) {
-		p1 := newTrackingProcessor[TestData]("p1").WithCloseError(errors.New("p1 error"))
-		p2 := newTrackingProcessor[TestData]("p2").WithCloseError(errors.New("p2 error"))
+		p1 := newTrackingProcessor[TestData](NewIdentity("p1", "")).WithCloseError(errors.New("p1 error"))
+		p2 := newTrackingProcessor[TestData](NewIdentity("p2", "")).WithCloseError(errors.New("p2 error"))
 
-		w := NewWorkerPool("test", 2, p1, p2)
+		w := NewWorkerPool(NewIdentity("test", ""), 2, p1, p2)
 		err := w.Close()
 
 		if err == nil {
@@ -737,8 +737,8 @@ func TestWorkerPoolClose(t *testing.T) {
 	})
 
 	t.Run("Idempotency", func(t *testing.T) {
-		p := newTrackingProcessor[TestData]("p")
-		w := NewWorkerPool("test", 2, p)
+		p := newTrackingProcessor[TestData](NewIdentity("p", ""))
+		w := NewWorkerPool(NewIdentity("test", ""), 2, p)
 
 		_ = w.Close()
 		_ = w.Close()
@@ -751,8 +751,8 @@ func TestWorkerPoolClose(t *testing.T) {
 
 func TestWorkerPoolDefaultClock(t *testing.T) {
 	// Test that WorkerPool works without setting a custom clock
-	processor := Transform("test", func(_ context.Context, n clonableInt) clonableInt { return n * 2 })
-	wp := NewWorkerPool("test", 2, processor)
+	processor := Transform(NewIdentity("test", ""), func(_ context.Context, n clonableInt) clonableInt { return n * 2 })
+	wp := NewWorkerPool(NewIdentity("test", ""), 2, processor)
 
 	// Process should use the default real clock
 	result, err := wp.Process(context.Background(), clonableInt(5))
@@ -766,8 +766,8 @@ func TestWorkerPoolDefaultClock(t *testing.T) {
 
 func TestWorkerPoolNilClock(t *testing.T) {
 	// Test that WorkerPool handles nil clock gracefully (falls back to RealClock)
-	processor := Transform("test", func(_ context.Context, n clonableInt) clonableInt { return n * 2 })
-	wp := NewWorkerPool("test", 2, processor)
+	processor := Transform(NewIdentity("test", ""), func(_ context.Context, n clonableInt) clonableInt { return n * 2 })
+	wp := NewWorkerPool(NewIdentity("test", ""), 2, processor)
 
 	// Explicitly set clock to nil
 	wp.WithClock(nil)
@@ -779,5 +779,32 @@ func TestWorkerPoolNilClock(t *testing.T) {
 	}
 	if result != 5 { // Original value returned
 		t.Errorf("expected 5, got %d", result)
+	}
+}
+
+func TestWorkerPool_Schema(t *testing.T) {
+	proc1 := Transform(NewIdentity("worker1", ""), func(_ context.Context, n clonableInt) clonableInt { return n })
+	proc2 := Transform(NewIdentity("worker2", ""), func(_ context.Context, n clonableInt) clonableInt { return n })
+
+	wp := NewWorkerPool(NewIdentity("test-pool", "Worker pool"), 4, proc1, proc2)
+
+	schema := wp.Schema()
+
+	if schema.Identity.Name() != "test-pool" {
+		t.Errorf("Schema Identity.Name() = %v, want %v", schema.Identity.Name(), "test-pool")
+	}
+	if schema.Type != "workerpool" {
+		t.Errorf("Schema Type = %v, want %v", schema.Type, "workerpool")
+	}
+
+	flow, ok := WorkerpoolKey.From(schema)
+	if !ok {
+		t.Fatal("Expected WorkerpoolFlow")
+	}
+	if len(flow.Processors) != 2 {
+		t.Errorf("len(Flow.Processors) = %d, want 2", len(flow.Processors))
+	}
+	if schema.Metadata["workers"] != 4 {
+		t.Errorf("Metadata[workers] = %v, want 4", schema.Metadata["workers"])
 	}
 }

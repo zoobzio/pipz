@@ -24,7 +24,7 @@ func BenchmarkProcessors(b *testing.B) {
 	}
 
 	b.Run("Transform", func(b *testing.B) {
-		processor := pipz.Transform("transform", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+		processor := pipz.Transform(pipz.NewIdentity("transform", ""), func(_ context.Context, p ProfileUpdate) ProfileUpdate {
 			// Simulate field validation and normalization
 			p.Field = strings.ToLower(strings.TrimSpace(p.Field))
 			p.Priority *= 2
@@ -46,7 +46,7 @@ func BenchmarkProcessors(b *testing.B) {
 	})
 
 	b.Run("Apply_Success", func(b *testing.B) {
-		processor := pipz.Apply("apply", func(_ context.Context, p ProfileUpdate) (ProfileUpdate, error) {
+		processor := pipz.Apply(pipz.NewIdentity("apply", ""), func(_ context.Context, p ProfileUpdate) (ProfileUpdate, error) {
 			// Simulate validation with potential error
 			if strings.TrimSpace(p.Field) == "" {
 				return p, errors.New("field cannot be empty")
@@ -70,7 +70,7 @@ func BenchmarkProcessors(b *testing.B) {
 	})
 
 	b.Run("Apply_Error", func(b *testing.B) {
-		processor := pipz.Apply("apply-error", func(_ context.Context, p ProfileUpdate) (ProfileUpdate, error) {
+		processor := pipz.Apply(pipz.NewIdentity("apply-error", ""), func(_ context.Context, p ProfileUpdate) (ProfileUpdate, error) {
 			return p, errors.New("validation failed: invalid field format")
 		})
 		b.ResetTimer()
@@ -84,7 +84,7 @@ func BenchmarkProcessors(b *testing.B) {
 	})
 
 	b.Run("Effect", func(b *testing.B) {
-		processor := pipz.Effect("effect", func(_ context.Context, p ProfileUpdate) error {
+		processor := pipz.Effect(pipz.NewIdentity("effect", ""), func(_ context.Context, p ProfileUpdate) error {
 			// Simulate logging or audit effect
 			if p.Priority > 8 {
 				// High priority updates need extra logging
@@ -105,7 +105,7 @@ func BenchmarkProcessors(b *testing.B) {
 	})
 
 	b.Run("Enrich", func(b *testing.B) {
-		processor := pipz.Enrich("enrich", func(_ context.Context, p ProfileUpdate) (ProfileUpdate, error) {
+		processor := pipz.Enrich(pipz.NewIdentity("enrich", ""), func(_ context.Context, p ProfileUpdate) (ProfileUpdate, error) {
 			// Simulate enrichment with additional data
 			if p.Field == "email" {
 				p.Priority += 3 // Email updates are higher priority
@@ -132,7 +132,7 @@ func BenchmarkProcessors(b *testing.B) {
 			Value int
 		}
 
-		processor := pipz.Mutate("mutate",
+		processor := pipz.Mutate(pipz.NewIdentity("mutate", ""),
 			func(_ context.Context, d MutableData) MutableData {
 				d.Value *= 2
 				return d
@@ -167,7 +167,7 @@ func BenchmarkConnectors(b *testing.B) {
 	}
 
 	// Create simple processors for composition
-	validate := pipz.Transform("validate", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+	validate := pipz.Transform(pipz.NewIdentity("validate", ""), func(_ context.Context, p ProfileUpdate) ProfileUpdate {
 		if p.Priority < 0 {
 			p.Priority = 0
 		}
@@ -176,7 +176,7 @@ func BenchmarkConnectors(b *testing.B) {
 		}
 		return p
 	})
-	enrich := pipz.Transform("enrich", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+	enrich := pipz.Transform(pipz.NewIdentity("enrich", ""), func(_ context.Context, p ProfileUpdate) ProfileUpdate {
 		if p.Timestamp == 0 {
 			p.Timestamp = time.Now().Unix()
 		}
@@ -184,7 +184,7 @@ func BenchmarkConnectors(b *testing.B) {
 	})
 
 	b.Run("Sequence_Short", func(b *testing.B) {
-		seq := pipz.NewSequence("short", validate, enrich)
+		seq := pipz.NewSequence(pipz.NewIdentity("short", ""), validate, enrich)
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -200,12 +200,12 @@ func BenchmarkConnectors(b *testing.B) {
 	b.Run("Sequence_Long", func(b *testing.B) {
 		processors := make([]pipz.Chainable[ProfileUpdate], 10)
 		for i := 0; i < 10; i++ {
-			processors[i] = pipz.Transform("step", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+			processors[i] = pipz.Transform(pipz.NewIdentity("step", ""), func(_ context.Context, p ProfileUpdate) ProfileUpdate {
 				p.Priority = (p.Priority + 1) % 11 // Cycle priority 0-10
 				return p
 			})
 		}
-		seq := pipz.NewSequence("long", processors...)
+		seq := pipz.NewSequence(pipz.NewIdentity("long", ""), processors...)
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -219,7 +219,7 @@ func BenchmarkConnectors(b *testing.B) {
 	})
 
 	b.Run("Concurrent_Two", func(b *testing.B) {
-		concurrent := pipz.NewConcurrent("concurrent", nil, validate, enrich)
+		concurrent := pipz.NewConcurrent(pipz.NewIdentity("concurrent", ""), nil, validate, enrich)
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -233,7 +233,7 @@ func BenchmarkConnectors(b *testing.B) {
 	})
 
 	b.Run("Race_Two", func(b *testing.B) {
-		race := pipz.NewRace("race", validate, enrich)
+		race := pipz.NewRace(pipz.NewIdentity("race", ""), validate, enrich)
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -247,7 +247,7 @@ func BenchmarkConnectors(b *testing.B) {
 	})
 
 	b.Run("Contest_First_Wins", func(b *testing.B) {
-		contest := pipz.NewContest("contest",
+		contest := pipz.NewContest(pipz.NewIdentity("contest", ""),
 			func(_ context.Context, p ProfileUpdate) bool { return p.Priority >= 5 },
 			validate, enrich,
 		)
@@ -264,7 +264,7 @@ func BenchmarkConnectors(b *testing.B) {
 	})
 
 	b.Run("Fallback_Primary_Success", func(b *testing.B) {
-		fallback := pipz.NewFallback("fallback", validate, enrich)
+		fallback := pipz.NewFallback(pipz.NewIdentity("fallback", ""), validate, enrich)
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -278,10 +278,10 @@ func BenchmarkConnectors(b *testing.B) {
 	})
 
 	b.Run("Fallback_Primary_Fails", func(b *testing.B) {
-		failing := pipz.Apply("fail", func(_ context.Context, p ProfileUpdate) (ProfileUpdate, error) {
+		failing := pipz.Apply(pipz.NewIdentity("fail", ""), func(_ context.Context, p ProfileUpdate) (ProfileUpdate, error) {
 			return p, errors.New("validation failed")
 		})
-		fallback := pipz.NewFallback("fallback", failing, validate)
+		fallback := pipz.NewFallback(pipz.NewIdentity("fallback", ""), failing, validate)
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -307,7 +307,7 @@ func BenchmarkStatefulConnectors(b *testing.B) {
 		Priority:  5,
 	}
 
-	processor := pipz.Transform("processor", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+	processor := pipz.Transform(pipz.NewIdentity("processor", ""), func(_ context.Context, p ProfileUpdate) ProfileUpdate {
 		p.Priority *= 2
 		if p.Priority > 10 {
 			p.Priority = 10
@@ -316,7 +316,7 @@ func BenchmarkStatefulConnectors(b *testing.B) {
 	})
 
 	b.Run("CircuitBreaker_Closed", func(b *testing.B) {
-		cb := pipz.NewCircuitBreaker("cb", processor, 5, time.Minute)
+		cb := pipz.NewCircuitBreaker(pipz.NewIdentity("cb", ""), processor, 5, time.Minute)
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -331,10 +331,10 @@ func BenchmarkStatefulConnectors(b *testing.B) {
 
 	b.Run("CircuitBreaker_Open", func(b *testing.B) {
 		// Create a circuit breaker and force it open
-		failingProcessor := pipz.Apply("fail", func(_ context.Context, p ProfileUpdate) (ProfileUpdate, error) {
+		failingProcessor := pipz.Apply(pipz.NewIdentity("fail", ""), func(_ context.Context, p ProfileUpdate) (ProfileUpdate, error) {
 			return p, errors.New("service unavailable")
 		})
-		cb := pipz.NewCircuitBreaker("cb", failingProcessor, 1, time.Minute)
+		cb := pipz.NewCircuitBreaker(pipz.NewIdentity("cb", ""), failingProcessor, 1, time.Minute)
 
 		// Open the circuit
 		_, _ = cb.Process(ctx, data) //nolint:errcheck // This will fail and open circuit - intentionally ignoring error
@@ -350,11 +350,8 @@ func BenchmarkStatefulConnectors(b *testing.B) {
 	})
 
 	b.Run("RateLimiter_Within_Limit", func(b *testing.B) {
-		// Create rate-limited sequence
-		limitedPipeline := pipz.NewSequence("rate-limited",
-			pipz.NewRateLimiter[ProfileUpdate]("limiter", 1000000, 100), // Very high limit
-			processor,
-		)
+		// Create rate-limited pipeline
+		limitedPipeline := pipz.NewRateLimiter[ProfileUpdate](pipz.NewIdentity("limiter", ""), 1000000, 100, processor) // Very high limit
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -368,7 +365,7 @@ func BenchmarkStatefulConnectors(b *testing.B) {
 	})
 
 	b.Run("Timeout_Fast_Operation", func(b *testing.B) {
-		timeout := pipz.NewTimeout("timeout", processor, time.Second)
+		timeout := pipz.NewTimeout(pipz.NewIdentity("timeout", ""), processor, time.Second)
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -382,7 +379,7 @@ func BenchmarkStatefulConnectors(b *testing.B) {
 	})
 
 	b.Run("Retry_Success_First_Try", func(b *testing.B) {
-		retry := pipz.NewRetry("retry", processor, 3)
+		retry := pipz.NewRetry(pipz.NewIdentity("retry", ""), processor, 3)
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -396,7 +393,7 @@ func BenchmarkStatefulConnectors(b *testing.B) {
 	})
 
 	b.Run("Backoff_Success_First_Try", func(b *testing.B) {
-		backoff := pipz.NewBackoff("backoff", processor, 3, time.Microsecond)
+		backoff := pipz.NewBackoff(pipz.NewIdentity("backoff", ""), processor, 3, time.Microsecond)
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -416,9 +413,9 @@ func BenchmarkErrorHandling(b *testing.B) {
 	data := ClonableInt(42)
 
 	b.Run("Handle_No_Error", func(b *testing.B) {
-		processor := pipz.Transform("success", func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 })
-		handler := pipz.NewHandle("handler", processor,
-			pipz.Effect("log", func(_ context.Context, _ *pipz.Error[ClonableInt]) error {
+		processor := pipz.Transform(pipz.NewIdentity("success", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 })
+		handler := pipz.NewHandle(pipz.NewIdentity("handler", ""), processor,
+			pipz.Effect(pipz.NewIdentity("log", ""), func(_ context.Context, _ *pipz.Error[ClonableInt]) error {
 				return nil
 			}),
 		)
@@ -435,11 +432,11 @@ func BenchmarkErrorHandling(b *testing.B) {
 	})
 
 	b.Run("Handle_With_Error", func(b *testing.B) {
-		processor := pipz.Apply("error", func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
+		processor := pipz.Apply(pipz.NewIdentity("error", ""), func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
 			return 0, errors.New("test error")
 		})
-		handler := pipz.NewHandle("handler", processor,
-			pipz.Effect("log", func(_ context.Context, _ *pipz.Error[ClonableInt]) error {
+		handler := pipz.NewHandle(pipz.NewIdentity("handler", ""), processor,
+			pipz.Effect(pipz.NewIdentity("log", ""), func(_ context.Context, _ *pipz.Error[ClonableInt]) error {
 				return nil
 			}),
 		)
@@ -462,7 +459,7 @@ func BenchmarkErrorHandling(b *testing.B) {
 				Timestamp: time.Now(),
 				InputData: data,
 				Err:       errors.New("test error"),
-				Path:      []pipz.Name{"test-processor"},
+				Path:      []pipz.Identity{pipz.NewIdentity("test-processor", "")},
 			}
 			_ = err
 		}
@@ -478,7 +475,7 @@ func BenchmarkErrorHandling(b *testing.B) {
 				Timestamp: time.Now(),
 				InputData: data,
 				Err:       originalErr,
-				Path:      []pipz.Name{"wrapper"},
+				Path:      []pipz.Identity{pipz.NewIdentity("wrapper", "")},
 			}
 			_ = err
 		}
@@ -490,7 +487,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 	ctx := context.Background()
 
 	b.Run("Zero_Alloc_Transform", func(b *testing.B) {
-		processor := pipz.Transform("transform", func(_ context.Context, n ClonableInt) ClonableInt {
+		processor := pipz.Transform(pipz.NewIdentity("transform", ""), func(_ context.Context, n ClonableInt) ClonableInt {
 			return n * 2
 		})
 		data := ClonableInt(42)
@@ -508,7 +505,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 	})
 
 	b.Run("String_Processing", func(b *testing.B) {
-		processor := pipz.Transform("string", func(_ context.Context, s string) string {
+		processor := pipz.Transform(pipz.NewIdentity("string", ""), func(_ context.Context, s string) string {
 			return s + "_processed"
 		})
 		data := "test"
@@ -543,7 +540,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 			}
 		}
 
-		processor := pipz.Transform("clone", func(_ context.Context, d TestData) TestData {
+		processor := pipz.Transform(pipz.NewIdentity("clone", ""), func(_ context.Context, d TestData) TestData {
 			return cloneFunc(d)
 		})
 
@@ -569,9 +566,9 @@ func BenchmarkMemoryUsage(b *testing.B) {
 		// Create a large pipeline to measure memory overhead
 		processors := make([]pipz.Chainable[ClonableInt], 50)
 		for i := 0; i < 50; i++ {
-			processors[i] = pipz.Transform("step", func(_ context.Context, n ClonableInt) ClonableInt { return n + 1 })
+			processors[i] = pipz.Transform(pipz.NewIdentity("step", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n + 1 })
 		}
-		seq := pipz.NewSequence("large", processors...)
+		seq := pipz.NewSequence(pipz.NewIdentity("large", ""), processors...)
 		data := ClonableInt(42)
 
 		b.ResetTimer()
@@ -593,7 +590,7 @@ func BenchmarkConcurrentAccess(b *testing.B) {
 	data := ClonableInt(42)
 
 	b.Run("Single_Processor_Concurrent", func(b *testing.B) {
-		processor := pipz.Transform("concurrent", func(_ context.Context, n ClonableInt) ClonableInt {
+		processor := pipz.Transform(pipz.NewIdentity("concurrent", ""), func(_ context.Context, n ClonableInt) ClonableInt {
 			return n * 2
 		})
 
@@ -614,8 +611,8 @@ func BenchmarkConcurrentAccess(b *testing.B) {
 	})
 
 	b.Run("Circuit_Breaker_Concurrent", func(b *testing.B) {
-		processor := pipz.Transform("base", func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 })
-		cb := pipz.NewCircuitBreaker("cb", processor, 1000, time.Minute)
+		processor := pipz.Transform(pipz.NewIdentity("base", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 })
+		cb := pipz.NewCircuitBreaker(pipz.NewIdentity("cb", ""), processor, 1000, time.Minute)
 
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -634,11 +631,8 @@ func BenchmarkConcurrentAccess(b *testing.B) {
 	})
 
 	b.Run("Rate_Limiter_Concurrent", func(b *testing.B) {
-		processor := pipz.Transform("base", func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 })
-		limitedPipeline := pipz.NewSequence("rate-limited",
-			pipz.NewRateLimiter[ClonableInt]("limiter", 1000000, 100),
-			processor,
-		)
+		processor := pipz.Transform(pipz.NewIdentity("base", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 })
+		limitedPipeline := pipz.NewRateLimiter[ClonableInt](pipz.NewIdentity("limiter", ""), 1000000, 100, processor)
 
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -696,7 +690,7 @@ func BenchmarkTestingHelpers(b *testing.B) {
 	})
 
 	b.Run("ChaosProcessor_No_Chaos", func(b *testing.B) {
-		baseProcessor := pipz.Transform("base", func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 })
+		baseProcessor := pipz.Transform(pipz.NewIdentity("base", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 })
 		chaos := pipztesting.NewChaosProcessor("chaos", baseProcessor, pipztesting.ChaosConfig{
 			FailureRate: 0.0, // No failures for benchmark
 			LatencyMin:  0,
@@ -719,7 +713,7 @@ func BenchmarkTestingHelpers(b *testing.B) {
 	})
 
 	b.Run("ChaosProcessor_With_Chaos", func(b *testing.B) {
-		baseProcessor := pipz.Transform("base", func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 })
+		baseProcessor := pipz.Transform(pipz.NewIdentity("base", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 })
 		chaos := pipztesting.NewChaosProcessor("chaos", baseProcessor, pipztesting.ChaosConfig{
 			FailureRate: 0.1, // 10% failure rate
 			LatencyMin:  0,   // No latency for benchmark speed
@@ -748,7 +742,7 @@ func BenchmarkPanicRecovery(b *testing.B) {
 
 	b.Run("Normal_Path_Defer_Overhead", func(b *testing.B) {
 		// Measure the defer overhead in normal execution (no panic)
-		processor := pipz.Transform("normal", func(_ context.Context, n ClonableInt) ClonableInt {
+		processor := pipz.Transform(pipz.NewIdentity("normal", ""), func(_ context.Context, n ClonableInt) ClonableInt {
 			return n * 2
 		})
 		b.ResetTimer()
@@ -765,7 +759,7 @@ func BenchmarkPanicRecovery(b *testing.B) {
 
 	b.Run("Panic_Recovery_Simple_Panic", func(b *testing.B) {
 		// Measure panic recovery with simple panic message
-		processor := pipz.Apply("panic-simple", func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
+		processor := pipz.Apply(pipz.NewIdentity("panic-simple", ""), func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
 			panic("simple test panic")
 		})
 		b.ResetTimer()
@@ -781,7 +775,7 @@ func BenchmarkPanicRecovery(b *testing.B) {
 	b.Run("Panic_Recovery_Complex_Message", func(b *testing.B) {
 		// Measure sanitization overhead with complex panic content
 		complexMessage := "panic with addresses 0x123456789abcdef and paths /sensitive/path/data"
-		processor := pipz.Apply("panic-complex", func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
+		processor := pipz.Apply(pipz.NewIdentity("panic-complex", ""), func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
 			panic(complexMessage)
 		})
 		b.ResetTimer()
@@ -796,7 +790,7 @@ func BenchmarkPanicRecovery(b *testing.B) {
 
 	b.Run("Panic_Recovery_Nil_Panic", func(b *testing.B) {
 		// Measure recovery from nil panic (edge case)
-		processor := pipz.Apply("panic-nil", func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
+		processor := pipz.Apply(pipz.NewIdentity("panic-nil", ""), func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
 			panic(nil)
 		})
 		b.ResetTimer()
@@ -811,10 +805,10 @@ func BenchmarkPanicRecovery(b *testing.B) {
 
 	b.Run("Panic_vs_Regular_Error", func(b *testing.B) {
 		// Compare panic recovery cost vs normal error handling
-		errorProcessor := pipz.Apply("regular-error", func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
+		errorProcessor := pipz.Apply(pipz.NewIdentity("regular-error", ""), func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
 			return 0, errors.New("regular error")
 		})
-		panicProcessor := pipz.Apply("panic-error", func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
+		panicProcessor := pipz.Apply(pipz.NewIdentity("panic-error", ""), func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
 			panic("equivalent panic")
 		})
 
@@ -843,11 +837,11 @@ func BenchmarkPanicRecovery(b *testing.B) {
 		// Measure cumulative defer overhead in long pipelines
 		processors := make([]pipz.Chainable[ClonableInt], 20)
 		for i := 0; i < 20; i++ {
-			processors[i] = pipz.Transform("step", func(_ context.Context, n ClonableInt) ClonableInt {
+			processors[i] = pipz.Transform(pipz.NewIdentity("step", ""), func(_ context.Context, n ClonableInt) ClonableInt {
 				return n + 1
 			})
 		}
-		pipeline := pipz.NewSequence("long-pipeline", processors...)
+		pipeline := pipz.NewSequence(pipz.NewIdentity("long-pipeline", ""), processors...)
 
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -863,7 +857,7 @@ func BenchmarkPanicRecovery(b *testing.B) {
 
 	b.Run("Concurrent_Panic_Recovery", func(b *testing.B) {
 		// Test panic recovery under concurrent access
-		processor := pipz.Transform("concurrent-safe", func(_ context.Context, n ClonableInt) ClonableInt {
+		processor := pipz.Transform(pipz.NewIdentity("concurrent-safe", ""), func(_ context.Context, n ClonableInt) ClonableInt {
 			// Occasionally panic to test recovery under load
 			if n%1000 == 0 {
 				panic("concurrent panic test")
@@ -893,7 +887,7 @@ func BenchmarkPanicRecovery(b *testing.B) {
 		defer func() { ballast = nil }()
 		_ = ballast // Prevent unused variable warning
 
-		processor := pipz.Apply("memory-pressure", func(_ context.Context, n ClonableInt) (ClonableInt, error) {
+		processor := pipz.Apply(pipz.NewIdentity("memory-pressure", ""), func(_ context.Context, n ClonableInt) (ClonableInt, error) {
 			if n%100 == 0 {
 				panic("memory pressure panic test")
 			}
@@ -927,7 +921,7 @@ func BenchmarkPanicRecovery_RealWorld(b *testing.B) {
 
 	b.Run("JSON_Parse_Panic", func(b *testing.B) {
 		// Simulate JSON parsing panic with realistic data
-		processor := pipz.Apply("json-parse", func(_ context.Context, u User) (User, error) {
+		processor := pipz.Apply(pipz.NewIdentity("json-parse", ""), func(_ context.Context, u User) (User, error) {
 			// Simulate a panic that might occur during JSON processing
 			if u.Email == "test@example.com" {
 				panic("json: cannot unmarshal number into Go struct field")
@@ -947,7 +941,7 @@ func BenchmarkPanicRecovery_RealWorld(b *testing.B) {
 
 	b.Run("Database_Connection_Panic", func(b *testing.B) {
 		// Simulate database driver panic with realistic error
-		processor := pipz.Apply("db-query", func(_ context.Context, _ User) (User, error) {
+		processor := pipz.Apply(pipz.NewIdentity("db-query", ""), func(_ context.Context, _ User) (User, error) {
 			panic("sql: database connection lost during query execution")
 		})
 
@@ -963,7 +957,7 @@ func BenchmarkPanicRecovery_RealWorld(b *testing.B) {
 
 	b.Run("Index_Out_Of_Bounds", func(b *testing.B) {
 		// Simulate slice bounds panic - common in data processing
-		processor := pipz.Apply("slice-access", func(_ context.Context, u User) (User, error) {
+		processor := pipz.Apply(pipz.NewIdentity("slice-access", ""), func(_ context.Context, u User) (User, error) {
 			slice := []int{1, 2, 3}
 			_ = slice[10] // Panic: index out of range
 			return u, nil
@@ -981,7 +975,7 @@ func BenchmarkPanicRecovery_RealWorld(b *testing.B) {
 
 	b.Run("Nil_Pointer_Dereference", func(b *testing.B) {
 		// Simulate nil pointer panic - another common scenario
-		processor := pipz.Apply("nil-deref", func(_ context.Context, u User) (User, error) {
+		processor := pipz.Apply(pipz.NewIdentity("nil-deref", ""), func(_ context.Context, u User) (User, error) {
 			var ptr *string
 			_ = *ptr // Panic: nil pointer dereference
 			return u, nil
@@ -999,19 +993,19 @@ func BenchmarkPanicRecovery_RealWorld(b *testing.B) {
 
 	b.Run("Complex_Pipeline_With_Intermittent_Panics", func(b *testing.B) {
 		// Realistic pipeline where some stages might panic
-		pipeline := pipz.NewSequence("complex-pipeline",
-			pipz.Transform("validate", func(_ context.Context, u User) User {
+		pipeline := pipz.NewSequence(pipz.NewIdentity("complex-pipeline", ""),
+			pipz.Transform(pipz.NewIdentity("validate", ""), func(_ context.Context, u User) User {
 				if u.ID <= 0 {
 					panic("invalid user ID")
 				}
 				return u
 			}),
-			pipz.Apply("enrich", func(_ context.Context, u User) (User, error) {
+			pipz.Apply(pipz.NewIdentity("enrich", ""), func(_ context.Context, u User) (User, error) {
 				// This succeeds normally
 				u.Age++
 				return u, nil
 			}),
-			pipz.Transform("format", func(_ context.Context, u User) User {
+			pipz.Transform(pipz.NewIdentity("format", ""), func(_ context.Context, u User) User {
 				if u.Email == "" {
 					panic("empty email not allowed")
 				}
@@ -1039,19 +1033,19 @@ func BenchmarkPanicRecovery_Connectors(b *testing.B) {
 	data := ClonableInt(42)
 
 	// Create processors that may panic
-	panicProcessor := pipz.Transform("panic", func(_ context.Context, n ClonableInt) ClonableInt {
+	panicProcessor := pipz.Transform(pipz.NewIdentity("panic", ""), func(_ context.Context, n ClonableInt) ClonableInt {
 		if n == 42 {
 			panic("test panic in connector")
 		}
 		return n * 2
 	})
 
-	safeProcessor := pipz.Transform("safe", func(_ context.Context, n ClonableInt) ClonableInt {
+	safeProcessor := pipz.Transform(pipz.NewIdentity("safe", ""), func(_ context.Context, n ClonableInt) ClonableInt {
 		return n + 10
 	})
 
 	b.Run("Sequence_With_Panic", func(b *testing.B) {
-		seq := pipz.NewSequence("seq", panicProcessor, safeProcessor)
+		seq := pipz.NewSequence(pipz.NewIdentity("seq", ""), panicProcessor, safeProcessor)
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -1063,7 +1057,7 @@ func BenchmarkPanicRecovery_Connectors(b *testing.B) {
 	})
 
 	b.Run("Fallback_Primary_Panics", func(b *testing.B) {
-		fallback := pipz.NewFallback("fallback", panicProcessor, safeProcessor)
+		fallback := pipz.NewFallback(pipz.NewIdentity("fallback", ""), panicProcessor, safeProcessor)
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -1077,7 +1071,7 @@ func BenchmarkPanicRecovery_Connectors(b *testing.B) {
 	})
 
 	b.Run("Retry_With_Panic", func(b *testing.B) {
-		retry := pipz.NewRetry("retry", panicProcessor, 3)
+		retry := pipz.NewRetry(pipz.NewIdentity("retry", ""), panicProcessor, 3)
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -1089,7 +1083,7 @@ func BenchmarkPanicRecovery_Connectors(b *testing.B) {
 	})
 
 	b.Run("CircuitBreaker_With_Panic", func(b *testing.B) {
-		cb := pipz.NewCircuitBreaker("cb", panicProcessor, 5, time.Minute)
+		cb := pipz.NewCircuitBreaker(pipz.NewIdentity("cb", ""), panicProcessor, 5, time.Minute)
 		b.ResetTimer()
 		b.ReportAllocs()
 
@@ -1102,8 +1096,8 @@ func BenchmarkPanicRecovery_Connectors(b *testing.B) {
 
 	b.Run("Handle_Panic_Processing", func(b *testing.B) {
 		// Test panic recovery in error handling
-		handler := pipz.NewHandle("handler", panicProcessor,
-			pipz.Effect("log-panic", func(_ context.Context, e *pipz.Error[ClonableInt]) error {
+		handler := pipz.NewHandle(pipz.NewIdentity("handler", ""), panicProcessor,
+			pipz.Effect(pipz.NewIdentity("log-panic", ""), func(_ context.Context, e *pipz.Error[ClonableInt]) error {
 				// Process the panic error
 				_ = e.Error()
 				return nil

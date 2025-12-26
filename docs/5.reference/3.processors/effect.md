@@ -20,12 +20,12 @@ Creates a processor that performs side effects without modifying the input data.
 ## Function Signature
 
 ```go
-func Effect[T any](name Name, fn func(context.Context, T) error) Chainable[T]
+func Effect[T any](identity Identity, fn func(context.Context, T) error) Chainable[T]
 ```
 
 ## Parameters
 
-- `name` (`Name`) - Identifier for the processor used in error messages and debugging
+- `identity` (`Identity`) - Identifier for the processor used in error messages and debugging
 - `fn` - Side effect function that takes context and input, returns error on failure
 
 ## Returns
@@ -43,40 +43,52 @@ Returns a `Chainable[T]` that passes through the original input unchanged (unles
 
 ```go
 // Logging
-logger := pipz.Effect("log", func(ctx context.Context, order Order) error {
-    log.Printf("Processing order: %s, amount: %.2f", order.ID, order.Total)
-    return nil
-})
+logger := pipz.Effect(
+    pipz.NewIdentity("log-order", "Logs order processing details"),
+    func(ctx context.Context, order Order) error {
+        log.Printf("Processing order: %s, amount: %.2f", order.ID, order.Total)
+        return nil
+    },
+)
 
 // Metrics
-metrics := pipz.Effect("metrics", func(ctx context.Context, event Event) error {
-    if err := metricsClient.Increment("events.processed", 
-        "type", event.Type,
-        "source", event.Source,
-    ); err != nil {
-        return fmt.Errorf("metrics failed: %w", err)
-    }
-    return nil
-})
+metrics := pipz.Effect(
+    pipz.NewIdentity("record-metrics", "Records event metrics"),
+    func(ctx context.Context, event Event) error {
+        if err := metricsClient.Increment("events.processed",
+            "type", event.Type,
+            "source", event.Source,
+        ); err != nil {
+            return fmt.Errorf("metrics failed: %w", err)
+        }
+        return nil
+    },
+)
 
 // Audit trail
-audit := pipz.Effect("audit", func(ctx context.Context, user User) error {
-    entry := AuditEntry{
-        UserID:    user.ID,
-        Action:    "profile_update",
-        Timestamp: time.Now(),
-        IP:        getIPFromContext(ctx),
-    }
-    return auditLog.Write(ctx, entry)
-})
+audit := pipz.Effect(
+    pipz.NewIdentity("audit-trail", "Writes audit log entry"),
+    func(ctx context.Context, user User) error {
+        entry := AuditEntry{
+            UserID:    user.ID,
+            Action:    "profile_update",
+            Timestamp: time.Now(),
+            IP:        getIPFromContext(ctx),
+        }
+        return auditLog.Write(ctx, entry)
+    },
+)
 
 // Validation (no data modification)
-checkPermissions := pipz.Effect("auth", func(ctx context.Context, req Request) error {
-    if !req.User.HasPermission(req.Action) {
-        return errors.New("permission denied")
-    }
-    return nil
-})
+checkPermissions := pipz.Effect(
+    pipz.NewIdentity("check-permissions", "Validates user permissions"),
+    func(ctx context.Context, req Request) error {
+        if !req.User.HasPermission(req.Action) {
+            return errors.New("permission denied")
+        }
+        return nil
+    },
+)
 ```
 
 ## When to Use
@@ -108,22 +120,35 @@ Effect has similar performance to Apply:
 ## Common Patterns
 
 ```go
+// Define identities upfront
+var (
+    ObserveID       = pipz.NewIdentity("observe", "Order observability pipeline")
+    LogOrderID      = pipz.NewIdentity("log-order", "Logs order details")
+    RecordMetricsID = pipz.NewIdentity("record-metrics", "Records order metrics")
+    AuditOrderID    = pipz.NewIdentity("audit-order", "Audits order processing")
+    NotificationsID = pipz.NewIdentity("notifications", "Notification effects")
+    SendEmailID     = pipz.NewIdentity("send-email", "Sends email notification")
+    SendSMSID       = pipz.NewIdentity("send-sms", "Sends SMS notification")
+    SendPushID      = pipz.NewIdentity("send-push", "Sends push notification")
+)
+
 // Custom observability pipeline
-observe := pipz.NewSequence[Order]("observe",
-    pipz.Effect("log", logOrder),
-    pipz.Effect("metrics", recordMetrics),
-    pipz.Effect("audit", auditOrder),
+observe := pipz.NewSequence[Order](ObserveID,
+    pipz.Effect(LogOrderID, logOrder),
+    pipz.Effect(RecordMetricsID, recordMetrics),
+    pipz.Effect(AuditOrderID, auditOrder),
 )
 
 // Notification effects running in parallel
-notifications := pipz.NewConcurrent[User](
-    pipz.Effect("email", sendEmail),
-    pipz.Effect("sms", sendSMS),
-    pipz.Effect("push", sendPushNotification),
+notifications := pipz.NewConcurrent[User](NotificationsID,
+    pipz.Effect(SendEmailID, sendEmail),
+    pipz.Effect(SendSMSID, sendSMS),
+    pipz.Effect(SendPushID, sendPushNotification),
 )
 
 // Conditional logging
-debugLog := pipz.Mutate("debug",
+debugLog := pipz.Mutate(
+    pipz.NewIdentity("debug-log", "Logs debug information when enabled"),
     func(ctx context.Context, data Data) Data {
         log.Printf("DEBUG: %+v", data)
         return data
@@ -134,12 +159,15 @@ debugLog := pipz.Mutate("debug",
 )
 
 // Critical validation
-authorize := pipz.Effect("authorize", func(ctx context.Context, req Request) error {
-    if !isAuthorized(ctx, req.UserID, req.Resource) {
-        return fmt.Errorf("unauthorized access to %s", req.Resource)
-    }
-    return nil
-})
+authorize := pipz.Effect(
+    pipz.NewIdentity("authorize-request", "Authorizes user access to resource"),
+    func(ctx context.Context, req Request) error {
+        if !isAuthorized(ctx, req.UserID, req.Resource) {
+            return fmt.Errorf("unauthorized access to %s", req.Resource)
+        }
+        return nil
+    },
+)
 ```
 
 ## Gotchas
@@ -147,38 +175,50 @@ authorize := pipz.Effect("authorize", func(ctx context.Context, req Request) err
 ### ❌ Don't modify the input
 ```go
 // WRONG - Effect shouldn't modify data
-effect := pipz.Effect("bad", func(ctx context.Context, user *User) error {
-    user.LastSeen = time.Now() // Modifying!
-    return nil
-})
+effect := pipz.Effect(
+    pipz.NewIdentity("bad-effect", "Incorrectly modifies data"),
+    func(ctx context.Context, user *User) error {
+        user.LastSeen = time.Now() // Modifying!
+        return nil
+    },
+)
 ```
 
 ### ✅ Use Transform for modifications
 ```go
 // RIGHT - Use Transform to modify
-transform := pipz.Transform("update", func(ctx context.Context, user User) User {
-    user.LastSeen = time.Now()
-    return user
-})
+transform := pipz.Transform(
+    pipz.NewIdentity("update-last-seen", "Updates last seen timestamp"),
+    func(ctx context.Context, user User) User {
+        user.LastSeen = time.Now()
+        return user
+    },
+)
 ```
 
 ### ❌ Don't return data through side channels
 ```go
 // WRONG - Using closure to smuggle data out
 var result string
-effect := pipz.Effect("fetch", func(ctx context.Context, id string) error {
-    data, err := fetchData(id)
-    result = data // Side channel!
-    return err
-})
+effect := pipz.Effect(
+    pipz.NewIdentity("fetch-data", "Fetches data via side channel"),
+    func(ctx context.Context, id string) error {
+        data, err := fetchData(id)
+        result = data // Side channel!
+        return err
+    },
+)
 ```
 
 ### ✅ Use Apply for operations that return data
 ```go
 // RIGHT - Proper data flow
-apply := pipz.Apply("fetch", func(ctx context.Context, id string) (Data, error) {
-    return fetchData(id)
-})
+apply := pipz.Apply(
+    pipz.NewIdentity("fetch-data", "Fetches data from external source"),
+    func(ctx context.Context, id string) (Data, error) {
+        return fetchData(id)
+    },
+)
 ```
 
 ## Error Handling
@@ -186,16 +226,20 @@ apply := pipz.Apply("fetch", func(ctx context.Context, id string) (Data, error) 
 Effect errors include the same rich context as other processors:
 
 ```go
-audit := pipz.Effect("audit", func(ctx context.Context, tx Transaction) error {
-    if err := auditDB.Log(ctx, tx); err != nil {
-        // This error will stop the pipeline
-        return fmt.Errorf("audit log failed: %w", err)
-    }
-    return nil
-})
+audit := pipz.Effect(
+    pipz.NewIdentity("audit-transaction", "Logs transaction to audit database"),
+    func(ctx context.Context, tx Transaction) error {
+        if err := auditDB.Log(ctx, tx); err != nil {
+            // This error will stop the pipeline
+            return fmt.Errorf("audit log failed: %w", err)
+        }
+        return nil
+    },
+)
 
 // To make effects optional, wrap with error handling
-optionalAudit := pipz.NewEnrich("optional-audit", 
+optionalAudit := pipz.NewEnrich(
+    pipz.NewIdentity("optional-audit", "Attempts to log transaction audit"),
     func(ctx context.Context, tx Transaction) (Transaction, error) {
         if err := auditDB.Log(ctx, tx); err != nil {
             // Log but don't fail

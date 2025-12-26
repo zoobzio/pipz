@@ -12,11 +12,14 @@ import (
 // It wraps the underlying error with information about where and when
 // the failure occurred, what data was being processed, and the complete
 // path through the processing chain.
+//
+// The Path field contains Identity values, enabling correlation between
+// error paths and schema definitions via the Identity.ID() UUIDs.
 type Error[T any] struct {
 	Timestamp time.Time
 	InputData T
 	Err       error
-	Path      []Name
+	Path      []Identity
 	Duration  time.Duration
 	Timeout   bool
 	Canceled  bool
@@ -30,8 +33,8 @@ func (e *Error[T]) Error() string {
 		return "<nil>"
 	}
 	pathStrs := make([]string, len(e.Path))
-	for i, name := range e.Path {
-		pathStrs[i] = string(name)
+	for i, id := range e.Path {
+		pathStrs[i] = id.Name()
 	}
 	path := strings.Join(pathStrs, " -> ")
 	if path == "" {
@@ -84,12 +87,12 @@ func (e *Error[T]) IsCanceled() bool {
 // It represents a panic that occurred during processing, with sensitive
 // information sanitized to prevent information leakage through panic messages.
 type panicError struct {
-	processorName Name
-	sanitized     string
+	identity  Identity
+	sanitized string
 }
 
 func (pe *panicError) Error() string {
-	return fmt.Sprintf("panic in processor %q: %s", pe.processorName, pe.sanitized)
+	return fmt.Sprintf("panic in processor %q: %s", pe.identity.Name(), pe.sanitized)
 }
 
 // sanitizePanicMessage removes potentially sensitive information from panic messages.
@@ -149,15 +152,15 @@ func sanitizePanicMessage(panicValue interface{}) string {
 //
 // This function should be used as a deferred call at the beginning of all Process methods:
 //
-//	defer recoverFromPanic(&result, &err, processorName, inputData)
-func recoverFromPanic[T any](result *T, err *error, processorName Name, inputData T) {
+//	defer recoverFromPanic(&result, &err, identity, inputData)
+func recoverFromPanic[T any](result *T, err *error, identity Identity, inputData T) {
 	if r := recover(); r != nil {
 		var zero T
 		*result = zero
 		*err = &Error[T]{
-			Path:      []Name{processorName},
+			Path:      []Identity{identity},
 			InputData: inputData,
-			Err:       &panicError{processorName: processorName, sanitized: sanitizePanicMessage(r)},
+			Err:       &panicError{identity: identity, sanitized: sanitizePanicMessage(r)},
 			Timestamp: time.Now(),
 			Duration:  0, // We don't track duration for panics
 			Timeout:   false,

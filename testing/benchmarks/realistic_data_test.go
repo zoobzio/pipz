@@ -52,17 +52,17 @@ func BenchmarkRealisticDataProcessing(b *testing.B) {
 
 	b.Run("User_Processing_Simple_Integer", func(b *testing.B) {
 		// Simple integer processing for comparison
-		pipeline := pipz.NewSequence("user-simple",
-			pipz.Transform("validate", func(_ context.Context, n ClonableInt) ClonableInt {
+		pipeline := pipz.NewSequence(pipz.NewIdentity("user-simple", ""),
+			pipz.Transform(pipz.NewIdentity("validate", ""), func(_ context.Context, n ClonableInt) ClonableInt {
 				if n <= 0 {
 					return 0
 				}
 				return n
 			}),
-			pipz.Transform("enrich", func(_ context.Context, n ClonableInt) ClonableInt {
+			pipz.Transform(pipz.NewIdentity("enrich", ""), func(_ context.Context, n ClonableInt) ClonableInt {
 				return n * 2
 			}),
-			pipz.Transform("format", func(_ context.Context, n ClonableInt) ClonableInt {
+			pipz.Transform(pipz.NewIdentity("format", ""), func(_ context.Context, n ClonableInt) ClonableInt {
 				return n + 100
 			}),
 		)
@@ -82,8 +82,8 @@ func BenchmarkRealisticDataProcessing(b *testing.B) {
 
 	b.Run("User_Processing_Realistic_Data", func(b *testing.B) {
 		// Realistic user processing pipeline
-		pipeline := pipz.NewSequence("user-realistic",
-			pipz.Apply("validate", func(_ context.Context, u User) (User, error) {
+		pipeline := pipz.NewSequence(pipz.NewIdentity("user-realistic", ""),
+			pipz.Apply(pipz.NewIdentity("validate", ""), func(_ context.Context, u User) (User, error) {
 				if u.ID <= 0 {
 					return u, errors.New("invalid user ID")
 				}
@@ -92,13 +92,13 @@ func BenchmarkRealisticDataProcessing(b *testing.B) {
 				}
 				return u, nil
 			}),
-			pipz.Transform("enrich", func(_ context.Context, u User) User {
+			pipz.Transform(pipz.NewIdentity("enrich", ""), func(_ context.Context, u User) User {
 				// Simulate enrichment with metadata
 				u.Metadata["processing_timestamp"] = time.Now().Unix()
 				u.Metadata["enriched"] = true
 				return u
 			}),
-			pipz.Transform("format", func(_ context.Context, u User) User {
+			pipz.Transform(pipz.NewIdentity("format", ""), func(_ context.Context, u User) User {
 				// Simulate formatting operations
 				u.Name = strings.ToTitle(u.Name)
 				u.Email = strings.ToLower(u.Email)
@@ -120,17 +120,17 @@ func BenchmarkRealisticDataProcessing(b *testing.B) {
 
 	b.Run("Order_Processing_Simple_Integer", func(b *testing.B) {
 		// Simple integer processing for comparison
-		pipeline := pipz.NewSequence("order-simple",
-			pipz.Apply("validate", func(_ context.Context, n ClonableInt) (ClonableInt, error) {
+		pipeline := pipz.NewSequence(pipz.NewIdentity("order-simple", ""),
+			pipz.Apply(pipz.NewIdentity("validate", ""), func(_ context.Context, n ClonableInt) (ClonableInt, error) {
 				if n <= 0 {
 					return 0, errors.New("invalid value")
 				}
 				return n, nil
 			}),
-			pipz.Transform("calculate", func(_ context.Context, n ClonableInt) ClonableInt {
+			pipz.Transform(pipz.NewIdentity("calculate", ""), func(_ context.Context, n ClonableInt) ClonableInt {
 				return n * 2
 			}),
-			pipz.Transform("finalize", func(_ context.Context, n ClonableInt) ClonableInt {
+			pipz.Transform(pipz.NewIdentity("finalize", ""), func(_ context.Context, n ClonableInt) ClonableInt {
 				return n + 100
 			}),
 		)
@@ -150,8 +150,8 @@ func BenchmarkRealisticDataProcessing(b *testing.B) {
 
 	b.Run("Order_Processing_Realistic_Data", func(b *testing.B) {
 		// Realistic order processing pipeline
-		pipeline := pipz.NewSequence("order-realistic",
-			pipz.Apply("validate", func(_ context.Context, o Order) (Order, error) {
+		pipeline := pipz.NewSequence(pipz.NewIdentity("order-realistic", ""),
+			pipz.Apply(pipz.NewIdentity("validate", ""), func(_ context.Context, o Order) (Order, error) {
 				if o.ID == "" {
 					return o, errors.New("order ID required")
 				}
@@ -163,7 +163,7 @@ func BenchmarkRealisticDataProcessing(b *testing.B) {
 				}
 				return o, nil
 			}),
-			pipz.Transform("calculate_total", func(_ context.Context, o Order) Order {
+			pipz.Transform(pipz.NewIdentity("calculate_total", ""), func(_ context.Context, o Order) Order {
 				// Recalculate total from items
 				total := 0.0
 				for _, item := range o.Items {
@@ -174,7 +174,7 @@ func BenchmarkRealisticDataProcessing(b *testing.B) {
 				o.Total = total
 				return o
 			}),
-			pipz.Transform("update_status", func(_ context.Context, o Order) Order {
+			pipz.Transform(pipz.NewIdentity("update_status", ""), func(_ context.Context, o Order) Order {
 				if o.Total > 100.0 {
 					o.Status = "approved"
 				} else {
@@ -198,11 +198,11 @@ func BenchmarkRealisticDataProcessing(b *testing.B) {
 
 	b.Run("Concurrent_Processing_Simple_Integer", func(b *testing.B) {
 		// Simple concurrent processing
-		concurrent := pipz.NewConcurrent("concurrent-simple",
+		concurrent := pipz.NewConcurrent(pipz.NewIdentity("concurrent-simple", ""),
 			nil,
-			pipz.Transform("proc1", func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 }),
-			pipz.Transform("proc2", func(_ context.Context, n ClonableInt) ClonableInt { return n + 10 }),
-			pipz.Transform("proc3", func(_ context.Context, n ClonableInt) ClonableInt { return n - 5 }),
+			pipz.Transform(pipz.NewIdentity("proc1", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 }),
+			pipz.Transform(pipz.NewIdentity("proc2", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n + 10 }),
+			pipz.Transform(pipz.NewIdentity("proc3", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n - 5 }),
 		)
 
 		data := ClonableInt(42)
@@ -220,9 +220,9 @@ func BenchmarkRealisticDataProcessing(b *testing.B) {
 
 	b.Run("Concurrent_Processing_Realistic_Data", func(b *testing.B) {
 		// Realistic concurrent processing
-		concurrent := pipz.NewConcurrent("concurrent-realistic",
+		concurrent := pipz.NewConcurrent(pipz.NewIdentity("concurrent-realistic", ""),
 			nil,
-			pipz.Transform("validate_address", func(_ context.Context, u User) User {
+			pipz.Transform(pipz.NewIdentity("validate_address", ""), func(_ context.Context, u User) User {
 				// Simulate address validation
 				if u.Metadata == nil {
 					u.Metadata = make(map[string]interface{})
@@ -230,7 +230,7 @@ func BenchmarkRealisticDataProcessing(b *testing.B) {
 				u.Metadata["address_validated"] = true
 				return u
 			}),
-			pipz.Transform("check_permissions", func(_ context.Context, u User) User {
+			pipz.Transform(pipz.NewIdentity("check_permissions", ""), func(_ context.Context, u User) User {
 				// Simulate permission check
 				if u.Metadata == nil {
 					u.Metadata = make(map[string]interface{})
@@ -238,7 +238,7 @@ func BenchmarkRealisticDataProcessing(b *testing.B) {
 				u.Metadata["permissions_checked"] = true
 				return u
 			}),
-			pipz.Transform("audit_log", func(_ context.Context, u User) User {
+			pipz.Transform(pipz.NewIdentity("audit_log", ""), func(_ context.Context, u User) User {
 				// Simulate audit logging
 				if u.Metadata == nil {
 					u.Metadata = make(map[string]interface{})
@@ -377,8 +377,8 @@ func BenchmarkErrorHandlingOverhead(b *testing.B) {
 	}
 
 	b.Run("Simple_Error_Simple_Data", func(b *testing.B) {
-		pipeline := pipz.NewSequence("simple-error",
-			pipz.Apply("fail", func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
+		pipeline := pipz.NewSequence(pipz.NewIdentity("simple-error", ""),
+			pipz.Apply(pipz.NewIdentity("fail", ""), func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
 				return 0, errors.New("simple error")
 			}),
 		)
@@ -397,8 +397,8 @@ func BenchmarkErrorHandlingOverhead(b *testing.B) {
 	})
 
 	b.Run("Rich_Error_Complex_Data", func(b *testing.B) {
-		pipeline := pipz.NewSequence("rich-error",
-			pipz.Apply("fail", func(_ context.Context, u User) (User, error) {
+		pipeline := pipz.NewSequence(pipz.NewIdentity("rich-error", ""),
+			pipz.Apply(pipz.NewIdentity("fail", ""), func(_ context.Context, u User) (User, error) {
 				return u, errors.New("complex error with user data")
 			}),
 		)

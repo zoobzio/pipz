@@ -28,18 +28,20 @@ import (
 //
 // Timeout is often combined with Retry for robust error handling:
 //
-//	pipz.NewRetry(pipz.NewTimeout(operation, 5*time.Second), 3)
+//	pipz.NewRetry(RetryID, pipz.NewTimeout(TimeoutID, operation, 5*time.Second), 3)
 //
 // Example:
 //
+//	var TimeoutID = pipz.NewIdentity("user-service-timeout", "Enforces 2s timeout")
 //	timeout := pipz.NewTimeout(
+//	    TimeoutID,
 //	    userServiceCall,
 //	    2*time.Second,  // Must complete within 2 seconds
 //	)
 type Timeout[T any] struct {
 	processor Chainable[T]
 	clock     clockz.Clock
-	name      Name
+	identity  Identity
 	duration  time.Duration
 	mu        sync.RWMutex
 	closeOnce sync.Once
@@ -47,9 +49,9 @@ type Timeout[T any] struct {
 }
 
 // NewTimeout creates a new Timeout connector.
-func NewTimeout[T any](name Name, processor Chainable[T], duration time.Duration) *Timeout[T] {
+func NewTimeout[T any](identity Identity, processor Chainable[T], duration time.Duration) *Timeout[T] {
 	return &Timeout[T]{
-		name:      name,
+		identity:  identity,
 		processor: processor,
 		duration:  duration,
 	}
@@ -57,7 +59,7 @@ func NewTimeout[T any](name Name, processor Chainable[T], duration time.Duration
 
 // Process implements the Chainable interface.
 func (t *Timeout[T]) Process(ctx context.Context, data T) (result T, err error) {
-	defer recoverFromPanic(&result, &err, t.name, data)
+	defer recoverFromPanic(&result, &err, t.identity, data)
 
 	t.mu.RLock()
 	processor := t.processor
@@ -82,9 +84,9 @@ func (t *Timeout[T]) Process(ctx context.Context, data T) (result T, err error) 
 				// Convert panic to error and send it
 				var zero T
 				panicErr := &Error[T]{
-					Path:      []Name{t.name},
+					Path:      []Identity{t.identity},
 					InputData: data,
-					Err:       &panicError{processorName: t.name, sanitized: sanitizePanicMessage(r)},
+					Err:       &panicError{identity: t.identity, sanitized: sanitizePanicMessage(r)},
 					Timestamp: time.Now(),
 					Duration:  0,
 					Timeout:   false,
@@ -112,8 +114,8 @@ func (t *Timeout[T]) Process(ctx context.Context, data T) (result T, err error) 
 			// Operation failed (but didn't timeout)
 			var pipeErr *Error[T]
 			if errors.As(res.err, &pipeErr) {
-				// Prepend this timeout's name to the path
-				pipeErr.Path = append([]Name{t.name}, pipeErr.Path...)
+				// Prepend this timeout's identity to the path
+				pipeErr.Path = append([]Identity{t.identity}, pipeErr.Path...)
 				return res.result, pipeErr
 			}
 			// Handle non-pipeline errors by wrapping them
@@ -121,7 +123,7 @@ func (t *Timeout[T]) Process(ctx context.Context, data T) (result T, err error) 
 				Timestamp: time.Now(),
 				InputData: data,
 				Err:       res.err,
-				Path:      []Name{t.name},
+				Path:      []Identity{t.identity},
 			}
 		}
 		// Success!
@@ -133,7 +135,8 @@ func (t *Timeout[T]) Process(ctx context.Context, data T) (result T, err error) 
 		// Emit timeout signal only when deadline exceeded (not cancellation)
 		if isTimeout {
 			capitan.Error(context.Background(), SignalTimeoutTriggered,
-				FieldName.Field(string(t.name)),
+				FieldName.Field(t.identity.Name()),
+				FieldIdentityID.Field(t.identity.ID().String()),
 				FieldDuration.Field(duration.Seconds()),
 				FieldTimestamp.Field(float64(time.Now().Unix())),
 			)
@@ -142,7 +145,7 @@ func (t *Timeout[T]) Process(ctx context.Context, data T) (result T, err error) 
 		return data, &Error[T]{
 			Err:       ctx.Err(),
 			InputData: data,
-			Path:      []Name{t.name},
+			Path:      []Identity{t.identity},
 			Timeout:   isTimeout,
 			Canceled:  errors.Is(ctx.Err(), context.Canceled),
 			Timestamp: time.Now(),
@@ -165,11 +168,26 @@ func (t *Timeout[T]) GetDuration() time.Duration {
 	return t.duration
 }
 
-// Name returns the name of this connector.
-func (t *Timeout[T]) Name() Name {
+// Identity returns the identity of this connector.
+func (t *Timeout[T]) Identity() Identity {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	return t.name
+	return t.identity
+}
+
+// Schema returns a Node representing this connector in the pipeline schema.
+func (t *Timeout[T]) Schema() Node {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	return Node{
+		Identity: t.identity,
+		Type:     "timeout",
+		Flow:     TimeoutFlow{Processor: t.processor.Schema()},
+		Metadata: map[string]any{
+			"duration": t.duration.String(),
+		},
+	}
 }
 
 // WithClock sets a custom clock for testing.

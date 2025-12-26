@@ -15,12 +15,12 @@ import (
 func TestCircuitBreaker(t *testing.T) {
 	t.Run("Normal Operation in Closed State", func(t *testing.T) {
 		calls := 0
-		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, n int) (int, error) {
 			calls++
 			return n * 2, nil
 		})
 
-		breaker := NewCircuitBreaker("test-breaker", processor, 3, time.Second)
+		breaker := NewCircuitBreaker(NewIdentity("test-breaker", ""), processor, 3, time.Second)
 
 		// Should allow normal operation
 		for i := 0; i < 5; i++ {
@@ -43,12 +43,12 @@ func TestCircuitBreaker(t *testing.T) {
 
 	t.Run("Opens After Failure Threshold", func(t *testing.T) {
 		failureCount := 0
-		processor := Apply("test", func(_ context.Context, _ int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, _ int) (int, error) {
 			failureCount++
 			return 0, errors.New("service error")
 		})
 
-		breaker := NewCircuitBreaker("test-breaker", processor, 3, time.Second)
+		breaker := NewCircuitBreaker(NewIdentity("test-breaker", ""), processor, 3, time.Second)
 
 		// First 3 failures should pass through
 		for i := 0; i < 3; i++ {
@@ -81,7 +81,7 @@ func TestCircuitBreaker(t *testing.T) {
 	t.Run("Resets to Half-Open After Timeout", func(t *testing.T) {
 		clock := clockz.NewFakeClock()
 		failureCount := 0
-		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, n int) (int, error) {
 			failureCount++
 			if failureCount <= 3 {
 				return 0, errors.New("service error")
@@ -89,7 +89,7 @@ func TestCircuitBreaker(t *testing.T) {
 			return n * 2, nil
 		})
 
-		breaker := NewCircuitBreaker("test-breaker", processor, 3, 5*time.Second)
+		breaker := NewCircuitBreaker(NewIdentity("test-breaker", ""), processor, 3, 5*time.Second)
 		breaker.WithClock(clock)
 
 		// Trigger opening
@@ -130,12 +130,12 @@ func TestCircuitBreaker(t *testing.T) {
 	t.Run("Half-Open Returns to Open on Failure", func(t *testing.T) {
 		clock := clockz.NewFakeClock()
 		callCount := 0
-		processor := Apply("test", func(_ context.Context, _ int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, _ int) (int, error) {
 			callCount++
 			return 0, errors.New("still broken")
 		})
 
-		breaker := NewCircuitBreaker("test-breaker", processor, 3, 5*time.Second)
+		breaker := NewCircuitBreaker(NewIdentity("test-breaker", ""), processor, 3, 5*time.Second)
 		breaker.WithClock(clock)
 
 		// Trigger opening
@@ -169,14 +169,14 @@ func TestCircuitBreaker(t *testing.T) {
 	})
 
 	t.Run("Success Resets Failure Count", func(t *testing.T) {
-		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, n int) (int, error) {
 			if n == 999 {
 				return 0, errors.New("error")
 			}
 			return n * 2, nil
 		})
 
-		breaker := NewCircuitBreaker("test-breaker", processor, 3, time.Second)
+		breaker := NewCircuitBreaker(NewIdentity("test-breaker", ""), processor, 3, time.Second)
 
 		// Two failures
 		breaker.Process(context.Background(), 999)
@@ -210,7 +210,7 @@ func TestCircuitBreaker(t *testing.T) {
 	t.Run("Multiple Success Threshold in Half-Open", func(t *testing.T) {
 		clock := clockz.NewFakeClock()
 		callCount := 0
-		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, n int) (int, error) {
 			callCount++
 			if callCount <= 3 {
 				return 0, errors.New("failure")
@@ -218,7 +218,7 @@ func TestCircuitBreaker(t *testing.T) {
 			return n * 2, nil
 		})
 
-		breaker := NewCircuitBreaker("test-breaker", processor, 3, 5*time.Second)
+		breaker := NewCircuitBreaker(NewIdentity("test-breaker", ""), processor, 3, 5*time.Second)
 		breaker.SetSuccessThreshold(2) // Need 2 successes to close
 		breaker.WithClock(clock)
 
@@ -262,7 +262,7 @@ func TestCircuitBreaker(t *testing.T) {
 		failAfter := atomic.Int32{}
 		failAfter.Store(100) // Allow first 100 calls
 
-		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, n int) (int, error) {
 			count := failAfter.Add(-1)
 			if count < 0 {
 				return 0, errors.New("failure")
@@ -270,10 +270,10 @@ func TestCircuitBreaker(t *testing.T) {
 			return n * 2, nil
 		})
 
-		breaker := NewCircuitBreaker("test-breaker", processor, 10, time.Second)
+		breaker := NewCircuitBreaker(NewIdentity("test-breaker", ""), processor, 10, time.Second)
 
 		var wg sync.WaitGroup
-		errors := make(chan error, 1000)
+		errs := make(chan error, 1000)
 
 		// Launch concurrent requests
 		for i := 0; i < 20; i++ {
@@ -284,17 +284,17 @@ func TestCircuitBreaker(t *testing.T) {
 					_, err := breaker.Process(context.Background(), id*100+j)
 					if err != nil && !strings.Contains(err.Error(), "circuit breaker is open") &&
 						!strings.Contains(err.Error(), "failure") {
-						errors <- err
+						errs <- err
 					}
 				}
 			}(i)
 		}
 
 		wg.Wait()
-		close(errors)
+		close(errs)
 
 		// Check for unexpected errors
-		for err := range errors {
+		for err := range errs {
 			t.Errorf("unexpected error: %v", err)
 		}
 
@@ -306,11 +306,11 @@ func TestCircuitBreaker(t *testing.T) {
 	})
 
 	t.Run("Manual Reset", func(t *testing.T) {
-		processor := Apply("test", func(_ context.Context, _ int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, _ int) (int, error) {
 			return 0, errors.New("failure")
 		})
 
-		breaker := NewCircuitBreaker("test-breaker", processor, 1, time.Hour)
+		breaker := NewCircuitBreaker(NewIdentity("test-breaker", ""), processor, 1, time.Hour)
 
 		// Open the breaker
 		breaker.Process(context.Background(), 1)
@@ -328,8 +328,8 @@ func TestCircuitBreaker(t *testing.T) {
 	})
 
 	t.Run("Configuration Methods", func(t *testing.T) {
-		processor := Transform("test", func(_ context.Context, n int) int { return n })
-		breaker := NewCircuitBreaker("test", processor, 5, 10*time.Second)
+		processor := Transform(NewIdentity("test", ""), func(_ context.Context, n int) int { return n })
+		breaker := NewCircuitBreaker(NewIdentity("test", ""), processor, 5, 10*time.Second)
 
 		// Test getters with defaults
 		if threshold := breaker.GetFailureThreshold(); threshold != 5 {
@@ -361,20 +361,20 @@ func TestCircuitBreaker(t *testing.T) {
 	})
 
 	t.Run("Name Method", func(t *testing.T) {
-		processor := Transform("test", func(_ context.Context, n int) int { return n })
-		breaker := NewCircuitBreaker("my-breaker", processor, 3, time.Second)
+		processor := Transform(NewIdentity("test", ""), func(_ context.Context, n int) int { return n })
+		breaker := NewCircuitBreaker(NewIdentity("my-breaker", ""), processor, 3, time.Second)
 
-		if name := breaker.Name(); name != "my-breaker" {
+		if name := breaker.Identity().Name(); name != "my-breaker" {
 			t.Errorf("expected name 'my-breaker', got %q", name)
 		}
 	})
 
 	t.Run("Panic Recovery", func(t *testing.T) {
-		panicProcessor := Apply("panic", func(_ context.Context, _ int) (int, error) {
+		panicProcessor := Apply(NewIdentity("panic", ""), func(_ context.Context, _ int) (int, error) {
 			panic("processor panic")
 		})
 
-		breaker := NewCircuitBreaker("panic-breaker", panicProcessor, 3, time.Second)
+		breaker := NewCircuitBreaker(NewIdentity("panic-breaker", ""), panicProcessor, 3, time.Second)
 		data := 42
 
 		result, err := breaker.Process(context.Background(), data)
@@ -388,7 +388,7 @@ func TestCircuitBreaker(t *testing.T) {
 			t.Fatal("expected pipz.Error")
 		}
 
-		if pipzErr.Path[0] != "panic-breaker" {
+		if pipzErr.Path[0].Name() != "panic-breaker" {
 			t.Errorf("expected path to start with 'panic-breaker', got %v", pipzErr.Path)
 		}
 
@@ -404,7 +404,7 @@ func TestCircuitBreaker(t *testing.T) {
 		processingDelay := make(chan struct{})
 		completions := atomic.Int32{}
 
-		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, n int) (int, error) {
 			// First request blocks, others fail
 			if completions.Add(1) == 1 {
 				<-processingDelay
@@ -413,7 +413,7 @@ func TestCircuitBreaker(t *testing.T) {
 			return 0, errors.New("failure")
 		})
 
-		breaker := NewCircuitBreaker("test-breaker", processor, 3, 5*time.Second)
+		breaker := NewCircuitBreaker(NewIdentity("test-breaker", ""), processor, 3, 5*time.Second)
 		breaker.WithClock(clock)
 
 		// Open the breaker
@@ -468,7 +468,7 @@ func TestCircuitBreaker(t *testing.T) {
 	t.Run("Pipeline Integration", func(t *testing.T) {
 		failUntil := 3
 		callCount := 0
-		processor := Apply("flaky", func(_ context.Context, n int) (int, error) {
+		processor := Apply(NewIdentity("flaky", ""), func(_ context.Context, n int) (int, error) {
 			callCount++
 			if callCount <= failUntil {
 				return 0, errors.New("temporary failure")
@@ -476,8 +476,8 @@ func TestCircuitBreaker(t *testing.T) {
 			return n * 2, nil
 		})
 
-		breaker := NewCircuitBreaker("breaker", processor, 5, time.Second)
-		retry := NewRetry("retry", breaker, 10)
+		breaker := NewCircuitBreaker(NewIdentity("breaker", ""), processor, 5, time.Second)
+		retry := NewRetry(NewIdentity("retry", ""), breaker, 10)
 
 		// Should retry through the circuit breaker
 		result, err := retry.Process(context.Background(), 42)
@@ -497,9 +497,9 @@ func TestCircuitBreaker(t *testing.T) {
 
 func TestCircuitBreakerClose(t *testing.T) {
 	t.Run("Closes Child Processor", func(t *testing.T) {
-		p := newTrackingProcessor[int]("p")
+		p := newTrackingProcessor[int](NewIdentity("p", ""))
 
-		cb := NewCircuitBreaker("test", p, 3, time.Second)
+		cb := NewCircuitBreaker(NewIdentity("test", ""), p, 3, time.Second)
 		err := cb.Close()
 
 		if err != nil {
@@ -511,9 +511,9 @@ func TestCircuitBreakerClose(t *testing.T) {
 	})
 
 	t.Run("Propagates Close Error", func(t *testing.T) {
-		p := newTrackingProcessor[int]("p").WithCloseError(errors.New("close error"))
+		p := newTrackingProcessor[int](NewIdentity("p", "")).WithCloseError(errors.New("close error"))
 
-		cb := NewCircuitBreaker("test", p, 3, time.Second)
+		cb := NewCircuitBreaker(NewIdentity("test", ""), p, 3, time.Second)
 		err := cb.Close()
 
 		if err == nil {
@@ -525,8 +525,8 @@ func TestCircuitBreakerClose(t *testing.T) {
 	})
 
 	t.Run("Idempotency", func(t *testing.T) {
-		p := newTrackingProcessor[int]("p")
-		cb := NewCircuitBreaker("test", p, 3, time.Second)
+		p := newTrackingProcessor[int](NewIdentity("p", ""))
+		cb := NewCircuitBreaker(NewIdentity("test", ""), p, 3, time.Second)
 
 		_ = cb.Close()
 		_ = cb.Close()
@@ -539,8 +539,8 @@ func TestCircuitBreakerClose(t *testing.T) {
 
 func BenchmarkCircuitBreaker(b *testing.B) {
 	b.Run("Closed State", func(b *testing.B) {
-		processor := Transform("test", func(_ context.Context, n int) int { return n * 2 })
-		breaker := NewCircuitBreaker("bench-breaker", processor, 100, time.Second)
+		processor := Transform(NewIdentity("test", ""), func(_ context.Context, n int) int { return n * 2 })
+		breaker := NewCircuitBreaker(NewIdentity("bench-breaker", ""), processor, 100, time.Second)
 		ctx := context.Background()
 
 		b.ResetTimer()
@@ -552,10 +552,10 @@ func BenchmarkCircuitBreaker(b *testing.B) {
 	})
 
 	b.Run("Open State", func(b *testing.B) {
-		processor := Apply("test", func(_ context.Context, _ int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, _ int) (int, error) {
 			return 0, errors.New("failure")
 		})
-		breaker := NewCircuitBreaker("bench-breaker", processor, 1, time.Hour)
+		breaker := NewCircuitBreaker(NewIdentity("bench-breaker", ""), processor, 1, time.Hour)
 		ctx := context.Background()
 
 		// Open the circuit
@@ -572,14 +572,14 @@ func BenchmarkCircuitBreaker(b *testing.B) {
 	b.Run("Mixed State with Clock", func(b *testing.B) {
 		clock := clockz.NewFakeClock()
 		shouldFail := atomic.Bool{}
-		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, n int) (int, error) {
 			if shouldFail.Load() {
 				return 0, errors.New("failure")
 			}
 			return n * 2, nil
 		})
 
-		breaker := NewCircuitBreaker("bench-breaker", processor, 3, 50*time.Millisecond)
+		breaker := NewCircuitBreaker(NewIdentity("bench-breaker", ""), processor, 3, 50*time.Millisecond)
 		breaker.WithClock(clock)
 		ctx := context.Background()
 
@@ -599,22 +599,22 @@ func BenchmarkCircuitBreaker(b *testing.B) {
 }
 
 func TestCircuitBreakerGuardClauses(t *testing.T) {
-	processor := Transform("test", func(_ context.Context, n int) int { return n })
+	processor := Transform(NewIdentity("test", ""), func(_ context.Context, n int) int { return n })
 
 	t.Run("NewCircuitBreaker clamps failureThreshold", func(t *testing.T) {
-		breaker := NewCircuitBreaker("test", processor, 0, time.Second)
+		breaker := NewCircuitBreaker(NewIdentity("test", ""), processor, 0, time.Second)
 		if threshold := breaker.GetFailureThreshold(); threshold != 1 {
 			t.Errorf("expected threshold clamped to 1, got %d", threshold)
 		}
 
-		breaker2 := NewCircuitBreaker("test", processor, -5, time.Second)
+		breaker2 := NewCircuitBreaker(NewIdentity("test", ""), processor, -5, time.Second)
 		if threshold := breaker2.GetFailureThreshold(); threshold != 1 {
 			t.Errorf("expected threshold clamped to 1, got %d", threshold)
 		}
 	})
 
 	t.Run("SetFailureThreshold clamps to 1", func(t *testing.T) {
-		breaker := NewCircuitBreaker("test", processor, 5, time.Second)
+		breaker := NewCircuitBreaker(NewIdentity("test", ""), processor, 5, time.Second)
 		breaker.SetFailureThreshold(0)
 		if threshold := breaker.GetFailureThreshold(); threshold != 1 {
 			t.Errorf("expected threshold clamped to 1, got %d", threshold)
@@ -627,7 +627,7 @@ func TestCircuitBreakerGuardClauses(t *testing.T) {
 	})
 
 	t.Run("SetSuccessThreshold clamps to 1", func(t *testing.T) {
-		breaker := NewCircuitBreaker("test", processor, 5, time.Second)
+		breaker := NewCircuitBreaker(NewIdentity("test", ""), processor, 5, time.Second)
 		breaker.SetSuccessThreshold(0)
 		if threshold := breaker.GetSuccessThreshold(); threshold != 1 {
 			t.Errorf("expected threshold clamped to 1, got %d", threshold)
@@ -636,6 +636,34 @@ func TestCircuitBreakerGuardClauses(t *testing.T) {
 		breaker.SetSuccessThreshold(-10)
 		if threshold := breaker.GetSuccessThreshold(); threshold != 1 {
 			t.Errorf("expected threshold clamped to 1, got %d", threshold)
+		}
+	})
+
+	t.Run("Schema", func(t *testing.T) {
+		procID := NewIdentity("inner-proc", "")
+		proc := Transform(procID, func(_ context.Context, n int) int { return n })
+
+		cbID := NewIdentity("test-cb", "Circuit breaker")
+		cb := NewCircuitBreaker(cbID, proc, 5, 30*time.Second)
+
+		schema := cb.Schema()
+
+		if schema.Identity.Name() != "test-cb" {
+			t.Errorf("Schema Identity.Name() = %v, want %v", schema.Identity.Name(), "test-cb")
+		}
+		if schema.Type != "circuitbreaker" {
+			t.Errorf("Schema Type = %v, want %v", schema.Type, "circuitbreaker")
+		}
+
+		flow, ok := CircuitBreakerKey.From(schema)
+		if !ok {
+			t.Fatal("Expected CircuitBreakerFlow")
+		}
+		if flow.Processor.Identity.Name() != "inner-proc" {
+			t.Errorf("Flow.Processor.Identity.Name() = %v, want %v", flow.Processor.Identity.Name(), "inner-proc")
+		}
+		if schema.Metadata["failure_threshold"] != 5 {
+			t.Errorf("Metadata[failure_threshold] = %v, want 5", schema.Metadata["failure_threshold"])
 		}
 	})
 }

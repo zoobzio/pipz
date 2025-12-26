@@ -15,12 +15,12 @@ import (
 func TestBackoff(t *testing.T) {
 	t.Run("Success On First Try", func(t *testing.T) {
 		calls := 0
-		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, n int) (int, error) {
 			calls++
 			return n * 2, nil
 		})
 
-		backoff := NewBackoff("test-backoff", processor, 3, 10*time.Millisecond)
+		backoff := NewBackoff(NewIdentity("test-backoff", ""), processor, 3, 10*time.Millisecond)
 		result, err := backoff.Process(context.Background(), 5)
 
 		if err != nil {
@@ -36,7 +36,7 @@ func TestBackoff(t *testing.T) {
 
 	t.Run("Backoff Timing With Clock", func(t *testing.T) {
 		var calls int32
-		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, n int) (int, error) {
 			atomic.AddInt32(&calls, 1)
 			if atomic.LoadInt32(&calls) < 3 {
 				return 0, errors.New("temporary error")
@@ -45,7 +45,7 @@ func TestBackoff(t *testing.T) {
 		})
 
 		clock := clockz.NewFakeClock()
-		backoff := NewBackoff("test-backoff", processor, 3, 50*time.Millisecond).WithClock(clock)
+		backoff := NewBackoff(NewIdentity("test-backoff", ""), processor, 3, 50*time.Millisecond).WithClock(clock)
 
 		// Run in goroutine so we can advance the clock
 		done := make(chan struct{})
@@ -89,7 +89,7 @@ func TestBackoff(t *testing.T) {
 
 	t.Run("Backoff Timing Without Clock", func(t *testing.T) {
 		var calls int32
-		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, n int) (int, error) {
 			atomic.AddInt32(&calls, 1)
 			if atomic.LoadInt32(&calls) < 3 {
 				return 0, errors.New("temporary error")
@@ -97,7 +97,7 @@ func TestBackoff(t *testing.T) {
 			return n * 2, nil
 		})
 
-		backoff := NewBackoff("test-backoff", processor, 3, 50*time.Millisecond)
+		backoff := NewBackoff(NewIdentity("test-backoff", ""), processor, 3, 50*time.Millisecond)
 
 		start := time.Now()
 		result, err := backoff.Process(context.Background(), 5)
@@ -116,8 +116,8 @@ func TestBackoff(t *testing.T) {
 	})
 
 	t.Run("Configuration Methods", func(t *testing.T) {
-		processor := Transform("test", func(_ context.Context, n int) int { return n })
-		backoff := NewBackoff("test", processor, 3, 100*time.Millisecond)
+		processor := Transform(NewIdentity("test", ""), func(_ context.Context, n int) int { return n })
+		backoff := NewBackoff(NewIdentity("test", ""), processor, 3, 100*time.Millisecond)
 
 		if backoff.GetMaxAttempts() != 3 {
 			t.Errorf("expected 3, got %d", backoff.GetMaxAttempts())
@@ -138,16 +138,16 @@ func TestBackoff(t *testing.T) {
 	})
 
 	t.Run("Name Method", func(t *testing.T) {
-		processor := Transform("noop", func(_ context.Context, n int) int { return n })
-		backoff := NewBackoff("my-backoff", processor, 3, time.Second)
-		if backoff.Name() != "my-backoff" {
-			t.Errorf("expected 'my-backoff', got %q", backoff.Name())
+		processor := Transform(NewIdentity("noop", ""), func(_ context.Context, n int) int { return n })
+		backoff := NewBackoff(NewIdentity("my-backoff", ""), processor, 3, time.Second)
+		if backoff.Identity().Name() != "my-backoff" {
+			t.Errorf("expected 'my-backoff', got %q", backoff.Identity().Name())
 		}
 	})
 
 	t.Run("Context Cancellation During Delay", func(t *testing.T) {
 		calls := 0
-		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, n int) (int, error) {
 			calls++
 			if calls == 1 {
 				return 0, errors.New("first attempt error")
@@ -156,7 +156,7 @@ func TestBackoff(t *testing.T) {
 			return n * 2, nil
 		})
 
-		backoff := NewBackoff("test", processor, 3, 100*time.Millisecond)
+		backoff := NewBackoff(NewIdentity("test", ""), processor, 3, 100*time.Millisecond)
 
 		// Cancel context after 50ms (during first backoff delay)
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -176,24 +176,24 @@ func TestBackoff(t *testing.T) {
 	})
 
 	t.Run("Constructor With Invalid MaxAttempts", func(t *testing.T) {
-		processor := Transform("test", func(_ context.Context, n int) int { return n })
+		processor := Transform(NewIdentity("test", ""), func(_ context.Context, n int) int { return n })
 
 		// Test with 0 attempts - should be clamped to 1
-		backoff := NewBackoff("test", processor, 0, time.Millisecond)
+		backoff := NewBackoff(NewIdentity("test", ""), processor, 0, time.Millisecond)
 		if backoff.GetMaxAttempts() != 1 {
 			t.Errorf("expected maxAttempts to be clamped to 1, got %d", backoff.GetMaxAttempts())
 		}
 
 		// Test with negative attempts - should be clamped to 1
-		backoff = NewBackoff("test", processor, -5, time.Millisecond)
+		backoff = NewBackoff(NewIdentity("test", ""), processor, -5, time.Millisecond)
 		if backoff.GetMaxAttempts() != 1 {
 			t.Errorf("expected maxAttempts to be clamped to 1, got %d", backoff.GetMaxAttempts())
 		}
 	})
 
 	t.Run("SetMaxAttempts With Invalid Value", func(t *testing.T) {
-		processor := Transform("test", func(_ context.Context, n int) int { return n })
-		backoff := NewBackoff("test", processor, 3, time.Millisecond)
+		processor := Transform(NewIdentity("test", ""), func(_ context.Context, n int) int { return n })
+		backoff := NewBackoff(NewIdentity("test", ""), processor, 3, time.Millisecond)
 
 		// Set to 0 - should be clamped to 1
 		backoff.SetMaxAttempts(0)
@@ -210,12 +210,12 @@ func TestBackoff(t *testing.T) {
 
 	t.Run("Exhausts Retries Returns Data", func(t *testing.T) {
 		calls := 0
-		processor := Apply("test", func(_ context.Context, _ int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, _ int) (int, error) {
 			calls++
 			return 0, errors.New("persistent error")
 		})
 
-		backoff := NewBackoff("test-backoff", processor, 2, 10*time.Millisecond)
+		backoff := NewBackoff(NewIdentity("test-backoff", ""), processor, 2, 10*time.Millisecond)
 		result, err := backoff.Process(context.Background(), 42)
 
 		if err == nil {
@@ -261,7 +261,7 @@ func TestBackoff(t *testing.T) {
 		defer listener.Close()
 
 		calls := 0
-		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, n int) (int, error) {
 			calls++
 			if calls < 3 {
 				return 0, errors.New("temporary error")
@@ -269,7 +269,7 @@ func TestBackoff(t *testing.T) {
 			return n * 2, nil
 		})
 
-		backoff := NewBackoff("backoff-hook-test", processor, 3, 100*time.Millisecond)
+		backoff := NewBackoff(NewIdentity("backoff-hook-test", ""), processor, 3, 100*time.Millisecond)
 		result, err := backoff.Process(context.Background(), 5)
 
 		if err != nil {
@@ -322,9 +322,9 @@ func TestBackoff(t *testing.T) {
 
 	t.Run("Close Tests", func(t *testing.T) {
 		t.Run("Closes Child Processor", func(t *testing.T) {
-			p := newTrackingProcessor[int]("p")
+			p := newTrackingProcessor[int](NewIdentity("p", ""))
 
-			b := NewBackoff("test", p, 3, 10*time.Millisecond)
+			b := NewBackoff(NewIdentity("test", ""), p, 3, 10*time.Millisecond)
 			err := b.Close()
 
 			if err != nil {
@@ -336,9 +336,9 @@ func TestBackoff(t *testing.T) {
 		})
 
 		t.Run("Propagates Close Error", func(t *testing.T) {
-			p := newTrackingProcessor[int]("p").WithCloseError(errors.New("close error"))
+			p := newTrackingProcessor[int](NewIdentity("p", "")).WithCloseError(errors.New("close error"))
 
-			b := NewBackoff("test", p, 3, 10*time.Millisecond)
+			b := NewBackoff(NewIdentity("test", ""), p, 3, 10*time.Millisecond)
 			err := b.Close()
 
 			if err == nil {
@@ -350,8 +350,8 @@ func TestBackoff(t *testing.T) {
 		})
 
 		t.Run("Idempotency", func(t *testing.T) {
-			p := newTrackingProcessor[int]("p")
-			b := NewBackoff("test", p, 3, 10*time.Millisecond)
+			p := newTrackingProcessor[int](NewIdentity("p", ""))
+			b := NewBackoff(NewIdentity("test", ""), p, 3, 10*time.Millisecond)
 
 			_ = b.Close()
 			_ = b.Close()
@@ -373,11 +373,11 @@ func TestBackoff(t *testing.T) {
 		})
 		defer listener.Close()
 
-		processor := Apply("test", func(_ context.Context, _ int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, _ int) (int, error) {
 			return 0, errors.New("always fails")
 		})
 
-		backoff := NewBackoff("final-attempt-test", processor, 3, 10*time.Millisecond)
+		backoff := NewBackoff(NewIdentity("final-attempt-test", ""), processor, 3, 10*time.Millisecond)
 		_, err := backoff.Process(context.Background(), 5)
 
 		if err == nil {
@@ -393,6 +393,31 @@ func TestBackoff(t *testing.T) {
 		// Should emit 2 signals (before attempt 2 and 3, but not after final attempt)
 		if eventCount != 2 {
 			t.Errorf("expected 2 backoff.waiting signals, got %d", eventCount)
+		}
+	})
+
+	t.Run("Schema", func(t *testing.T) {
+		procID := NewIdentity("inner-proc", "Inner processor")
+		proc := Transform(procID, func(_ context.Context, n int) int { return n })
+
+		backoffID := NewIdentity("test-backoff", "Backoff connector")
+		backoff := NewBackoff(backoffID, proc, 3, time.Second)
+
+		schema := backoff.Schema()
+
+		if schema.Identity.Name() != "test-backoff" {
+			t.Errorf("Schema Identity.Name() = %v, want %v", schema.Identity.Name(), "test-backoff")
+		}
+		if schema.Type != "backoff" {
+			t.Errorf("Schema Type = %v, want %v", schema.Type, "backoff")
+		}
+
+		flow, ok := BackoffKey.From(schema)
+		if !ok {
+			t.Fatal("Expected BackoffFlow")
+		}
+		if flow.Processor.Identity.Name() != "inner-proc" {
+			t.Errorf("Flow.Processor.Identity.Name() = %v, want %v", flow.Processor.Identity.Name(), "inner-proc")
 		}
 	})
 }

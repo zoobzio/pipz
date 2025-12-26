@@ -20,8 +20,8 @@ Runs multiple processors in parallel with isolated data copies.
 
 ```go
 func NewConcurrent[T Cloner[T]](
-    name Name,
-    reducer func(original T, results map[Name]T, errors map[Name]error) T,
+    identity Identity,
+    reducer func(original T, results map[Identity]T, errors map[Identity]error) T,
     processors ...Chainable[T],
 ) *Concurrent[T]
 ```
@@ -37,7 +37,7 @@ func NewConcurrent[T Cloner[T]](
 
 ## Parameters
 
-- `name` (`Name`) - Identifier for the connector used in debugging
+- `identity` (`Identity`) - Identifier with name and description for debugging
 - `reducer` - Optional function to aggregate results; if `nil`, returns original input unchanged
 - `processors` - Variable number of processors to run concurrently
 
@@ -81,19 +81,37 @@ func (u User) Clone() User {
     }
 }
 
+// Define identities upfront
+var (
+    NotifyAllID = pipz.NewIdentity("notify-all", "Send notifications to all channels in parallel")
+    EmailID     = pipz.NewIdentity("email", "Send email notification")
+    SMSID       = pipz.NewIdentity("sms", "Send SMS notification")
+    PushID      = pipz.NewIdentity("push", "Send push notification")
+    AuditID     = pipz.NewIdentity("audit", "Log to audit trail")
+)
+
 // Create concurrent processor without reducer
-notifications := pipz.NewConcurrent("notify-all",
+notifications := pipz.NewConcurrent(
+    NotifyAllID,
     nil, // No reducer - just run side effects
-    pipz.Effect("email", sendEmailNotification),
-    pipz.Effect("sms", sendSMSNotification),
-    pipz.Effect("push", sendPushNotification),
-    pipz.Effect("audit", logToAuditTrail),
+    pipz.Effect(EmailID, sendEmailNotification),
+    pipz.Effect(SMSID, sendSMSNotification),
+    pipz.Effect(PushID, sendPushNotification),
+    pipz.Effect(AuditID, logToAuditTrail),
+)
+
+// Define pipeline identities
+var (
+    UserUpdateID = pipz.NewIdentity("user-update", "Process user update with notifications")
+    ValidateID   = pipz.NewIdentity("validate", "Validate user data")
+    UpdateID     = pipz.NewIdentity("update", "Update user in database")
 )
 
 // Use in a pipeline
-pipeline := pipz.NewSequence[User]("user-update",
-    pipz.Apply("validate", validateUser),
-    pipz.Apply("update", updateDatabase),
+pipeline := pipz.NewSequence[User](
+    UserUpdateID,
+    pipz.Apply(ValidateID, validateUser),
+    pipz.Apply(UpdateID, updateDatabase),
     notifications, // All notifications sent in parallel
 )
 ```
@@ -110,8 +128,16 @@ func (p PriceCheck) Clone() PriceCheck {
     return p
 }
 
+// Define identities upfront
+var (
+    CheckPricesID = pipz.NewIdentity("check-prices", "Check prices across multiple vendors for best price")
+    AmazonID      = pipz.NewIdentity("amazon", "Check Amazon price")
+    WalmartID     = pipz.NewIdentity("walmart", "Check Walmart price")
+    TargetID      = pipz.NewIdentity("target", "Check Target price")
+)
+
 // Reducer function to find the best price
-reducer := func(original PriceCheck, results map[Name]PriceCheck, errors map[Name]error) PriceCheck {
+reducer := func(original PriceCheck, results map[pipz.Identity]PriceCheck, errors map[pipz.Identity]error) PriceCheck {
     bestPrice := original.BestPrice
     for _, result := range results {
         if result.BestPrice > 0 && result.BestPrice < bestPrice {
@@ -125,11 +151,12 @@ reducer := func(original PriceCheck, results map[Name]PriceCheck, errors map[Nam
 }
 
 // Check prices from multiple vendors concurrently
-priceChecker := pipz.NewConcurrent("check-prices",
+priceChecker := pipz.NewConcurrent(
+    CheckPricesID,
     reducer,
-    pipz.Transform("amazon", checkAmazonPrice),
-    pipz.Transform("walmart", checkWalmartPrice),
-    pipz.Transform("target", checkTargetPrice),
+    pipz.Transform(AmazonID, checkAmazonPrice),
+    pipz.Transform(WalmartID, checkWalmartPrice),
+    pipz.Transform(TargetID, checkTargetPrice),
 )
 
 // Returns PriceCheck with the lowest price found
@@ -164,11 +191,20 @@ Don't use `Concurrent` when:
 Concurrent continues even if some processors fail:
 
 ```go
-concurrent := pipz.NewConcurrent("multi-save",
+// Define identities upfront
+var (
+    MultiSaveID = pipz.NewIdentity("multi-save", "Save data to multiple destinations")
+    PrimaryID   = pipz.NewIdentity("primary", "Save to primary storage")
+    BackupID    = pipz.NewIdentity("backup", "Save to backup storage")
+    CacheID     = pipz.NewIdentity("cache", "Update cache")
+)
+
+concurrent := pipz.NewConcurrent(
+    MultiSaveID,
     nil, // No reducer
-    pipz.Apply("primary", saveToPrimary),    // Might fail
-    pipz.Apply("backup", saveToBackup),      // Still runs
-    pipz.Effect("cache", updateCache),       // Still runs
+    pipz.Apply(PrimaryID, saveToPrimary),   // Might fail
+    pipz.Apply(BackupID, saveToBackup),     // Still runs
+    pipz.Effect(CacheID, updateCache),      // Still runs
 )
 
 // The original data is returned regardless of individual failures
@@ -182,11 +218,11 @@ result, err := concurrent.Process(ctx, data)
 Errors are collected in the `errors` map passed to the reducer:
 
 ```go
-reducer := func(original Data, results map[Name]Data, errors map[Name]error) Data {
+reducer := func(original Data, results map[pipz.Identity]Data, errors map[pipz.Identity]error) Data {
     if len(errors) > 0 {
         // Handle errors - maybe log them or set a flag
-        for name, err := range errors {
-            log.Printf("processor %s failed: %v", name, err)
+        for id, err := range errors {
+            log.Printf("processor %s failed: %v", id.Name(), err)
         }
     }
     // Merge successful results
@@ -210,34 +246,68 @@ reducer := func(original Data, results map[Name]Data, errors map[Name]error) Dat
 ### Side Effects Pattern (No Reducer)
 
 ```go
+// Define identities for parallel notifications
+var (
+    NotificationsID = pipz.NewIdentity("notifications", "Send welcome notifications across all channels")
+    WelcomeEmailID  = pipz.NewIdentity("email", "Send welcome email")
+    WelcomeSMSID    = pipz.NewIdentity("sms", "Send welcome SMS")
+    CRMID           = pipz.NewIdentity("crm", "Update CRM system")
+    SignupAnalyticsID = pipz.NewIdentity("analytics", "Track signup event")
+)
+
 // Parallel notifications
-userNotifications := pipz.NewConcurrent("notifications",
+userNotifications := pipz.NewConcurrent(
+    NotificationsID,
     nil, // No reducer needed
-    pipz.Effect("email", sendWelcomeEmail),
-    pipz.Effect("sms", sendWelcomeSMS),
-    pipz.Effect("crm", updateCRM),
-    pipz.Effect("analytics", trackSignup),
+    pipz.Effect(WelcomeEmailID, sendWelcomeEmail),
+    pipz.Effect(WelcomeSMSID, sendWelcomeSMS),
+    pipz.Effect(CRMID, updateCRM),
+    pipz.Effect(SignupAnalyticsID, trackSignup),
+)
+
+// Define identities for parallel data distribution
+var (
+    DistributeID      = pipz.NewIdentity("distribute", "Distribute data to multiple systems")
+    ElasticsearchID   = pipz.NewIdentity("elasticsearch", "Index in Elasticsearch")
+    RedisID           = pipz.NewIdentity("redis", "Cache in Redis")
+    S3ID              = pipz.NewIdentity("s3", "Upload to S3")
+    MetricsID         = pipz.NewIdentity("metrics", "Record metrics")
 )
 
 // Parallel data distribution
-distribute := pipz.NewConcurrent("distribute",
+distribute := pipz.NewConcurrent(
+    DistributeID,
     nil,
-    pipz.Apply("elasticsearch", indexInElastic),
-    pipz.Apply("redis", cacheInRedis),
-    pipz.Apply("s3", uploadToS3),
-    pipz.Effect("metrics", recordMetrics),
+    pipz.Apply(ElasticsearchID, indexInElastic),
+    pipz.Apply(RedisID, cacheInRedis),
+    pipz.Apply(S3ID, uploadToS3),
+    pipz.Effect(MetricsID, recordMetrics),
+)
+
+// Define identities for order processing
+var (
+    OrderFlowID       = pipz.NewIdentity("order-flow", "Process order from validation to post-payment")
+    ValidateOrderID   = pipz.NewIdentity("validate", "Validate order details")
+    PaymentID         = pipz.NewIdentity("payment", "Process payment")
+    PostPaymentID     = pipz.NewIdentity("post-payment", "Execute post-payment operations in parallel")
+    InventoryID       = pipz.NewIdentity("inventory", "Update inventory")
+    ShippingID        = pipz.NewIdentity("shipping", "Create shipping label")
+    ConfirmationID    = pipz.NewIdentity("email", "Send confirmation email")
+    RevenueAnalyticsID = pipz.NewIdentity("analytics", "Track revenue")
 )
 
 // Multi-channel processing
-processOrder := pipz.NewSequence[Order]("order-flow",
-    pipz.Apply("validate", validateOrder),
-    pipz.Apply("payment", processPayment),
-    pipz.NewConcurrent("post-payment",
+processOrder := pipz.NewSequence[Order](
+    OrderFlowID,
+    pipz.Apply(ValidateOrderID, validateOrder),
+    pipz.Apply(PaymentID, processPayment),
+    pipz.NewConcurrent(
+        PostPaymentID,
         nil,
-        pipz.Effect("inventory", updateInventory),
-        pipz.Effect("shipping", createShippingLabel),
-        pipz.Effect("email", sendConfirmation),
-        pipz.Effect("analytics", trackRevenue),
+        pipz.Effect(InventoryID, updateInventory),
+        pipz.Effect(ShippingID, createShippingLabel),
+        pipz.Effect(ConfirmationID, sendConfirmation),
+        pipz.Effect(RevenueAnalyticsID, trackRevenue),
     ),
 )
 ```
@@ -255,32 +325,41 @@ type Product struct {
     Price       float64
 }
 
-enrichReducer := func(original Product, results map[Name]Product, errors map[Name]error) Product {
+// Define identities upfront so we can reference them in the reducer
+var (
+    EnrichProductID = pipz.NewIdentity("enrich-product", "Enrich product with data from multiple services")
+    ReviewsID       = pipz.NewIdentity("reviews", "Fetch product reviews")
+    ProductInventoryID = pipz.NewIdentity("inventory", "Fetch inventory levels")
+    PricingID       = pipz.NewIdentity("pricing", "Fetch current pricing")
+)
+
+enrichReducer := func(original Product, results map[pipz.Identity]Product, errors map[pipz.Identity]error) Product {
     enriched := original
 
     // Merge reviews from review service
-    if r, ok := results["reviews"]; ok {
+    if r, ok := results[ReviewsID]; ok {
         enriched.Reviews = r.Reviews
     }
 
     // Merge inventory from warehouse service
-    if inv, ok := results["inventory"]; ok {
+    if inv, ok := results[ProductInventoryID]; ok {
         enriched.Inventory = inv.Inventory
     }
 
     // Merge pricing from pricing service
-    if price, ok := results["pricing"]; ok {
+    if price, ok := results[PricingID]; ok {
         enriched.Price = price.Price
     }
 
     return enriched
 }
 
-enrichProduct := pipz.NewConcurrent("enrich-product",
+enrichProduct := pipz.NewConcurrent(
+    EnrichProductID,
     enrichReducer,
-    pipz.Transform("reviews", fetchReviews),
-    pipz.Transform("inventory", fetchInventory),
-    pipz.Transform("pricing", fetchPricing),
+    pipz.Transform(ReviewsID, fetchReviews),
+    pipz.Transform(ProductInventoryID, fetchInventory),
+    pipz.Transform(PricingID, fetchPricing),
 )
 ```
 
@@ -289,9 +368,15 @@ enrichProduct := pipz.NewConcurrent("enrich-product",
 ### ❌ Don't forget to use reducer if you need results
 ```go
 // WRONG - Expecting modified data without reducer
-concurrent := pipz.NewConcurrent("modify",
+var (
+    ModifyID = pipz.NewIdentity("modify", "Modify values")
+    DoubleID = pipz.NewIdentity("double", "Double the value")
+)
+
+concurrent := pipz.NewConcurrent(
+    ModifyID,
     nil, // No reducer!
-    pipz.Transform("double", func(ctx context.Context, n int) int {
+    pipz.Transform(DoubleID, func(ctx context.Context, n int) int {
         return n * 2 // Result is discarded!
     }),
 )
@@ -301,8 +386,14 @@ result, _ := concurrent.Process(ctx, 5)
 
 ### ✅ Use reducer when you need results
 ```go
+// Define identities upfront
+var (
+    SumID    = pipz.NewIdentity("sum", "Sum original value with results")
+    DoubleID = pipz.NewIdentity("double", "Double the value")
+)
+
 // RIGHT - Reducer aggregates results
-reducer := func(original int, results map[Name]int, errors map[Name]error) int {
+reducer := func(original int, results map[pipz.Identity]int, errors map[pipz.Identity]error) int {
     sum := original
     for _, v := range results {
         sum += v
@@ -310,9 +401,10 @@ reducer := func(original int, results map[Name]int, errors map[Name]error) int {
     return sum
 }
 
-concurrent := pipz.NewConcurrent("sum",
+concurrent := pipz.NewConcurrent(
+    SumID,
     reducer,
-    pipz.Transform("double", func(ctx context.Context, n int) int {
+    pipz.Transform(DoubleID, func(ctx context.Context, n int) int {
         return n * 2
     }),
 )
@@ -322,11 +414,19 @@ result, _ := concurrent.Process(ctx, 5)
 
 ### ✅ Or use nil reducer for side effects only
 ```go
+// Define identities upfront
+var (
+    EffectsID = pipz.NewIdentity("effects", "Execute side effects in parallel")
+    LogID     = pipz.NewIdentity("log", "Log data")
+    MetricsID = pipz.NewIdentity("metrics", "Update metrics")
+)
+
 // RIGHT - Side effects, not transformations
-concurrent := pipz.NewConcurrent("effects",
+concurrent := pipz.NewConcurrent(
+    EffectsID,
     nil,
-    pipz.Effect("log", logData),
-    pipz.Effect("metrics", updateMetrics),
+    pipz.Effect(LogID, logData),
+    pipz.Effect(MetricsID, updateMetrics),
 )
 ```
 
@@ -334,12 +434,20 @@ concurrent := pipz.NewConcurrent("effects",
 ```go
 // WRONG - Race condition!
 var counter int
-concurrent := pipz.NewConcurrent("racy",
-    pipz.Effect("inc1", func(ctx context.Context, _ Data) error {
+
+var (
+    RacyID = pipz.NewIdentity("racy", "Increment counter (has race condition)")
+    Inc1ID = pipz.NewIdentity("inc1", "Increment counter")
+    Inc2ID = pipz.NewIdentity("inc2", "Increment counter again")
+)
+
+concurrent := pipz.NewConcurrent(
+    RacyID,
+    pipz.Effect(Inc1ID, func(ctx context.Context, _ Data) error {
         counter++ // Race!
         return nil
     }),
-    pipz.Effect("inc2", func(ctx context.Context, _ Data) error {
+    pipz.Effect(Inc2ID, func(ctx context.Context, _ Data) error {
         counter++ // Race!
         return nil
     }),
@@ -348,10 +456,18 @@ concurrent := pipz.NewConcurrent("racy",
 
 ### ✅ Use proper synchronization or avoid shared state
 ```go
+// Define identities upfront
+var (
+    SafeID = pipz.NewIdentity("safe", "Save to multiple databases independently")
+    DB1ID  = pipz.NewIdentity("db1", "Save to database 1")
+    DB2ID  = pipz.NewIdentity("db2", "Save to database 2")
+)
+
 // RIGHT - No shared state
-concurrent := pipz.NewConcurrent("safe",
-    pipz.Effect("db1", saveToDatabase1),
-    pipz.Effect("db2", saveToDatabase2),
+concurrent := pipz.NewConcurrent(
+    SafeID,
+    pipz.Effect(DB1ID, saveToDatabase1),
+    pipz.Effect(DB2ID, saveToDatabase2),
 )
 ```
 

@@ -22,8 +22,8 @@ import (
 //
 // Example:
 //
-//	const PremiumDiscountName = pipz.Name("premium_discount")
-//	discountPremium := pipz.Mutate(PremiumDiscountName,
+//	var PremiumDiscountID = pipz.NewIdentity("premium-discount", "Applies 10% discount for premium customers")
+//	discountPremium := pipz.Mutate(PremiumDiscountID,
 //	    func(ctx context.Context, order Order) Order {
 //	        order.Total *= 0.9  // 10% discount
 //	        return order
@@ -32,11 +32,11 @@ import (
 //	        return order.CustomerTier == "premium" && order.Total > 100
 //	    },
 //	)
-func Mutate[T any](name Name, transformer func(context.Context, T) T, condition func(context.Context, T) bool) Processor[T] {
+func Mutate[T any](identity Identity, transformer func(context.Context, T) T, condition func(context.Context, T) bool) Processor[T] {
 	return Processor[T]{
-		name: name,
+		identity: identity,
 		fn: func(ctx context.Context, value T) (result T, err error) {
-			defer recoverFromPanic(&result, &err, name, value)
+			defer recoverFromPanic(&result, &err, identity, value)
 			if condition(ctx, value) {
 				result = transformer(ctx, value)
 			} else {

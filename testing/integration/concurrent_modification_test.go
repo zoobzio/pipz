@@ -21,23 +21,23 @@ func TestConcurrentProcessorModification(t *testing.T) {
 		var processor2Calls int32
 
 		// First processor with delay
-		processor1 := pipz.Apply("slow-processor", func(_ context.Context, n int) (int, error) {
+		processor1 := pipz.Apply(pipz.NewIdentity("slow-processor", ""), func(_ context.Context, n int) (int, error) {
 			atomic.AddInt32(&processor1Calls, 1)
 			time.Sleep(50 * time.Millisecond) // Slow to increase race window
 			return n * 2, nil
 		})
 
 		// Second processor that behaves differently
-		processor2 := pipz.Apply("fast-processor", func(_ context.Context, n int) (int, error) {
+		processor2 := pipz.Apply(pipz.NewIdentity("fast-processor", ""), func(_ context.Context, n int) (int, error) {
 			atomic.AddInt32(&processor2Calls, 1)
 			return n * 10, nil
 		})
 
-		errorHandler := pipz.Effect("noop", func(_ context.Context, _ *pipz.Error[int]) error {
+		errorHandler := pipz.Effect(pipz.NewIdentity("noop", ""), func(_ context.Context, _ *pipz.Error[int]) error {
 			return nil
 		})
 
-		handle := pipz.NewHandle("race-handle", processor1, errorHandler)
+		handle := pipz.NewHandle(pipz.NewIdentity("race-handle", ""), processor1, errorHandler)
 
 		// Start multiple Process calls
 		var wg sync.WaitGroup
@@ -99,24 +99,24 @@ func TestConcurrentProcessorModification(t *testing.T) {
 		var handler2Calls int32
 
 		// Processor that always fails
-		processor := pipz.Apply("failing", func(_ context.Context, _ int) (int, error) {
+		processor := pipz.Apply(pipz.NewIdentity("failing", ""), func(_ context.Context, _ int) (int, error) {
 			return 0, errors.New("always fails")
 		})
 
 		// First error handler with delay
-		handler1 := pipz.Effect("slow-handler", func(_ context.Context, _ *pipz.Error[int]) error {
+		handler1 := pipz.Effect(pipz.NewIdentity("slow-handler", ""), func(_ context.Context, _ *pipz.Error[int]) error {
 			atomic.AddInt32(&handler1Calls, 1)
 			time.Sleep(50 * time.Millisecond) // Slow handler
 			return nil
 		})
 
 		// Second handler that's faster
-		handler2 := pipz.Effect("fast-handler", func(_ context.Context, _ *pipz.Error[int]) error {
+		handler2 := pipz.Effect(pipz.NewIdentity("fast-handler", ""), func(_ context.Context, _ *pipz.Error[int]) error {
 			atomic.AddInt32(&handler2Calls, 1)
 			return nil
 		})
 
-		handle := pipz.NewHandle("handler-race", processor, handler1)
+		handle := pipz.NewHandle(pipz.NewIdentity("handler-race", ""), processor, handler1)
 
 		// Start concurrent failing operations
 		var wg sync.WaitGroup
@@ -151,16 +151,16 @@ func TestConcurrentProcessorModification(t *testing.T) {
 
 	t.Run("Rapid swapping during continuous processing", func(t *testing.T) {
 		processors := []pipz.Chainable[int]{
-			pipz.Transform("p1", func(_ context.Context, n int) int { return n + 1 }),
-			pipz.Transform("p2", func(_ context.Context, n int) int { return n * 2 }),
-			pipz.Transform("p3", func(_ context.Context, n int) int { return n - 1 }),
+			pipz.Transform(pipz.NewIdentity("p1", ""), func(_ context.Context, n int) int { return n + 1 }),
+			pipz.Transform(pipz.NewIdentity("p2", ""), func(_ context.Context, n int) int { return n * 2 }),
+			pipz.Transform(pipz.NewIdentity("p3", ""), func(_ context.Context, n int) int { return n - 1 }),
 		}
 
-		errorHandler := pipz.Effect("noop", func(_ context.Context, _ *pipz.Error[int]) error {
+		errorHandler := pipz.Effect(pipz.NewIdentity("noop", ""), func(_ context.Context, _ *pipz.Error[int]) error {
 			return nil
 		})
 
-		handle := pipz.NewHandle("rapid-swap", processors[0], errorHandler)
+		handle := pipz.NewHandle(pipz.NewIdentity("rapid-swap", ""), processors[0], errorHandler)
 
 		// Continuous processing
 		stopProcessing := make(chan bool)
@@ -217,18 +217,18 @@ func TestConcurrentProcessorModification(t *testing.T) {
 func TestStatefulProcessorRace(t *testing.T) {
 	// Stateful processor that accumulates
 	type StatefulProcessor struct {
-		name  pipz.Name
-		sum   int
-		mutex sync.Mutex
+		identity pipz.Identity
+		sum      int
+		mutex    sync.Mutex
 	}
 
-	makeStateful := func(name pipz.Name) *StatefulProcessor {
-		sp := &StatefulProcessor{name: name}
+	makeStateful := func(identity pipz.Identity) *StatefulProcessor {
+		sp := &StatefulProcessor{identity: identity}
 		return sp
 	}
 
 	processFunc := func(sp *StatefulProcessor) pipz.Chainable[int] {
-		return pipz.Apply(sp.name, func(_ context.Context, n int) (int, error) {
+		return pipz.Apply(sp.identity, func(_ context.Context, n int) (int, error) {
 			sp.mutex.Lock()
 			defer sp.mutex.Unlock()
 			sp.sum += n
@@ -236,14 +236,14 @@ func TestStatefulProcessorRace(t *testing.T) {
 		})
 	}
 
-	processor1 := makeStateful("accumulator-1")
-	processor2 := makeStateful("accumulator-2")
+	processor1 := makeStateful(pipz.NewIdentity("accumulator-1", ""))
+	processor2 := makeStateful(pipz.NewIdentity("accumulator-2", ""))
 
-	errorHandler := pipz.Effect("noop", func(_ context.Context, _ *pipz.Error[int]) error {
+	errorHandler := pipz.Effect(pipz.NewIdentity("noop", ""), func(_ context.Context, _ *pipz.Error[int]) error {
 		return nil
 	})
 
-	handle := pipz.NewHandle("stateful-race", processFunc(processor1), errorHandler)
+	handle := pipz.NewHandle(pipz.NewIdentity("stateful-race", ""), processFunc(processor1), errorHandler)
 
 	// Process some values
 	var wg sync.WaitGroup
@@ -287,7 +287,7 @@ func TestStatefulProcessorRace(t *testing.T) {
 // state transitions during concurrent access.
 func TestCircuitBreakerRace(t *testing.T) {
 	failureCount := 0
-	processor := pipz.Apply("flaky", func(_ context.Context, n int) (int, error) {
+	processor := pipz.Apply(pipz.NewIdentity("flaky", ""), func(_ context.Context, n int) (int, error) {
 		failureCount++
 		if failureCount <= 5 {
 			return 0, errors.New("temporary failure")
@@ -295,7 +295,7 @@ func TestCircuitBreakerRace(t *testing.T) {
 		return n, nil
 	})
 
-	breaker := pipz.NewCircuitBreaker("breaker", processor, 3, time.Millisecond*50)
+	breaker := pipz.NewCircuitBreaker(pipz.NewIdentity("breaker", ""), processor, 3, time.Millisecond*50)
 
 	// Concurrent requests during state transitions
 	var wg sync.WaitGroup

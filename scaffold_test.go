@@ -13,14 +13,14 @@ import (
 func TestScaffold(t *testing.T) {
 	t.Run("Fire and Forget Behavior", func(t *testing.T) {
 		var counter int32
-		effect := Effect("increment", func(_ context.Context, _ TestData) error {
+		effect := Effect(NewIdentity("increment", ""), func(_ context.Context, _ TestData) error {
 			// Simulate some work
 			time.Sleep(50 * time.Millisecond)
 			atomic.AddInt32(&counter, 1)
 			return nil
 		})
 
-		scaffold := NewScaffold("test-scaffold", effect, effect, effect)
+		scaffold := NewScaffold(NewIdentity("test-scaffold", ""), effect, effect, effect)
 		data := TestData{Value: 1}
 
 		start := time.Now()
@@ -57,7 +57,7 @@ func TestScaffold(t *testing.T) {
 
 	t.Run("Context Isolation", func(t *testing.T) {
 		var executed int32
-		blocker := Effect("block", func(ctx context.Context, _ TestData) error {
+		blocker := Effect(NewIdentity("block", ""), func(ctx context.Context, _ TestData) error {
 			select {
 			case <-time.After(100 * time.Millisecond):
 				atomic.AddInt32(&executed, 1)
@@ -68,7 +68,7 @@ func TestScaffold(t *testing.T) {
 			}
 		})
 
-		scaffold := NewScaffold("test", blocker)
+		scaffold := NewScaffold(NewIdentity("test", ""), blocker)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 		defer cancel()
 
@@ -90,7 +90,7 @@ func TestScaffold(t *testing.T) {
 	})
 
 	t.Run("Empty Processors", func(t *testing.T) {
-		scaffold := NewScaffold[TestData]("empty")
+		scaffold := NewScaffold[TestData](NewIdentity("empty", ""))
 		data := TestData{Value: 42}
 
 		result, err := scaffold.Process(context.Background(), data)
@@ -103,11 +103,11 @@ func TestScaffold(t *testing.T) {
 	})
 
 	t.Run("Configuration Methods", func(t *testing.T) {
-		p1 := Transform("p1", func(_ context.Context, d TestData) TestData { return d })
-		p2 := Transform("p2", func(_ context.Context, d TestData) TestData { return d })
-		p3 := Transform("p3", func(_ context.Context, d TestData) TestData { return d })
+		p1 := Transform(NewIdentity("p1", ""), func(_ context.Context, d TestData) TestData { return d })
+		p2 := Transform(NewIdentity("p2", ""), func(_ context.Context, d TestData) TestData { return d })
+		p3 := Transform(NewIdentity("p3", ""), func(_ context.Context, d TestData) TestData { return d })
 
-		scaffold := NewScaffold("test", p1, p2)
+		scaffold := NewScaffold(NewIdentity("test", ""), p1, p2)
 
 		if scaffold.Len() != 2 {
 			t.Errorf("expected 2 processors, got %d", scaffold.Len())
@@ -138,14 +138,14 @@ func TestScaffold(t *testing.T) {
 	})
 
 	t.Run("Name Method", func(t *testing.T) {
-		scaffold := NewScaffold[TestData]("test-name")
-		if scaffold.Name() != "test-name" {
-			t.Errorf("expected name 'test-name', got '%s'", scaffold.Name())
+		scaffold := NewScaffold[TestData](NewIdentity("test-name", ""))
+		if scaffold.Identity().Name() != "test-name" {
+			t.Errorf("expected name 'test-name', got '%s'", scaffold.Identity().Name())
 		}
 	})
 
 	t.Run("Remove Out of Bounds", func(t *testing.T) {
-		scaffold := NewScaffold[TestData]("test")
+		scaffold := NewScaffold[TestData](NewIdentity("test", ""))
 
 		err := scaffold.Remove(-1)
 		if !errors.Is(err, ErrIndexOutOfBounds) {
@@ -157,7 +157,7 @@ func TestScaffold(t *testing.T) {
 			t.Errorf("expected ErrIndexOutOfBounds for empty scaffold, got %v", err)
 		}
 
-		scaffold.Add(Transform("p1", func(_ context.Context, d TestData) TestData { return d }))
+		scaffold.Add(Transform(NewIdentity("p1", ""), func(_ context.Context, d TestData) TestData { return d }))
 		err = scaffold.Remove(1)
 		if !errors.Is(err, ErrIndexOutOfBounds) {
 			t.Errorf("expected ErrIndexOutOfBounds for index >= length, got %v", err)
@@ -169,14 +169,14 @@ func TestScaffold(t *testing.T) {
 		const traceKey contextKey = "trace-id"
 
 		capturedChan := make(chan string, 1)
-		tracer := Effect("trace", func(ctx context.Context, _ TestData) error {
+		tracer := Effect(NewIdentity("trace", ""), func(ctx context.Context, _ TestData) error {
 			if id, ok := ctx.Value(traceKey).(string); ok {
 				capturedChan <- id
 			}
 			return nil
 		})
 
-		scaffold := NewScaffold("test", tracer)
+		scaffold := NewScaffold(NewIdentity("test", ""), tracer)
 		ctx := context.WithValue(context.Background(), traceKey, "test-trace-123")
 
 		_, err := scaffold.Process(ctx, TestData{Value: 1})
@@ -198,11 +198,11 @@ func TestScaffold(t *testing.T) {
 	t.Run("Scaffold panic recovery", func(t *testing.T) {
 		// Scaffold is fire-and-forget, so panics happen in background goroutines
 		// We test that the main process doesn't panic and returns original data
-		panicEffect := Effect("panic_effect", func(_ context.Context, _ TestData) error {
+		panicEffect := Effect(NewIdentity("panic_effect", ""), func(_ context.Context, _ TestData) error {
 			panic("scaffold panic")
 		})
 
-		scaffold := NewScaffold("panic_scaffold", panicEffect)
+		scaffold := NewScaffold(NewIdentity("panic_scaffold", ""), panicEffect)
 
 		original := TestData{Value: 42}
 		result, err := scaffold.Process(context.Background(), original)
@@ -224,10 +224,10 @@ func TestScaffold(t *testing.T) {
 
 func TestScaffoldClose(t *testing.T) {
 	t.Run("Closes All Children", func(t *testing.T) {
-		p1 := newTrackingProcessor[TestData]("p1")
-		p2 := newTrackingProcessor[TestData]("p2")
+		p1 := newTrackingProcessor[TestData](NewIdentity("p1", ""))
+		p2 := newTrackingProcessor[TestData](NewIdentity("p2", ""))
 
-		s := NewScaffold("test", p1, p2)
+		s := NewScaffold(NewIdentity("test", ""), p1, p2)
 		err := s.Close()
 
 		if err != nil {
@@ -239,10 +239,10 @@ func TestScaffoldClose(t *testing.T) {
 	})
 
 	t.Run("Aggregates Errors", func(t *testing.T) {
-		p1 := newTrackingProcessor[TestData]("p1").WithCloseError(errors.New("p1 error"))
-		p2 := newTrackingProcessor[TestData]("p2").WithCloseError(errors.New("p2 error"))
+		p1 := newTrackingProcessor[TestData](NewIdentity("p1", "")).WithCloseError(errors.New("p1 error"))
+		p2 := newTrackingProcessor[TestData](NewIdentity("p2", "")).WithCloseError(errors.New("p2 error"))
 
-		s := NewScaffold("test", p1, p2)
+		s := NewScaffold(NewIdentity("test", ""), p1, p2)
 		err := s.Close()
 
 		if err == nil {
@@ -254,8 +254,8 @@ func TestScaffoldClose(t *testing.T) {
 	})
 
 	t.Run("Idempotency", func(t *testing.T) {
-		p := newTrackingProcessor[TestData]("p")
-		s := NewScaffold("test", p)
+		p := newTrackingProcessor[TestData](NewIdentity("p", ""))
+		s := NewScaffold(NewIdentity("test", ""), p)
 
 		_ = s.Close()
 		_ = s.Close()
@@ -279,10 +279,10 @@ func TestScaffoldSignals(t *testing.T) {
 		})
 		defer listener.Close()
 
-		scaffold := NewScaffold[TestData]("signal-test-scaffold",
-			Effect("task1", func(_ context.Context, _ TestData) error { return nil }),
-			Effect("task2", func(_ context.Context, _ TestData) error { return nil }),
-			Effect("task3", func(_ context.Context, _ TestData) error { return nil }),
+		scaffold := NewScaffold[TestData](NewIdentity("signal-test-scaffold", ""),
+			Effect(NewIdentity("task1", ""), func(_ context.Context, _ TestData) error { return nil }),
+			Effect(NewIdentity("task2", ""), func(_ context.Context, _ TestData) error { return nil }),
+			Effect(NewIdentity("task3", ""), func(_ context.Context, _ TestData) error { return nil }),
 		)
 
 		data := TestData{Value: 5}
@@ -304,6 +304,30 @@ func TestScaffoldSignals(t *testing.T) {
 		}
 		if signalProcessorCount != 3 {
 			t.Errorf("expected processor_count 3, got %d", signalProcessorCount)
+		}
+	})
+
+	t.Run("Schema", func(t *testing.T) {
+		proc1 := Transform(NewIdentity("proc1", ""), func(_ context.Context, d TestData) TestData { return d })
+		proc2 := Transform(NewIdentity("proc2", ""), func(_ context.Context, d TestData) TestData { return d })
+
+		scaffold := NewScaffold(NewIdentity("test-scaffold", "Scaffold connector"), proc1, proc2)
+
+		schema := scaffold.Schema()
+
+		if schema.Identity.Name() != "test-scaffold" {
+			t.Errorf("Schema Identity.Name() = %v, want %v", schema.Identity.Name(), "test-scaffold")
+		}
+		if schema.Type != "scaffold" {
+			t.Errorf("Schema Type = %v, want %v", schema.Type, "scaffold")
+		}
+
+		flow, ok := ScaffoldKey.From(schema)
+		if !ok {
+			t.Fatal("Expected ScaffoldFlow")
+		}
+		if len(flow.Processors) != 2 {
+			t.Errorf("len(Flow.Processors) = %d, want 2", len(flow.Processors))
 		}
 	})
 }

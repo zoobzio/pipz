@@ -101,7 +101,7 @@ type CircuitBreaker[T any] struct {
 	lastFailTime     time.Time
 	processor        Chainable[T]
 	clock            clockz.Clock
-	name             Name
+	identity         Identity
 	state            string
 	mu               sync.Mutex
 	resetTimeout     time.Duration
@@ -117,13 +117,13 @@ type CircuitBreaker[T any] struct {
 // NewCircuitBreaker creates a new CircuitBreaker connector.
 // The failureThreshold sets how many consecutive failures trigger opening.
 // The resetTimeout sets how long to wait before attempting recovery.
-func NewCircuitBreaker[T any](name Name, processor Chainable[T], failureThreshold int, resetTimeout time.Duration) *CircuitBreaker[T] {
+func NewCircuitBreaker[T any](identity Identity, processor Chainable[T], failureThreshold int, resetTimeout time.Duration) *CircuitBreaker[T] {
 	if failureThreshold < 1 {
 		failureThreshold = 1
 	}
 
 	return &CircuitBreaker[T]{
-		name:             name,
+		identity:         identity,
 		processor:        processor,
 		failureThreshold: failureThreshold,
 		successThreshold: 1, // Default: 1 success to close from half-open
@@ -134,7 +134,7 @@ func NewCircuitBreaker[T any](name Name, processor Chainable[T], failureThreshol
 
 // Process implements the Chainable interface.
 func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err error) {
-	defer recoverFromPanic(&result, &err, cb.name, data)
+	defer recoverFromPanic(&result, &err, cb.identity, data)
 
 	cb.mu.Lock()
 
@@ -148,7 +148,8 @@ func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err
 
 		// Emit half-open signal
 		capitan.Warn(ctx, SignalCircuitBreakerHalfOpen,
-			FieldName.Field(string(cb.name)),
+			FieldName.Field(cb.identity.Name()),
+			FieldIdentityID.Field(cb.identity.ID().String()),
 			FieldState.Field(cb.state),
 			FieldGeneration.Field(cb.generation),
 			FieldTimestamp.Field(float64(clock.Now().Unix())),
@@ -163,7 +164,8 @@ func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err
 	if state == stateOpen {
 		// Emit rejected signal
 		capitan.Error(ctx, SignalCircuitBreakerRejected,
-			FieldName.Field(string(cb.name)),
+			FieldName.Field(cb.identity.Name()),
+			FieldIdentityID.Field(cb.identity.ID().String()),
 			FieldState.Field(state),
 			FieldGeneration.Field(generation),
 			FieldTimestamp.Field(float64(cb.getClock().Now().Unix())),
@@ -173,7 +175,7 @@ func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err
 		return data, &Error[T]{
 			Err:       fmt.Errorf("circuit breaker is open"),
 			InputData: data,
-			Path:      []Name{cb.name},
+			Path:      []Identity{cb.identity},
 			Timestamp: cb.getClock().Now(),
 		}
 	}
@@ -194,27 +196,27 @@ func (cb *CircuitBreaker[T]) Process(ctx context.Context, data T) (result T, err
 	}
 
 	if err != nil {
-		cb.onFailure()
+		cb.onFailure(ctx)
 		// Wrap the error with circuit breaker context
 		var pipeErr *Error[T]
 		if errors.As(err, &pipeErr) {
-			pipeErr.Path = append([]Name{cb.name}, pipeErr.Path...)
+			pipeErr.Path = append([]Identity{cb.identity}, pipeErr.Path...)
 			return result, pipeErr
 		}
 		return result, &Error[T]{
 			Err:       err,
 			InputData: data,
-			Path:      []Name{cb.name},
+			Path:      []Identity{cb.identity},
 			Timestamp: cb.getClock().Now(),
 		}
 	}
 
-	cb.onSuccess()
+	cb.onSuccess(ctx)
 	return result, nil
 }
 
 // onSuccess handles successful request.
-func (cb *CircuitBreaker[T]) onSuccess() {
+func (cb *CircuitBreaker[T]) onSuccess(ctx context.Context) {
 	switch cb.state {
 	case stateClosed:
 		// Reset failure count on success
@@ -228,8 +230,9 @@ func (cb *CircuitBreaker[T]) onSuccess() {
 			cb.successes = 0
 
 			// Emit closed signal
-			capitan.Info(context.Background(), SignalCircuitBreakerClosed,
-				FieldName.Field(string(cb.name)),
+			capitan.Info(ctx, SignalCircuitBreakerClosed,
+				FieldName.Field(cb.identity.Name()),
+				FieldIdentityID.Field(cb.identity.ID().String()),
 				FieldState.Field(cb.state),
 				FieldSuccesses.Field(cb.successes),
 				FieldSuccessThreshold.Field(cb.successThreshold),
@@ -240,7 +243,7 @@ func (cb *CircuitBreaker[T]) onSuccess() {
 }
 
 // onFailure handles failed request.
-func (cb *CircuitBreaker[T]) onFailure() {
+func (cb *CircuitBreaker[T]) onFailure(ctx context.Context) {
 	cb.lastFailTime = cb.getClock().Now()
 
 	switch cb.state {
@@ -251,8 +254,9 @@ func (cb *CircuitBreaker[T]) onFailure() {
 			cb.state = stateOpen
 
 			// Emit opened signal
-			capitan.Error(context.Background(), SignalCircuitBreakerOpened,
-				FieldName.Field(string(cb.name)),
+			capitan.Error(ctx, SignalCircuitBreakerOpened,
+				FieldName.Field(cb.identity.Name()),
+				FieldIdentityID.Field(cb.identity.ID().String()),
 				FieldState.Field(cb.state),
 				FieldFailures.Field(cb.failures),
 				FieldFailureThreshold.Field(cb.failureThreshold),
@@ -266,8 +270,9 @@ func (cb *CircuitBreaker[T]) onFailure() {
 		cb.successes = 0
 
 		// Emit opened signal (reopened from half-open)
-		capitan.Emit(context.Background(), SignalCircuitBreakerOpened,
-			FieldName.Field(string(cb.name)),
+		capitan.Emit(ctx, SignalCircuitBreakerOpened,
+			FieldName.Field(cb.identity.Name()),
+			FieldIdentityID.Field(cb.identity.ID().String()),
 			FieldState.Field(cb.state),
 			FieldFailures.Field(cb.failures),
 			FieldFailureThreshold.Field(cb.failureThreshold),
@@ -367,11 +372,28 @@ func (cb *CircuitBreaker[T]) getClock() clockz.Clock {
 	return cb.clock
 }
 
-// Name returns the name of this connector.
-func (cb *CircuitBreaker[T]) Name() Name {
+// Identity returns the identity of this connector.
+func (cb *CircuitBreaker[T]) Identity() Identity {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	return cb.name
+	return cb.identity
+}
+
+// Schema returns a Node representing this connector in the pipeline schema.
+func (cb *CircuitBreaker[T]) Schema() Node {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	return Node{
+		Identity: cb.identity,
+		Type:     "circuitbreaker",
+		Flow:     CircuitBreakerFlow{Processor: cb.processor.Schema()},
+		Metadata: map[string]any{
+			"failure_threshold": cb.failureThreshold,
+			"success_threshold": cb.successThreshold,
+			"reset_timeout":     cb.resetTimeout.String(),
+		},
+	}
 }
 
 // Close gracefully shuts down the connector and its child processor.

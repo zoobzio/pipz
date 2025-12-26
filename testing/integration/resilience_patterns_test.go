@@ -42,7 +42,7 @@ func TestResilience_CircuitBreakerWithRetry(t *testing.T) {
 			var callCount int64
 
 			// Create a flaky service that fails for the first N calls
-			flakyService := pipz.Apply("flaky-service", func(_ context.Context, data string) (string, error) {
+			flakyService := pipz.Apply(pipz.NewIdentity("flaky-service", ""), func(_ context.Context, data string) (string, error) {
 				count := atomic.AddInt64(&callCount, 1)
 				if count <= int64(tt.failures) {
 					return "", errors.New("service temporarily unavailable")
@@ -51,20 +51,20 @@ func TestResilience_CircuitBreakerWithRetry(t *testing.T) {
 			})
 
 			// Build resilience pipeline with circuit breaker and retry
-			pipeline := pipz.NewSequence[string]("resilient-service",
+			pipeline := pipz.NewSequence[string](pipz.NewIdentity("resilient-service", ""),
 				// Circuit breaker wraps retry
-				pipz.NewCircuitBreaker[string]("service-breaker",
+				pipz.NewCircuitBreaker[string](pipz.NewIdentity("service-breaker", ""),
 					// Retry wraps the actual service
-					pipz.NewRetry[string]("service-retry", flakyService, 3),
+					pipz.NewRetry[string](pipz.NewIdentity("service-retry", ""), flakyService, 3),
 					tt.threshold,
 					time.Second,
 				),
 			)
 
 			// Add fallback for when circuit breaker opens
-			fallbackPipeline := pipz.NewFallback[string]("service-with-fallback",
+			fallbackPipeline := pipz.NewFallback[string](pipz.NewIdentity("service-with-fallback", ""),
 				pipeline,
-				pipz.Transform("fallback", func(_ context.Context, data string) string {
+				pipz.Transform(pipz.NewIdentity("fallback", ""), func(_ context.Context, data string) string {
 					return data + "_fallback"
 				}),
 			)
@@ -103,27 +103,28 @@ func TestResilience_RateLimitingWithBackoff(t *testing.T) {
 	var rateLimited int64
 
 	// Create a rate-limited service
-	service := pipz.Apply("rate-limited-service", func(_ context.Context, data string) (string, error) {
+	service := pipz.Apply(pipz.NewIdentity("rate-limited-service", ""), func(_ context.Context, data string) (string, error) {
 		atomic.AddInt64(&processed, 1)
 		return data + "_processed", nil
 	})
 
 	// Build pipeline with rate limiting and backoff
-	pipeline := pipz.NewSequence[string]("rate-limited-pipeline",
-		// Rate limiter allows 2 requests per second
-		pipz.NewRateLimiter[string]("api-limiter", 2.0, 2).SetMode("drop"),
-		// Backoff for rate limit errors
-		pipz.NewBackoff[string]("backoff",
-			service,
-			2,                   // max attempts
-			10*time.Millisecond, // initial delay
-		),
+	pipeline := pipz.NewSequence[string](pipz.NewIdentity("rate-limited-pipeline", ""),
+		// Rate limiter allows 2 requests per second, wrapping the backoff chain
+		pipz.NewRateLimiter[string](pipz.NewIdentity("api-limiter", ""), 2.0, 2,
+			// Backoff for rate limit errors
+			pipz.NewBackoff[string](pipz.NewIdentity("backoff", ""),
+				service,
+				2,                   // max attempts
+				10*time.Millisecond, // initial delay
+			),
+		).SetMode("drop"),
 	)
 
 	// Process multiple requests quickly
 	requests := []string{"req1", "req2", "req3", "req4", "req5"}
 	results := make([]string, len(requests))
-	errors := make([]error, len(requests))
+	errs := make([]error, len(requests))
 
 	// Process all requests concurrently
 	done := make(chan bool, len(requests))
@@ -132,7 +133,7 @@ func TestResilience_RateLimitingWithBackoff(t *testing.T) {
 		go func(idx int, data string) {
 			result, err := pipeline.Process(ctx, data)
 			results[idx] = result
-			errors[idx] = err
+			errs[idx] = err
 			if err != nil {
 				atomic.AddInt64(&rateLimited, 1)
 			}
@@ -161,7 +162,7 @@ func TestResilience_RateLimitingWithBackoff(t *testing.T) {
 
 	// Verify successful requests have correct format
 	for i, result := range results {
-		if errors[i] == nil && result != requests[i]+"_processed" {
+		if errs[i] == nil && result != requests[i]+"_processed" {
 			t.Errorf("request %d: expected %s_processed, got %s",
 				i, requests[i], result)
 		}
@@ -197,7 +198,7 @@ func TestResilience_TimeoutWithFallback(t *testing.T) {
 			ctx := context.Background()
 
 			// Create a slow service
-			slowService := pipz.Apply("slow-service", func(_ context.Context, data string) (string, error) {
+			slowService := pipz.Apply(pipz.NewIdentity("slow-service", ""), func(_ context.Context, data string) (string, error) {
 				select {
 				case <-time.After(tt.serviceDelay):
 					return data + "_slow_processed", nil
@@ -207,11 +208,11 @@ func TestResilience_TimeoutWithFallback(t *testing.T) {
 			})
 
 			// Build pipeline with timeout and fallback
-			timeoutPipeline := pipz.NewTimeout[string]("service-timeout", slowService, tt.timeout)
+			timeoutPipeline := pipz.NewTimeout[string](pipz.NewIdentity("service-timeout", ""), slowService, tt.timeout)
 
-			fallbackPipeline := pipz.NewFallback[string]("service-with-fallback",
+			fallbackPipeline := pipz.NewFallback[string](pipz.NewIdentity("service-with-fallback", ""),
 				timeoutPipeline,
-				pipz.Transform("fast-fallback", func(_ context.Context, data string) string {
+				pipz.Transform(pipz.NewIdentity("fast-fallback", ""), func(_ context.Context, data string) string {
 					return data + "_fast_fallback"
 				}),
 			)
@@ -255,7 +256,7 @@ func TestResilience_ChaosEngineering(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a service with built-in panic recovery for chaos testing
-	reliableService := pipz.Apply("panic-safe-service", func(_ context.Context, data string) (string, error) {
+	reliableService := pipz.Apply(pipz.NewIdentity("panic-safe-service", ""), func(_ context.Context, data string) (string, error) {
 		// This simulates a service that can panic but is wrapped with recovery
 		defer func() {
 			if r := recover(); r != nil {
@@ -278,13 +279,13 @@ func TestResilience_ChaosEngineering(t *testing.T) {
 	})
 
 	// Build resilient pipeline that can handle chaos
-	pipeline := pipz.NewSequence[string]("chaos-resilient",
+	pipeline := pipz.NewSequence[string](pipz.NewIdentity("chaos-resilient", ""),
 		// Circuit breaker to handle failures
-		pipz.NewCircuitBreaker[string]("chaos-breaker",
+		pipz.NewCircuitBreaker[string](pipz.NewIdentity("chaos-breaker", ""),
 			// Timeout to handle slow responses
-			pipz.NewTimeout[string]("chaos-timeout",
+			pipz.NewTimeout[string](pipz.NewIdentity("chaos-timeout", ""),
 				// Retry to handle transient failures
-				pipz.NewRetry[string]("chaos-retry",
+				pipz.NewRetry[string](pipz.NewIdentity("chaos-retry", ""),
 					// Handle panics (would be caught by recover middleware in real app)
 					chaosService,
 					3,
@@ -297,9 +298,9 @@ func TestResilience_ChaosEngineering(t *testing.T) {
 	)
 
 	// Add fallback for when all resilience patterns fail
-	resilientPipeline := pipz.NewFallback[string]("ultimate-fallback",
+	resilientPipeline := pipz.NewFallback[string](pipz.NewIdentity("ultimate-fallback", ""),
 		pipeline,
-		pipz.Transform("emergency-fallback", func(_ context.Context, data string) string {
+		pipz.Transform(pipz.NewIdentity("emergency-fallback", ""), func(_ context.Context, data string) string {
 			return data + "_emergency"
 		}),
 	)
@@ -363,7 +364,7 @@ func TestResilience_MultiLayerResilienceStack(t *testing.T) {
 	var dbCalls int64
 
 	// Simulate external API service
-	apiService := pipz.Apply("external-api", func(_ context.Context, data TestUser) (TestUser, error) {
+	apiService := pipz.Apply(pipz.NewIdentity("external-api", ""), func(_ context.Context, data TestUser) (TestUser, error) {
 		count := atomic.AddInt64(&apiCalls, 1)
 		// Fail first 2 calls to test retry
 		if count <= 2 {
@@ -381,7 +382,7 @@ func TestResilience_MultiLayerResilienceStack(t *testing.T) {
 	})
 
 	// Simulate database fallback
-	dbService := pipz.Apply("database-fallback", func(_ context.Context, data TestUser) (TestUser, error) {
+	dbService := pipz.Apply(pipz.NewIdentity("database-fallback", ""), func(_ context.Context, data TestUser) (TestUser, error) {
 		atomic.AddInt64(&dbCalls, 1)
 
 		// Simulate DB delay
@@ -395,43 +396,43 @@ func TestResilience_MultiLayerResilienceStack(t *testing.T) {
 	})
 
 	// Build multi-layer resilience stack
-	resilientPipeline := pipz.NewSequence[TestUser]("multi-layer-resilience",
+	resilientPipeline := pipz.NewSequence[TestUser](pipz.NewIdentity("multi-layer-resilience", ""),
 		// Layer 1: Input validation
-		pipz.Apply("validate", func(_ context.Context, user TestUser) (TestUser, error) {
+		pipz.Apply(pipz.NewIdentity("validate", ""), func(_ context.Context, user TestUser) (TestUser, error) {
 			if user.Name == "" {
 				return user, errors.New("name is required")
 			}
 			return user, nil
 		}),
 
-		// Layer 2: Rate limiting for external API
-		pipz.NewRateLimiter[TestUser]("api-rate-limit", 10.0, 5).SetMode("wait"),
-
-		// Layer 3: Circuit breaker for API failures
-		pipz.NewCircuitBreaker[TestUser]("api-circuit-breaker",
-			// Layer 4: Timeout protection
-			pipz.NewTimeout[TestUser]("api-timeout",
-				// Layer 5: Retry for transient failures
-				pipz.NewRetry[TestUser]("api-retry",
-					apiService,
-					3, // max attempts
+		// Layer 2: Rate limiting wrapping circuit breaker chain for external API
+		pipz.NewRateLimiter[TestUser](pipz.NewIdentity("api-rate-limit", ""), 10.0, 5,
+			// Layer 3: Circuit breaker for API failures
+			pipz.NewCircuitBreaker[TestUser](pipz.NewIdentity("api-circuit-breaker", ""),
+				// Layer 4: Timeout protection
+				pipz.NewTimeout[TestUser](pipz.NewIdentity("api-timeout", ""),
+					// Layer 5: Retry for transient failures
+					pipz.NewRetry[TestUser](pipz.NewIdentity("api-retry", ""),
+						apiService,
+						3, // max attempts
+					),
+					100*time.Millisecond, // timeout
 				),
-				100*time.Millisecond, // timeout
+				3,                    // failure threshold
+				500*time.Millisecond, // reset timeout
 			),
-			3,                    // failure threshold
-			500*time.Millisecond, // reset timeout
-		),
+		).SetMode("wait"),
 
 		// Layer 6: Fallback to database if API fails completely
-		pipz.NewFallback[TestUser]("api-db-fallback",
-			pipz.Transform("passthrough", func(_ context.Context, user TestUser) TestUser {
+		pipz.NewFallback[TestUser](pipz.NewIdentity("api-db-fallback", ""),
+			pipz.Transform(pipz.NewIdentity("passthrough", ""), func(_ context.Context, user TestUser) TestUser {
 				return user
 			}),
 			dbService,
 		),
 
 		// Layer 7: Final processing
-		pipz.Transform("finalize", func(_ context.Context, user TestUser) TestUser {
+		pipz.Transform(pipz.NewIdentity("finalize", ""), func(_ context.Context, user TestUser) TestUser {
 			if user.Metadata == nil {
 				user.Metadata = make(map[string]interface{})
 			}
@@ -491,7 +492,7 @@ func TestResilience_GracefulDegradation(t *testing.T) {
 	ctx := context.Background()
 
 	// Create processors with different reliability levels
-	criticalService := pipz.Apply("critical", func(_ context.Context, user TestUser) (TestUser, error) {
+	criticalService := pipz.Apply(pipz.NewIdentity("critical", ""), func(_ context.Context, user TestUser) (TestUser, error) {
 		// Critical service always works
 		if user.Metadata == nil {
 			user.Metadata = make(map[string]interface{})
@@ -500,25 +501,25 @@ func TestResilience_GracefulDegradation(t *testing.T) {
 		return user, nil
 	})
 
-	importantService := pipz.Apply("important", func(_ context.Context, user TestUser) (TestUser, error) {
+	importantService := pipz.Apply(pipz.NewIdentity("important", ""), func(_ context.Context, user TestUser) (TestUser, error) {
 		// Important service fails sometimes
 		return user, errors.New("important service unavailable")
 	})
 
-	niceToHaveService := pipz.Apply("nice-to-have", func(_ context.Context, user TestUser) (TestUser, error) {
+	niceToHaveService := pipz.Apply(pipz.NewIdentity("nice-to-have", ""), func(_ context.Context, user TestUser) (TestUser, error) {
 		// Nice-to-have service also fails
 		return user, errors.New("nice-to-have service unavailable")
 	})
 
 	// Build graceful degradation pipeline
-	pipeline := pipz.NewSequence[TestUser]("graceful-degradation",
+	pipeline := pipz.NewSequence[TestUser](pipz.NewIdentity("graceful-degradation", ""),
 		// Critical service must succeed
 		criticalService,
 
 		// Important service with fallback
-		pipz.NewFallback[TestUser]("important-with-fallback",
+		pipz.NewFallback[TestUser](pipz.NewIdentity("important-with-fallback", ""),
 			importantService,
-			pipz.Transform("important-fallback", func(_ context.Context, user TestUser) TestUser {
+			pipz.Transform(pipz.NewIdentity("important-fallback", ""), func(_ context.Context, user TestUser) TestUser {
 				if user.Metadata == nil {
 					user.Metadata = make(map[string]interface{})
 				}
@@ -528,10 +529,10 @@ func TestResilience_GracefulDegradation(t *testing.T) {
 		),
 
 		// Nice-to-have service with ignore-failure wrapper
-		pipz.NewFallback[TestUser]("nice-to-have-optional",
+		pipz.NewFallback[TestUser](pipz.NewIdentity("nice-to-have-optional", ""),
 			niceToHaveService,
 			// Fallback is just pass-through - feature degrades gracefully
-			pipz.Transform("optional-skip", func(_ context.Context, user TestUser) TestUser {
+			pipz.Transform(pipz.NewIdentity("optional-skip", ""), func(_ context.Context, user TestUser) TestUser {
 				if user.Metadata == nil {
 					user.Metadata = make(map[string]interface{})
 				}
@@ -541,7 +542,7 @@ func TestResilience_GracefulDegradation(t *testing.T) {
 		),
 
 		// Final processing always runs
-		pipz.Transform("finalize", func(_ context.Context, user TestUser) TestUser {
+		pipz.Transform(pipz.NewIdentity("finalize", ""), func(_ context.Context, user TestUser) TestUser {
 			if user.Metadata == nil {
 				user.Metadata = make(map[string]interface{})
 			}

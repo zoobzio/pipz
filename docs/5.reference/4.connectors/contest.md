@@ -27,13 +27,18 @@ Contest is ideal when you need the fastest result that also meets quality criter
 ## Creating a Contest
 
 ```go
+// Define identities
+var FindBestRateID = pipz.NewIdentity("find-best-rate", "Find first shipping rate under $50 with 3-day delivery")
+
 // Define the winning condition
 condition := func(ctx context.Context, rate ShippingRate) bool {
     return rate.Cost < 50.00 && rate.DeliveryDays <= 3
 }
 
 // Create Contest with multiple processors
-contest := pipz.NewContest("find-best-rate", condition,
+contest := pipz.NewContest(
+    FindBestRateID,
+    condition,
     fedexRates,
     upsRates,
     uspsRates,
@@ -59,23 +64,33 @@ import (
     "github.com/zoobzio/pipz"
 )
 
+// Define identities
+var (
+    FedExID = pipz.NewIdentity("fedex", "Fetch FedEx shipping rate")
+    UPSID = pipz.NewIdentity("ups", "Fetch UPS shipping rate")
+    USPSID = pipz.NewIdentity("usps", "Fetch USPS shipping rate")
+    RateShoppingID = pipz.NewIdentity("rate-shopping", "Find first acceptable shipping rate under $30")
+)
+
 // Find the cheapest acceptable shipping rate
 func main() {
     // Condition: Must be under $30 and deliver within 5 days
     acceptableRate := func(_ context.Context, rate Rate) bool {
         return rate.Cost < 30.00 && rate.EstimatedDays <= 5
     }
-    
+
     // Create processors for each provider
-    fedex := pipz.Apply("fedex", fetchFedExRate)
-    ups := pipz.Apply("ups", fetchUPSRate)
-    usps := pipz.Apply("usps", fetchUSPSRate)
-    
+    fedex := pipz.Apply(FedExID, fetchFedExRate)
+    ups := pipz.Apply(UPSID, fetchUPSRate)
+    usps := pipz.Apply(USPSID, fetchUSPSRate)
+
     // Contest to find first acceptable rate
-    rateContest := pipz.NewContest("rate-shopping", acceptableRate,
+    rateContest := pipz.NewContest(
+        RateShoppingID,
+        acceptableRate,
         fedex, ups, usps,
     )
-    
+
     shipment := Shipment{Weight: 5.0, Destination: "NYC"}
     result, err := rateContest.Process(context.Background(), shipment)
 }
@@ -86,8 +101,15 @@ func main() {
 You can update the winning condition at runtime:
 
 ```go
+// Define identity
+var DynamicContestID = pipz.NewIdentity("dynamic", "Contest with dynamic quality criteria")
+
 // Start with strict criteria
-contest := pipz.NewContest("dynamic", strictCondition, processors...)
+contest := pipz.NewContest(
+    DynamicContestID,
+    strictCondition,
+    processors...,
+)
 
 // Relax criteria based on circumstances
 if timeIsRunningOut {
@@ -122,7 +144,13 @@ adaptiveCondition := func(ctx context.Context, result Result) bool {
 Contest supports the same configuration methods as other connectors:
 
 ```go
-contest := pipz.NewContest("configurable", condition)
+// Define identity
+var ConfigurableContestID = pipz.NewIdentity("configurable", "Contest with configurable processors")
+
+contest := pipz.NewContest(
+    ConfigurableContestID,
+    condition,
+)
 
 // Add processors
 contest.Add(newProcessor)
@@ -194,7 +222,10 @@ Don't use `Contest` when:
 ### ❌ Don't use vague conditions
 ```go
 // WRONG - What does "good" mean?
-contest := pipz.NewContest("vague",
+var VagueContestID = pipz.NewIdentity("vague", "Contest with unclear criteria")
+
+contest := pipz.NewContest(
+    VagueContestID,
     func(ctx context.Context, result Result) bool {
         return result.IsGood // Unclear criteria
     },
@@ -205,9 +236,12 @@ contest := pipz.NewContest("vague",
 ### ✅ Use specific, measurable conditions
 ```go
 // RIGHT - Clear, measurable criteria
-contest := pipz.NewContest("specific",
+var SpecificContestID = pipz.NewIdentity("specific", "Find result with >95% accuracy, <100ms latency, and <$10 cost")
+
+contest := pipz.NewContest(
+    SpecificContestID,
     func(ctx context.Context, result Result) bool {
-        return result.Accuracy > 0.95 && 
+        return result.Accuracy > 0.95 &&
                result.Latency < 100*time.Millisecond &&
                result.Cost < 10.00
     },
@@ -239,24 +273,38 @@ if err != nil {
 ### ❌ Don't use Contest for side effects
 ```go
 // WRONG - All run until one meets condition!
-contest := pipz.NewContest("side-effects",
+var (
+    SideEffectsContestID = pipz.NewIdentity("side-effects", "Contest with side effects (dangerous)")
+    Update1ID = pipz.NewIdentity("update1", "Update database 1")
+    Update2ID = pipz.NewIdentity("update2", "Update database 2")
+)
+
+contest := pipz.NewContest(
+    SideEffectsContestID,
     func(ctx context.Context, r Result) bool {
         return r.Success
     },
-    pipz.Apply("update1", updateDatabase1), // Updates!
-    pipz.Apply("update2", updateDatabase2), // Also updates!
+    pipz.Apply(Update1ID, updateDatabase1), // Updates!
+    pipz.Apply(Update2ID, updateDatabase2), // Also updates!
 )
 ```
 
 ### ✅ Use Contest for queries only
 ```go
 // RIGHT - Safe read operations
-contest := pipz.NewContest("queries",
+var (
+    QueriesContestID = pipz.NewIdentity("queries", "Find first complete and fresh query result")
+    Query1ID = pipz.NewIdentity("query1", "Query database 1")
+    Query2ID = pipz.NewIdentity("query2", "Query database 2")
+)
+
+contest := pipz.NewContest(
+    QueriesContestID,
     func(ctx context.Context, r Result) bool {
         return r.Complete && r.Fresh
     },
-    pipz.Apply("query1", queryDatabase1),
-    pipz.Apply("query2", queryDatabase2),
+    pipz.Apply(Query1ID, queryDatabase1),
+    pipz.Apply(Query2ID, queryDatabase2),
 )
 ```
 
@@ -273,12 +321,17 @@ contest := pipz.NewContest("queries",
 ### Fallback with Quality
 
 ```go
+// Define identity
+var ServiceSelectionID = pipz.NewIdentity("service-selection", "Select first available premium service, fallback to economy")
+
 // Try premium services first, fall back to economy if needed
 premiumCondition := func(_ context.Context, svc Service) bool {
     return svc.Type == "premium" && svc.Available
 }
 
-contest := pipz.NewContest("service-selection", premiumCondition,
+contest := pipz.NewContest(
+    ServiceSelectionID,
+    premiumCondition,
     premiumService1,
     premiumService2,
     // These economy services won't win unless all premium fail
@@ -290,12 +343,17 @@ contest := pipz.NewContest("service-selection", premiumCondition,
 ### Cost-Optimized Selection
 
 ```go
+// Define identity
+var CostOptimizationID = pipz.NewIdentity("cost-optimization", "Find first vendor meeting SLA within budget")
+
 // Find cheapest option that meets SLA
 budgetCondition := func(_ context.Context, opt Option) bool {
     return opt.MeetsSLA && opt.Cost < budget
 }
 
-contest := pipz.NewContest("cost-optimization", budgetCondition,
+contest := pipz.NewContest(
+    CostOptimizationID,
+    budgetCondition,
     vendors...,
 )
 ```
@@ -303,13 +361,27 @@ contest := pipz.NewContest("cost-optimization", budgetCondition,
 ### Progressive Relaxation
 
 ```go
+// Define identities
+var (
+    StrictContestID = pipz.NewIdentity("strict", "Contest with strict quality criteria")
+    RelaxedContestID = pipz.NewIdentity("relaxed", "Contest with relaxed criteria")
+)
+
 // Try strict criteria first
-strict := pipz.NewContest("strict", strictCondition, processors...)
+strict := pipz.NewContest(
+    StrictContestID,
+    strictCondition,
+    processors...,
+)
 result, err := strict.Process(ctx, input)
 
 if err != nil {
     // Relax criteria and try again
-    relaxed := pipz.NewContest("relaxed", relaxedCondition, processors...)
+    relaxed := pipz.NewContest(
+        RelaxedContestID,
+        relaxedCondition,
+        processors...,
+    )
     result, err = relaxed.Process(ctx, input)
 }
 ```

@@ -18,12 +18,12 @@ import (
 func TestPanicCascade(t *testing.T) {
 	t.Run("Error handler panic propagates uncaught", func(t *testing.T) {
 		// Processor that returns an error
-		processor := pipz.Apply("failing-processor", func(_ context.Context, _ int) (int, error) {
+		processor := pipz.Apply(pipz.NewIdentity("failing-processor", ""), func(_ context.Context, _ int) (int, error) {
 			return 0, errors.New("processor failed")
 		})
 
 		// Error handler that panics - this is the gap
-		errorHandler := pipz.Apply("panicking-handler", func(_ context.Context, err *pipz.Error[int]) (*pipz.Error[int], error) {
+		errorHandler := pipz.Apply(pipz.NewIdentity("panicking-handler", ""), func(_ context.Context, err *pipz.Error[int]) (*pipz.Error[int], error) {
 			// Simulate handler that panics on certain error patterns
 			if strings.Contains(err.Error(), "processor failed") {
 				panic("handler cannot handle this error type")
@@ -31,7 +31,7 @@ func TestPanicCascade(t *testing.T) {
 			return err, nil
 		})
 
-		handle := pipz.NewHandle("vulnerable-handle", processor, errorHandler)
+		handle := pipz.NewHandle(pipz.NewIdentity("vulnerable-handle", ""), processor, errorHandler)
 
 		// Test that error handler panics are properly handled
 		defer func() {
@@ -53,16 +53,16 @@ func TestPanicCascade(t *testing.T) {
 
 	t.Run("Nested panic through multiple layers", func(t *testing.T) {
 		// Create a processor that triggers specific panic message
-		processor := pipz.Apply("memory-leak", func(_ context.Context, n int) (int, error) {
+		processor := pipz.Apply(pipz.NewIdentity("memory-leak", ""), func(_ context.Context, n int) (int, error) {
 			// Panic with memory address
 			panic(fmt.Sprintf("leaked address: %p", &n))
 		})
 
 		// Wrap in timeout to add a layer
-		timeoutProcessor := pipz.NewTimeout("timeout-wrap", processor, time.Second)
+		timeoutProcessor := pipz.NewTimeout(pipz.NewIdentity("timeout-wrap", ""), processor, time.Second)
 
 		// Error handler that panics when it sees sanitized addresses
-		errorHandler := pipz.Apply("sensitive-handler", func(_ context.Context, err *pipz.Error[int]) (*pipz.Error[int], error) {
+		errorHandler := pipz.Apply(pipz.NewIdentity("sensitive-handler", ""), func(_ context.Context, err *pipz.Error[int]) (*pipz.Error[int], error) {
 			// This handler is sensitive to sanitized addresses
 			if strings.Contains(err.Error(), "0x***") {
 				panic("handler detected sanitized sensitive data")
@@ -70,7 +70,7 @@ func TestPanicCascade(t *testing.T) {
 			return err, nil
 		})
 
-		handle := pipz.NewHandle("nested-panic", timeoutProcessor, errorHandler)
+		handle := pipz.NewHandle(pipz.NewIdentity("nested-panic", ""), timeoutProcessor, errorHandler)
 
 		defer func() {
 			if r := recover(); r != nil {
@@ -85,12 +85,12 @@ func TestPanicCascade(t *testing.T) {
 
 	t.Run("Error handler panic during concurrent processing", func(t *testing.T) {
 		var callCount int32
-		processor := pipz.Apply("concurrent-fail", func(_ context.Context, n int) (int, error) {
+		processor := pipz.Apply(pipz.NewIdentity("concurrent-fail", ""), func(_ context.Context, n int) (int, error) {
 			return 0, fmt.Errorf("error-%d", n)
 		})
 
 		// Handler that panics on specific condition that occurs during concurrent access
-		errorHandler := pipz.Apply("race-sensitive", func(_ context.Context, err *pipz.Error[int]) (*pipz.Error[int], error) {
+		errorHandler := pipz.Apply(pipz.NewIdentity("race-sensitive", ""), func(_ context.Context, err *pipz.Error[int]) (*pipz.Error[int], error) {
 			count := atomic.AddInt32(&callCount, 1)
 			// Panic on specific concurrent condition
 			if count == 3 {
@@ -99,7 +99,7 @@ func TestPanicCascade(t *testing.T) {
 			return err, nil
 		})
 
-		handle := pipz.NewHandle("concurrent-vulnerable", processor, errorHandler)
+		handle := pipz.NewHandle(pipz.NewIdentity("concurrent-vulnerable", ""), processor, errorHandler)
 
 		// Run concurrent operations
 		done := make(chan bool, 5)
@@ -182,23 +182,20 @@ func TestSanitizationBypass(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			processor := pipz.Apply("panic-test", func(_ context.Context, _ int) (int, error) {
+			processor := pipz.Apply(pipz.NewIdentity("panic-test", ""), func(_ context.Context, _ int) (int, error) {
 				panic(tc.panicValue)
 			})
 
 			// Use a simple error handler that doesn't panic
-			errorHandler := pipz.Effect("capture", func(_ context.Context, err *pipz.Error[int]) error {
+			errorHandler := pipz.Effect(pipz.NewIdentity("capture", ""), func(_ context.Context, err *pipz.Error[int]) error {
 				// Check if sanitization worked
 				errStr := err.Error()
-				hasLeak := false
 				// Check for various leak indicators
-				if strings.Contains(errStr, "0xc000") ||
+				hasLeak := strings.Contains(errStr, "0xc000") ||
 					strings.Contains(errStr, "/etc/") ||
 					strings.Contains(errStr, "\\\\server") ||
 					(tc.name == "Exactly 200 characters" && len(errStr) > 200) ||
-					(strings.Contains(errStr, "sync.") && strings.Contains(errStr, "0x")) {
-					hasLeak = true
-				}
+					(strings.Contains(errStr, "sync.") && strings.Contains(errStr, "0x"))
 
 				if hasLeak && !tc.shouldLeak {
 					t.Errorf("SECURITY: Information leaked through panic: %s\nDescription: %s",
@@ -209,7 +206,7 @@ func TestSanitizationBypass(t *testing.T) {
 				return nil
 			})
 
-			handle := pipz.NewHandle("security-test", processor, errorHandler)
+			handle := pipz.NewHandle(pipz.NewIdentity("security-test", ""), processor, errorHandler)
 
 			// Process should handle the panic
 			_, err := handle.Process(context.Background(), 42)
@@ -224,7 +221,7 @@ func TestSanitizationBypass(t *testing.T) {
 // can trigger handler panics in unexpected ways.
 func TestHandlerPanicWithComplexError(t *testing.T) {
 	// Create a processor that fails with complex error chain
-	processor := pipz.Apply("complex-fail", func(_ context.Context, _ int) (int, error) {
+	processor := pipz.Apply(pipz.NewIdentity("complex-fail", ""), func(_ context.Context, _ int) (int, error) {
 		// Create nested error that might confuse handler
 		innerErr := fmt.Errorf("inner: %w", errors.New("root cause"))
 		outerErr := fmt.Errorf("outer: %w", innerErr)
@@ -232,7 +229,7 @@ func TestHandlerPanicWithComplexError(t *testing.T) {
 	})
 
 	// Handler that panics on complex error structures
-	errorHandler := pipz.Apply("fragile-handler", func(_ context.Context, err *pipz.Error[int]) (*pipz.Error[int], error) {
+	errorHandler := pipz.Apply(pipz.NewIdentity("fragile-handler", ""), func(_ context.Context, err *pipz.Error[int]) (*pipz.Error[int], error) {
 		// Try to unwrap multiple times - might panic
 		unwrapped := errors.Unwrap(err.Err)
 		if unwrapped != nil {
@@ -245,7 +242,7 @@ func TestHandlerPanicWithComplexError(t *testing.T) {
 		return err, nil
 	})
 
-	handle := pipz.NewHandle("complex-error-handle", processor, errorHandler)
+	handle := pipz.NewHandle(pipz.NewIdentity("complex-error-handle", ""), processor, errorHandler)
 
 	defer func() {
 		if r := recover(); r != nil {

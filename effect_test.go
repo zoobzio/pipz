@@ -8,14 +8,14 @@ import (
 	"testing"
 )
 
-// Effect test name constants.
-const (
-	logEffect       Name = "log"
-	validateEffect  Name = "validate"
-	badEffect       Name = "bad_effect"
-	auditLogEffect  Name = "audit_log"
-	strictLogger    Name = "strict_logger"
-	captureIDEffect Name = "capture_id"
+// Effect test identity variables.
+var (
+	logEffect       = NewIdentity("log", "")
+	validateEffect  = NewIdentity("validate", "")
+	badEffectID     = NewIdentity("bad_effect", "")
+	auditLogEffect  = NewIdentity("audit_log", "")
+	strictLogger    = NewIdentity("strict_logger", "")
+	captureIDEffect = NewIdentity("capture_id", "")
 )
 
 func TestEffect(t *testing.T) {
@@ -62,7 +62,7 @@ func TestEffect(t *testing.T) {
 		if pipzErr.InputData != "" {
 			t.Errorf("expected input data to be preserved")
 		}
-		if len(pipzErr.Path) == 0 || pipzErr.Path[len(pipzErr.Path)-1] != "validate" {
+		if len(pipzErr.Path) == 0 || pipzErr.Path[len(pipzErr.Path)-1].Name() != "validate" {
 			t.Errorf("expected processor name in path")
 		}
 	})
@@ -74,7 +74,7 @@ func TestEffect(t *testing.T) {
 			Age  int
 		}
 
-		badEffect := Effect(badEffect, func(_ context.Context, u User) error {
+		badEffect := Effect(badEffectID, func(_ context.Context, u User) error {
 			u.Name = "modified" // This won't affect the result
 			u.Age = 100         // This won't affect the result
 			return nil
@@ -178,7 +178,7 @@ func TestEffectLogging(t *testing.T) {
 	})
 
 	t.Run("Effect panic recovery", func(t *testing.T) {
-		panicEffect := Effect("panic_effect", func(_ context.Context, _ string) error {
+		panicEffect := Effect(NewIdentity("panic_effect", ""), func(_ context.Context, _ string) error {
 			panic("effect panic")
 		})
 

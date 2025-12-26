@@ -135,17 +135,17 @@ func BenchmarkErrorHandlingPatterns(b *testing.B) {
 
 	b.Run("Pipz_Error_Chain", func(b *testing.B) {
 		// pipz equivalent
-		pipeline := pipz.NewSequence("error-chain",
-			pipz.Apply("validate", func(_ context.Context, n int) (int, error) {
+		pipeline := pipz.NewSequence(pipz.NewIdentity("error-chain", ""),
+			pipz.Apply(pipz.NewIdentity("validate", ""), func(_ context.Context, n int) (int, error) {
 				return validateTraditional(n)
 			}),
-			pipz.Apply("transform", func(_ context.Context, n int) (int, error) {
+			pipz.Apply(pipz.NewIdentity("transform", ""), func(_ context.Context, n int) (int, error) {
 				return transformTraditional(n)
 			}),
-			pipz.Apply("enrich", func(_ context.Context, n int) (int, error) {
+			pipz.Apply(pipz.NewIdentity("enrich", ""), func(_ context.Context, n int) (int, error) {
 				return enrichTraditional(n)
 			}),
-			pipz.Transform("finalize", func(_ context.Context, n int) int {
+			pipz.Transform(pipz.NewIdentity("finalize", ""), func(_ context.Context, n int) int {
 				return finalizeTraditional(n)
 			}),
 		)
@@ -196,17 +196,17 @@ func BenchmarkErrorHandlingPatterns(b *testing.B) {
 
 	b.Run("Pipz_With_Rich_Errors", func(b *testing.B) {
 		// pipz automatically provides rich error context
-		pipeline := pipz.NewSequence("rich-errors",
-			pipz.Apply("validate", func(_ context.Context, n int) (int, error) {
+		pipeline := pipz.NewSequence(pipz.NewIdentity("rich-errors", ""),
+			pipz.Apply(pipz.NewIdentity("validate", ""), func(_ context.Context, n int) (int, error) {
 				return validateTraditional(n)
 			}),
-			pipz.Apply("transform", func(_ context.Context, n int) (int, error) {
+			pipz.Apply(pipz.NewIdentity("transform", ""), func(_ context.Context, n int) (int, error) {
 				return transformTraditional(n)
 			}),
-			pipz.Apply("enrich", func(_ context.Context, n int) (int, error) {
+			pipz.Apply(pipz.NewIdentity("enrich", ""), func(_ context.Context, n int) (int, error) {
 				return enrichTraditional(n)
 			}),
-			pipz.Transform("finalize", func(_ context.Context, n int) int {
+			pipz.Transform(pipz.NewIdentity("finalize", ""), func(_ context.Context, n int) int {
 				return finalizeTraditional(n)
 			}),
 		)
@@ -248,11 +248,11 @@ func BenchmarkRetryPatterns(b *testing.B) {
 	})
 
 	b.Run("Pipz_Retry", func(b *testing.B) {
-		flakyFunc := pipz.Apply("flaky", func(_ context.Context, n int) (int, error) {
+		flakyFunc := pipz.Apply(pipz.NewIdentity("flaky", ""), func(_ context.Context, n int) (int, error) {
 			return flakyOperation(n)
 		})
 
-		retry := pipz.NewRetry("retry", flakyFunc, 3)
+		retry := pipz.NewRetry(pipz.NewIdentity("retry", ""), flakyFunc, 3)
 		data := 42
 
 		b.ResetTimer()
@@ -283,11 +283,11 @@ func BenchmarkRetryPatterns(b *testing.B) {
 	})
 
 	b.Run("Pipz_Backoff", func(b *testing.B) {
-		flakyFunc := pipz.Apply("flaky", func(_ context.Context, n int) (int, error) {
+		flakyFunc := pipz.Apply(pipz.NewIdentity("flaky", ""), func(_ context.Context, n int) (int, error) {
 			return flakyOperation(n)
 		})
 
-		backoff := pipz.NewBackoff("backoff", flakyFunc, 3, 1*time.Millisecond)
+		backoff := pipz.NewBackoff(pipz.NewIdentity("backoff", ""), flakyFunc, 3, 1*time.Millisecond)
 		data := 42
 
 		b.ResetTimer()
@@ -329,11 +329,11 @@ func BenchmarkCircuitBreakerPatterns(b *testing.B) {
 	})
 
 	b.Run("Pipz_Circuit_Breaker", func(b *testing.B) {
-		processor := pipz.Apply("stable", func(_ context.Context, n int) (int, error) {
+		processor := pipz.Apply(pipz.NewIdentity("stable", ""), func(_ context.Context, n int) (int, error) {
 			return stableOperation(n)
 		})
 
-		cb := pipz.NewCircuitBreaker("cb", processor, 5, time.Minute)
+		cb := pipz.NewCircuitBreaker(pipz.NewIdentity("cb", ""), processor, 5, time.Minute)
 		data := 42
 
 		b.ResetTimer()
@@ -369,9 +369,9 @@ func BenchmarkConcurrentPatterns(b *testing.B) {
 	})
 
 	b.Run("Pipz_Concurrent", func(b *testing.B) {
-		concurrent := pipz.NewConcurrent("concurrent",
+		concurrent := pipz.NewConcurrent(pipz.NewIdentity("concurrent", ""),
 			nil,
-			pipz.Transform("validate", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+			pipz.Transform(pipz.NewIdentity("validate", ""), func(_ context.Context, p ProfileUpdate) ProfileUpdate {
 				if p.Priority < 0 {
 					p.Priority = 0
 				}
@@ -380,17 +380,17 @@ func BenchmarkConcurrentPatterns(b *testing.B) {
 				}
 				return p
 			}),
-			pipz.Transform("normalize", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+			pipz.Transform(pipz.NewIdentity("normalize", ""), func(_ context.Context, p ProfileUpdate) ProfileUpdate {
 				p.Field = strings.ToLower(p.Field)
 				return p
 			}),
-			pipz.Transform("timestamp", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+			pipz.Transform(pipz.NewIdentity("timestamp", ""), func(_ context.Context, p ProfileUpdate) ProfileUpdate {
 				if p.Timestamp == 0 {
 					p.Timestamp = time.Now().Unix()
 				}
 				return p
 			}),
-			pipz.Transform("prioritize", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+			pipz.Transform(pipz.NewIdentity("prioritize", ""), func(_ context.Context, p ProfileUpdate) ProfileUpdate {
 				if p.Field == "email" || p.Field == "password" {
 					p.Priority += 2
 				}
@@ -435,19 +435,19 @@ func BenchmarkConcurrentPatterns(b *testing.B) {
 	})
 
 	b.Run("Pipz_Race", func(b *testing.B) {
-		race := pipz.NewRace("race",
-			pipz.Transform("fast-validate", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+		race := pipz.NewRace(pipz.NewIdentity("race", ""),
+			pipz.Transform(pipz.NewIdentity("fast-validate", ""), func(_ context.Context, p ProfileUpdate) ProfileUpdate {
 				if p.Priority < 5 {
 					p.Priority = 5
 				} // Quick priority boost
 				return p
 			}),
-			pipz.Transform("slow-enrich", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+			pipz.Transform(pipz.NewIdentity("slow-enrich", ""), func(_ context.Context, p ProfileUpdate) ProfileUpdate {
 				time.Sleep(time.Microsecond)
 				p.Field = "enriched_" + p.Field // Simulate database lookup
 				return p
 			}),
-			pipz.Transform("slower-audit", func(_ context.Context, p ProfileUpdate) ProfileUpdate {
+			pipz.Transform(pipz.NewIdentity("slower-audit", ""), func(_ context.Context, p ProfileUpdate) ProfileUpdate {
 				time.Sleep(2 * time.Microsecond)
 				p.Timestamp = time.Now().Unix() // Audit timestamp
 				return p
@@ -496,16 +496,13 @@ func BenchmarkRateLimitingPatterns(b *testing.B) {
 	})
 
 	b.Run("Pipz_Rate_Limiter", func(b *testing.B) {
-		processor := pipz.Transform("stable", func(_ context.Context, n int) int {
+		processor := pipz.Transform(pipz.NewIdentity("stable", ""), func(_ context.Context, n int) int {
 			result, _ := stableOperation(n) //nolint:errcheck // Error ignored for benchmarking
 			return result
 		})
 
 		// Create rate-limited pipeline
-		limitedPipeline := pipz.NewSequence("rate-limited",
-			pipz.NewRateLimiter[int]("limiter", 1000, 100),
-			processor,
-		)
+		limitedPipeline := pipz.NewRateLimiter[int](pipz.NewIdentity("limiter", ""), 1000, 100, processor)
 		data := 42
 
 		b.ResetTimer()
@@ -542,16 +539,16 @@ func BenchmarkComplexComposition(b *testing.B) {
 
 	b.Run("Pipz_Complex_Processing", func(b *testing.B) {
 		// Equivalent pipz pipeline
-		pipeline := pipz.NewSequence("complex",
+		pipeline := pipz.NewSequence(pipz.NewIdentity("complex", ""),
 			// Validation with fallback
-			pipz.NewFallback("validation",
-				pipz.Apply("strict-validate", func(_ context.Context, n int) (int, error) {
+			pipz.NewFallback(pipz.NewIdentity("validation", ""),
+				pipz.Apply(pipz.NewIdentity("strict-validate", ""), func(_ context.Context, n int) (int, error) {
 					if n <= 0 {
 						return n, errors.New("must be positive")
 					}
 					return n, nil
 				}),
-				pipz.Apply("lenient-validate", func(_ context.Context, n int) (int, error) {
+				pipz.Apply(pipz.NewIdentity("lenient-validate", ""), func(_ context.Context, n int) (int, error) {
 					if n < -100 {
 						return n, errors.New("too negative")
 					}
@@ -560,16 +557,16 @@ func BenchmarkComplexComposition(b *testing.B) {
 			),
 
 			// Circuit breaker with timeout and retry
-			pipz.NewCircuitBreaker("circuit-breaker",
+			pipz.NewCircuitBreaker(pipz.NewIdentity("circuit-breaker", ""),
 				// Retry with backoff
-				pipz.NewBackoff("retry",
+				pipz.NewBackoff(pipz.NewIdentity("retry", ""),
 					// Timeout protection
-					pipz.NewTimeout("timeout",
+					pipz.NewTimeout(pipz.NewIdentity("timeout", ""),
 						// Sequential processing (since concurrent needs ClonableInt)
-						pipz.NewSequence("sequential-processing",
-							pipz.Transform("proc1", func(_ context.Context, n int) int { return n * 2 }),
-							pipz.Transform("proc2", func(_ context.Context, n int) int { return n + 100 }),
-							pipz.Transform("proc3", func(_ context.Context, n int) int { return n - 10 }),
+						pipz.NewSequence(pipz.NewIdentity("sequential-processing", ""),
+							pipz.Transform(pipz.NewIdentity("proc1", ""), func(_ context.Context, n int) int { return n * 2 }),
+							pipz.Transform(pipz.NewIdentity("proc2", ""), func(_ context.Context, n int) int { return n + 100 }),
+							pipz.Transform(pipz.NewIdentity("proc3", ""), func(_ context.Context, n int) int { return n - 10 }),
 						),
 						100*time.Millisecond,
 					),
@@ -581,7 +578,7 @@ func BenchmarkComplexComposition(b *testing.B) {
 			),
 
 			// Final processing
-			pipz.Transform("finalize", func(_ context.Context, n int) int {
+			pipz.Transform(pipz.NewIdentity("finalize", ""), func(_ context.Context, n int) int {
 				return n + 1000
 			}),
 		)
@@ -758,23 +755,23 @@ func (rl *TraditionalRateLimiter) Allow() bool {
 
 func traditionalFanOutFanIn(ctx context.Context, data int) ([]int, error) {
 	results := make(chan int, 4)
-	errors := make(chan error, 4)
+	errs := make(chan error, 4)
 
 	go func() {
 		results <- data * 2
-		errors <- nil
+		errs <- nil
 	}()
 	go func() {
 		results <- data + 10
-		errors <- nil
+		errs <- nil
 	}()
 	go func() {
 		results <- data - 5
-		errors <- nil
+		errs <- nil
 	}()
 	go func() {
 		results <- data * 3
-		errors <- nil
+		errs <- nil
 	}()
 
 	var collected []int
@@ -782,7 +779,7 @@ func traditionalFanOutFanIn(ctx context.Context, data int) ([]int, error) {
 		select {
 		case result := <-results:
 			collected = append(collected, result)
-		case err := <-errors:
+		case err := <-errs:
 			if err != nil {
 				return nil, err
 			}

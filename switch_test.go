@@ -3,7 +3,6 @@ package pipz
 import (
 	"context"
 	"errors"
-	"reflect"
 	"testing"
 
 	"github.com/zoobzio/capitan"
@@ -12,10 +11,10 @@ import (
 func TestSwitch(t *testing.T) {
 	t.Run("Basic Routing", func(t *testing.T) {
 		// Create processors for routes
-		double := Transform("double", func(_ context.Context, n int) int {
+		double := Transform(NewIdentity("double", ""), func(_ context.Context, n int) int {
 			return n * 2
 		})
-		triple := Transform("triple", func(_ context.Context, n int) int {
+		triple := Transform(NewIdentity("triple", ""), func(_ context.Context, n int) int {
 			return n * 3
 		})
 
@@ -28,7 +27,7 @@ func TestSwitch(t *testing.T) {
 		}
 
 		// Create switch
-		sw := NewSwitch("test-switch", condition)
+		sw := NewSwitch(NewIdentity("test-switch", ""), condition)
 		sw.AddRoute("even", double)
 		sw.AddRoute("odd", triple)
 
@@ -56,8 +55,8 @@ func TestSwitch(t *testing.T) {
 			return "nonexistent"
 		}
 
-		sw := NewSwitch("test-switch", condition)
-		sw.AddRoute("other", Transform("noop", func(_ context.Context, n int) int {
+		sw := NewSwitch(NewIdentity("test-switch", ""), condition)
+		sw.AddRoute("other", Transform(NewIdentity("noop", ""), func(_ context.Context, n int) int {
 			return n + 100
 		}))
 
@@ -72,21 +71,21 @@ func TestSwitch(t *testing.T) {
 	})
 
 	t.Run("Name Method", func(t *testing.T) {
-		sw := NewSwitch("my-switch", func(_ context.Context, _ int) string {
+		sw := NewSwitch(NewIdentity("my-switch", ""), func(_ context.Context, _ int) string {
 			return "test"
 		})
 
-		if sw.Name() != "my-switch" {
-			t.Errorf("expected 'my-switch', got %q", sw.Name())
+		if sw.Identity().Name() != "my-switch" {
+			t.Errorf("expected 'my-switch', got %q", sw.Identity().Name())
 		}
 	})
 
 	t.Run("Route Management", func(t *testing.T) {
-		sw := NewSwitch("test", func(_ context.Context, _ int) string {
+		sw := NewSwitch(NewIdentity("test", ""), func(_ context.Context, _ int) string {
 			return "route1"
 		})
 
-		processor := Transform("test", func(_ context.Context, n int) int { return n })
+		processor := Transform(NewIdentity("test", ""), func(_ context.Context, n int) int { return n })
 
 		// Add route
 		sw.AddRoute("route1", processor)
@@ -118,9 +117,9 @@ func TestSwitch(t *testing.T) {
 			return "negative"
 		}
 
-		sw := NewSwitch("test", initialCondition)
-		sw.AddRoute("positive", Transform("double", func(_ context.Context, n int) int { return n * 2 }))
-		sw.AddRoute("negative", Transform("negate", func(_ context.Context, n int) int { return -n }))
+		sw := NewSwitch(NewIdentity("test", ""), initialCondition)
+		sw.AddRoute("positive", Transform(NewIdentity("double", ""), func(_ context.Context, n int) int { return n * 2 }))
+		sw.AddRoute("negative", Transform(NewIdentity("negate", ""), func(_ context.Context, n int) int { return -n }))
 
 		// Test with initial condition
 		result, err := sw.Process(context.Background(), 5)
@@ -151,11 +150,11 @@ func TestSwitch(t *testing.T) {
 	})
 
 	t.Run("Routes Method", func(t *testing.T) {
-		sw := NewSwitch("test", func(_ context.Context, _ int) string { return "default" })
+		sw := NewSwitch(NewIdentity("test", ""), func(_ context.Context, _ int) string { return "default" })
 
-		p1 := Transform("p1", func(_ context.Context, n int) int { return n })
-		p2 := Transform("p2", func(_ context.Context, n int) int { return n })
-		p3 := Transform("p3", func(_ context.Context, n int) int { return n })
+		p1 := Transform(NewIdentity("p1", ""), func(_ context.Context, n int) int { return n })
+		p2 := Transform(NewIdentity("p2", ""), func(_ context.Context, n int) int { return n })
+		p3 := Transform(NewIdentity("p3", ""), func(_ context.Context, n int) int { return n })
 
 		sw.AddRoute("route1", p1)
 		sw.AddRoute("route2", p2)
@@ -182,11 +181,11 @@ func TestSwitch(t *testing.T) {
 	})
 
 	t.Run("SetRoutes Method", func(t *testing.T) {
-		sw := NewSwitch("test", func(_ context.Context, _ int) string { return "default" })
+		sw := NewSwitch(NewIdentity("test", ""), func(_ context.Context, _ int) string { return "default" })
 
-		p1 := Transform("p1", func(_ context.Context, n int) int { return n + 1 })
-		p2 := Transform("p2", func(_ context.Context, n int) int { return n + 2 })
-		p3 := Transform("p3", func(_ context.Context, n int) int { return n + 3 })
+		p1 := Transform(NewIdentity("p1", ""), func(_ context.Context, n int) int { return n + 1 })
+		p2 := Transform(NewIdentity("p2", ""), func(_ context.Context, n int) int { return n + 2 })
+		p3 := Transform(NewIdentity("p3", ""), func(_ context.Context, n int) int { return n + 3 })
 
 		// Set initial routes
 		initialRoutes := map[string]Chainable[int]{
@@ -233,10 +232,10 @@ func TestSwitch(t *testing.T) {
 
 	t.Run("Route Processor Error", func(t *testing.T) {
 		// Create a processor that returns an error
-		errorProc := Apply("error-proc", func(_ context.Context, _ int) (int, error) {
+		errorProc := Apply(NewIdentity("error-proc", ""), func(_ context.Context, _ int) (int, error) {
 			return 0, errors.New("processor failed")
 		})
-		successProc := Transform("success", func(_ context.Context, n int) int {
+		successProc := Transform(NewIdentity("success", ""), func(_ context.Context, n int) int {
 			return n * 2
 		})
 
@@ -247,7 +246,7 @@ func TestSwitch(t *testing.T) {
 			return "success"
 		}
 
-		sw := NewSwitch("error-switch", condition)
+		sw := NewSwitch(NewIdentity("error-switch", ""), condition)
 		sw.AddRoute("error", errorProc)
 		sw.AddRoute("success", successProc)
 
@@ -260,9 +259,14 @@ func TestSwitch(t *testing.T) {
 		// Check error path includes switch name
 		var pipeErr *Error[int]
 		if errors.As(err, &pipeErr) {
-			expectedPath := []Name{"error-switch", "error-proc"}
-			if !reflect.DeepEqual(pipeErr.Path, expectedPath) {
-				t.Errorf("expected error path %v, got %v", expectedPath, pipeErr.Path)
+			expectedPath := []string{"error-switch", "error-proc"}
+			if len(pipeErr.Path) != len(expectedPath) {
+				t.Errorf("expected error path length %d, got %d", len(expectedPath), len(pipeErr.Path))
+			}
+			for i, exp := range expectedPath {
+				if pipeErr.Path[i].Name() != exp {
+					t.Errorf("expected error path[%d] %q, got %q", i, exp, pipeErr.Path[i].Name())
+				}
 			}
 		} else {
 			t.Error("expected error to be of type *pipz.Error[int]")
@@ -271,7 +275,7 @@ func TestSwitch(t *testing.T) {
 
 	t.Run("Switch panic recovery", func(t *testing.T) {
 		// Create a switch with panic in condition
-		panicSwitch := NewSwitch("panic_switch", func(_ context.Context, _ string) string {
+		panicSwitch := NewSwitch(NewIdentity("panic_switch", ""), func(_ context.Context, _ string) string {
 			panic("switch condition panic")
 		})
 
@@ -286,7 +290,7 @@ func TestSwitch(t *testing.T) {
 			t.Fatal("expected pipz.Error")
 		}
 
-		if pipzErr.Path[0] != "panic_switch" {
+		if pipzErr.Path[0].Name() != "panic_switch" {
 			t.Errorf("expected path to start with 'panic_switch', got %v", pipzErr.Path)
 		}
 
@@ -299,10 +303,10 @@ func TestSwitch(t *testing.T) {
 
 func TestSwitchClose(t *testing.T) {
 	t.Run("Closes All Routes", func(t *testing.T) {
-		p1 := newTrackingProcessor[int]("p1")
-		p2 := newTrackingProcessor[int]("p2")
+		p1 := newTrackingProcessor[int](NewIdentity("p1", ""))
+		p2 := newTrackingProcessor[int](NewIdentity("p2", ""))
 
-		sw := NewSwitch("test", func(_ context.Context, _ int) string { return "a" })
+		sw := NewSwitch(NewIdentity("test", ""), func(_ context.Context, _ int) string { return "a" })
 		sw.AddRoute("a", p1)
 		sw.AddRoute("b", p2)
 
@@ -317,10 +321,10 @@ func TestSwitchClose(t *testing.T) {
 	})
 
 	t.Run("Aggregates Errors", func(t *testing.T) {
-		p1 := newTrackingProcessor[int]("p1").WithCloseError(errors.New("p1 error"))
-		p2 := newTrackingProcessor[int]("p2").WithCloseError(errors.New("p2 error"))
+		p1 := newTrackingProcessor[int](NewIdentity("p1", "")).WithCloseError(errors.New("p1 error"))
+		p2 := newTrackingProcessor[int](NewIdentity("p2", "")).WithCloseError(errors.New("p2 error"))
 
-		sw := NewSwitch("test", func(_ context.Context, _ int) string { return "a" })
+		sw := NewSwitch(NewIdentity("test", ""), func(_ context.Context, _ int) string { return "a" })
 		sw.AddRoute("a", p1)
 		sw.AddRoute("b", p2)
 
@@ -335,8 +339,8 @@ func TestSwitchClose(t *testing.T) {
 	})
 
 	t.Run("Idempotency", func(t *testing.T) {
-		p := newTrackingProcessor[int]("p")
-		sw := NewSwitch("test", func(_ context.Context, _ int) string { return "a" })
+		p := newTrackingProcessor[int](NewIdentity("p", ""))
+		sw := NewSwitch(NewIdentity("test", ""), func(_ context.Context, _ int) string { return "a" })
 		sw.AddRoute("a", p)
 
 		_ = sw.Close()
@@ -363,14 +367,14 @@ func TestSwitchSignals(t *testing.T) {
 		})
 		defer listener.Close()
 
-		sw := NewSwitch("signal-test-switch", func(_ context.Context, n int) string {
+		sw := NewSwitch(NewIdentity("signal-test-switch", ""), func(_ context.Context, n int) string {
 			if n > 10 {
 				return "high"
 			}
 			return "low"
 		})
-		sw.AddRoute("high", Transform("double", func(_ context.Context, n int) int { return n * 2 }))
-		sw.AddRoute("low", Transform("half", func(_ context.Context, n int) int { return n / 2 }))
+		sw.AddRoute("high", Transform(NewIdentity("double", ""), func(_ context.Context, n int) int { return n * 2 }))
+		sw.AddRoute("low", Transform(NewIdentity("half", ""), func(_ context.Context, n int) int { return n / 2 }))
 
 		_, err := sw.Process(context.Background(), 20)
 
@@ -406,10 +410,10 @@ func TestSwitchSignals(t *testing.T) {
 		})
 		defer listener.Close()
 
-		sw := NewSwitch("signal-no-match", func(_ context.Context, _ int) string {
+		sw := NewSwitch(NewIdentity("signal-no-match", ""), func(_ context.Context, _ int) string {
 			return "unknown"
 		})
-		sw.AddRoute("known", Transform("double", func(_ context.Context, n int) int { return n * 2 }))
+		sw.AddRoute("known", Transform(NewIdentity("double", ""), func(_ context.Context, n int) int { return n * 2 }))
 
 		_, err := sw.Process(context.Background(), 5)
 
@@ -426,6 +430,33 @@ func TestSwitchSignals(t *testing.T) {
 		}
 		if signalMatched {
 			t.Error("expected matched to be false")
+		}
+	})
+
+	t.Run("Schema", func(t *testing.T) {
+		proc1 := Transform(NewIdentity("route-a", ""), func(_ context.Context, n int) int { return n })
+		proc2 := Transform(NewIdentity("route-b", ""), func(_ context.Context, n int) int { return n })
+		condition := func(_ context.Context, _ int) string { return "a" }
+
+		sw := NewSwitch(NewIdentity("test-switch", "Switch connector"), condition)
+		sw.AddRoute("a", proc1)
+		sw.AddRoute("b", proc2)
+
+		schema := sw.Schema()
+
+		if schema.Identity.Name() != "test-switch" {
+			t.Errorf("Schema Identity.Name() = %v, want %v", schema.Identity.Name(), "test-switch")
+		}
+		if schema.Type != "switch" {
+			t.Errorf("Schema Type = %v, want %v", schema.Type, "switch")
+		}
+
+		flow, ok := SwitchKey.From(schema)
+		if !ok {
+			t.Fatal("Expected SwitchFlow")
+		}
+		if len(flow.Routes) != 2 {
+			t.Errorf("len(Flow.Routes) = %d, want 2", len(flow.Routes))
 		}
 	})
 }

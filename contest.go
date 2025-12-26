@@ -50,7 +50,7 @@ import (
 //	    uspsRates,
 //	)
 type Contest[T Cloner[T]] struct {
-	name       Name
+	identity   Identity
 	condition  func(context.Context, T) bool
 	processors []Chainable[T]
 	mu         sync.RWMutex
@@ -61,17 +61,17 @@ type Contest[T Cloner[T]] struct {
 // NewContest creates a new Contest connector with the specified winning condition.
 // The condition function determines which results are acceptable winners.
 // A result must both complete successfully AND meet the condition to win.
-func NewContest[T Cloner[T]](name Name, condition func(context.Context, T) bool, processors ...Chainable[T]) *Contest[T] {
+func NewContest[T Cloner[T]](identity Identity, condition func(context.Context, T) bool, processors ...Chainable[T]) *Contest[T] {
 	return &Contest[T]{
-		name:       name,
-		condition:  condition,
+		identity:  identity,
+		condition: condition,
 		processors: processors,
 	}
 }
 
 // Process implements the Chainable interface.
 func (c *Contest[T]) Process(ctx context.Context, input T) (result T, err error) {
-	defer recoverFromPanic(&result, &err, c.name, input)
+	defer recoverFromPanic(&result, &err, c.identity, input)
 
 	start := time.Now()
 
@@ -84,7 +84,7 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (result T, err error)
 	if len(processors) == 0 {
 		var zero T
 		return zero, &Error[T]{
-			Path:      []Name{c.name},
+			Path:      []Identity{c.identity},
 			Err:       fmt.Errorf("no processors provided to Contest"),
 			InputData: input,
 			Timestamp: time.Now(),
@@ -95,7 +95,7 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (result T, err error)
 	if condition == nil {
 		var zero T
 		return zero, &Error[T]{
-			Path:      []Name{c.name},
+			Path:      []Identity{c.identity},
 			Err:       fmt.Errorf("no condition provided to Contest"),
 			InputData: input,
 			Timestamp: time.Now(),
@@ -108,7 +108,7 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (result T, err error)
 		data T
 		err  error
 		idx  int
-		name Name
+		name string
 	}
 
 	resultCh := make(chan contestResult, len(processors))
@@ -126,7 +126,7 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (result T, err error)
 			// Process
 			data, processErr := p.Process(contestCtx, inputCopy)
 			select {
-			case resultCh <- contestResult{data: data, err: processErr, idx: idx, name: p.Name()}:
+			case resultCh <- contestResult{data: data, err: processErr, idx: idx, name: p.Identity().Name()}:
 			case <-contestCtx.Done():
 			}
 		}(i, processor)
@@ -149,8 +149,9 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (result T, err error)
 
 					// Emit winner signal
 					capitan.Info(ctx, SignalContestWinner,
-						FieldName.Field(string(c.name)),
-						FieldWinnerName.Field(string(res.name)),
+						FieldName.Field(c.identity.Name()),
+						FieldIdentityID.Field(c.identity.ID().String()),
+						FieldWinnerName.Field(res.name),
 						FieldDuration.Field(time.Since(start).Seconds()),
 					)
 
@@ -180,7 +181,7 @@ func (c *Contest[T]) Process(ctx context.Context, input T) (result T, err error)
 	}
 
 	return input, &Error[T]{
-		Path:      []Name{c.name},
+		Path:      []Identity{c.identity},
 		Err:       err,
 		InputData: input,
 		Timestamp: time.Now(),
@@ -242,11 +243,28 @@ func (c *Contest[T]) SetProcessors(processors ...Chainable[T]) *Contest[T] {
 	return c
 }
 
-// Name returns the name of this connector.
-func (c *Contest[T]) Name() Name {
+// Identity returns the identity of this connector.
+func (c *Contest[T]) Identity() Identity {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.name
+	return c.identity
+}
+
+// Schema returns a Node representing this connector in the pipeline schema.
+func (c *Contest[T]) Schema() Node {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	competitors := make([]Node, len(c.processors))
+	for i, proc := range c.processors {
+		competitors[i] = proc.Schema()
+	}
+
+	return Node{
+		Identity: c.identity,
+		Type:     "contest",
+		Flow:     ContestFlow{Competitors: competitors},
+	}
 }
 
 // Close gracefully shuts down the connector and all its child processors.

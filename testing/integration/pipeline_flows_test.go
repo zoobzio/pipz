@@ -92,9 +92,9 @@ func TestPipelineFlows_SequentialProcessing(t *testing.T) {
 			ctx := context.Background()
 
 			// Build a user processing pipeline
-			pipeline := pipz.NewSequence[TestUser]("user-processing",
+			pipeline := pipz.NewSequence[TestUser](pipz.NewIdentity("user-processing", ""),
 				// Step 1: Validate user data
-				pipz.Apply("validate", func(_ context.Context, user TestUser) (TestUser, error) {
+				pipz.Apply(pipz.NewIdentity("validate", ""), func(_ context.Context, user TestUser) (TestUser, error) {
 					if user.Name == "" {
 						return user, errors.New("name is required")
 					}
@@ -114,7 +114,7 @@ func TestPipelineFlows_SequentialProcessing(t *testing.T) {
 				}),
 
 				// Step 2: Normalize data
-				pipz.Transform("normalize", func(_ context.Context, user TestUser) TestUser {
+				pipz.Transform(pipz.NewIdentity("normalize", ""), func(_ context.Context, user TestUser) TestUser {
 					// Normalize name to title case
 					words := strings.Fields(strings.ToLower(user.Name))
 					for i, word := range words {
@@ -134,7 +134,7 @@ func TestPipelineFlows_SequentialProcessing(t *testing.T) {
 				}),
 
 				// Step 3: Apply business rules
-				pipz.Transform("business-rules", func(_ context.Context, user TestUser) TestUser {
+				pipz.Transform(pipz.NewIdentity("business-rules", ""), func(_ context.Context, user TestUser) TestUser {
 					// Premium upgrade for users 40+
 					if user.Age >= 40 && !user.Premium {
 						user.Premium = true
@@ -186,9 +186,9 @@ func TestPipelineFlows_ConditionalBranching(t *testing.T) {
 	var minorProcessing int64
 
 	// Build a pipeline with conditional branching
-	pipeline := pipz.NewSequence[TestUser]("age-based-processing",
+	pipeline := pipz.NewSequence[TestUser](pipz.NewIdentity("age-based-processing", ""),
 		// Validate input
-		pipz.Apply("validate", func(_ context.Context, user TestUser) (TestUser, error) {
+		pipz.Apply(pipz.NewIdentity("validate", ""), func(_ context.Context, user TestUser) (TestUser, error) {
 			if user.Age < 0 {
 				return user, errors.New("age cannot be negative")
 			}
@@ -196,14 +196,14 @@ func TestPipelineFlows_ConditionalBranching(t *testing.T) {
 		}),
 
 		// Branch based on age
-		pipz.NewSwitch[TestUser, string]("age-switch", func(_ context.Context, user TestUser) string {
+		pipz.NewSwitch[TestUser](pipz.NewIdentity("age-switch", ""), func(_ context.Context, user TestUser) string {
 			if user.Age < 18 {
 				return "minor"
 			}
 			return "adult"
 		}).
 			AddRoute("minor",
-				pipz.Transform("minor-processing", func(_ context.Context, user TestUser) TestUser {
+				pipz.Transform(pipz.NewIdentity("minor-processing", ""), func(_ context.Context, user TestUser) TestUser {
 					atomic.AddInt64(&minorProcessing, 1)
 					if user.Metadata == nil {
 						user.Metadata = make(map[string]interface{})
@@ -214,7 +214,7 @@ func TestPipelineFlows_ConditionalBranching(t *testing.T) {
 				}),
 			).
 			AddRoute("adult",
-				pipz.Transform("adult-processing", func(_ context.Context, user TestUser) TestUser {
+				pipz.Transform(pipz.NewIdentity("adult-processing", ""), func(_ context.Context, user TestUser) TestUser {
 					atomic.AddInt64(&adultProcessing, 1)
 					if user.Metadata == nil {
 						user.Metadata = make(map[string]interface{})
@@ -317,9 +317,14 @@ func TestPipelineFlows_ConditionalBranching(t *testing.T) {
 func TestPipelineFlows_DynamicModification(t *testing.T) {
 	ctx := context.Background()
 
+	// Create Identity objects upfront so we can reference them for lookups
+	step1ID := pipz.NewIdentity("step1", "")
+	step2ID := pipz.NewIdentity("step2", "")
+	step15ID := pipz.NewIdentity("step1.5", "")
+
 	// Create a sequence that can be modified at runtime
-	seq := pipz.NewSequence[TestUser]("dynamic-pipeline",
-		pipz.Transform("step1", func(_ context.Context, user TestUser) TestUser {
+	seq := pipz.NewSequence[TestUser](pipz.NewIdentity("dynamic-pipeline", ""),
+		pipz.Transform(step1ID, func(_ context.Context, user TestUser) TestUser {
 			if user.Metadata == nil {
 				user.Metadata = make(map[string]interface{})
 			}
@@ -344,7 +349,7 @@ func TestPipelineFlows_DynamicModification(t *testing.T) {
 	}
 
 	// Add step2 dynamically
-	seq.Register(pipz.Transform("step2", func(_ context.Context, user TestUser) TestUser {
+	seq.Register(pipz.Transform(step2ID, func(_ context.Context, user TestUser) TestUser {
 		if user.Metadata == nil {
 			user.Metadata = make(map[string]interface{})
 		}
@@ -366,7 +371,7 @@ func TestPipelineFlows_DynamicModification(t *testing.T) {
 	}
 
 	// Insert step1.5 between step1 and step2
-	_ = seq.After("step1", pipz.Transform("step1.5", func(_ context.Context, user TestUser) TestUser { //nolint:errcheck // Return value ignored in test
+	_ = seq.After(step1ID, pipz.Transform(step15ID, func(_ context.Context, user TestUser) TestUser { //nolint:errcheck // Return value ignored in test
 		if user.Metadata == nil {
 			user.Metadata = make(map[string]interface{})
 		}
@@ -395,13 +400,13 @@ func TestPipelineFlows_DynamicModification(t *testing.T) {
 	}
 
 	for i, expected := range expectedNames {
-		if names[i] != pipz.Name(expected) {
+		if names[i] != expected {
 			t.Errorf("processor %d: expected %s, got %s", i, expected, names[i])
 		}
 	}
 
 	// Remove step1.5
-	_ = seq.Remove("step1.5") //nolint:errcheck // Return value ignored in test
+	_ = seq.Remove(step15ID) //nolint:errcheck // Return value ignored in test
 
 	// Process again - should only include step1 and step2
 	result4, err := seq.Process(ctx, user)
@@ -458,8 +463,8 @@ func TestPipelineFlows_ErrorPropagation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Build pipeline with potential failure points
-			pipeline := pipz.NewSequence[TestUser]("error-propagation",
-				pipz.Apply("validate", func(_ context.Context, user TestUser) (TestUser, error) {
+			pipeline := pipz.NewSequence[TestUser](pipz.NewIdentity("error-propagation", ""),
+				pipz.Apply(pipz.NewIdentity("validate", ""), func(_ context.Context, user TestUser) (TestUser, error) {
 					if tt.failAtStep == "validate" {
 						return user, errors.New("validation failed")
 					}
@@ -470,7 +475,7 @@ func TestPipelineFlows_ErrorPropagation(t *testing.T) {
 					return user, nil
 				}),
 
-				pipz.Apply("transform", func(_ context.Context, user TestUser) (TestUser, error) {
+				pipz.Apply(pipz.NewIdentity("transform", ""), func(_ context.Context, user TestUser) (TestUser, error) {
 					if tt.failAtStep == "transform" {
 						return user, errors.New("transformation failed")
 					}
@@ -481,7 +486,7 @@ func TestPipelineFlows_ErrorPropagation(t *testing.T) {
 					return user, nil
 				}),
 
-				pipz.Apply("enrich", func(_ context.Context, user TestUser) (TestUser, error) {
+				pipz.Apply(pipz.NewIdentity("enrich", ""), func(_ context.Context, user TestUser) (TestUser, error) {
 					if tt.failAtStep == "enrich" {
 						return user, errors.New("enrichment failed")
 					}
@@ -516,7 +521,7 @@ func TestPipelineFlows_ErrorPropagation(t *testing.T) {
 					// Verify the error includes the failing step
 					found := false
 					for _, elem := range pipzErr.Path {
-						if elem == pipz.Name(tt.failAtStep) {
+						if elem.Name() == tt.failAtStep {
 							found = true
 							break
 						}
@@ -547,8 +552,8 @@ func TestPipelineFlows_ContextCancellation(t *testing.T) {
 	t.Run("no_cancellation", func(t *testing.T) {
 		ctx := context.Background()
 
-		pipeline := pipz.NewSequence[TestUser]("cancellation-test",
-			pipz.Transform("step1", func(_ context.Context, user TestUser) TestUser {
+		pipeline := pipz.NewSequence[TestUser](pipz.NewIdentity("cancellation-test", ""),
+			pipz.Transform(pipz.NewIdentity("step1", ""), func(_ context.Context, user TestUser) TestUser {
 				if user.Metadata == nil {
 					user.Metadata = make(map[string]interface{})
 				}
@@ -556,7 +561,7 @@ func TestPipelineFlows_ContextCancellation(t *testing.T) {
 				return user
 			}),
 
-			pipz.Apply("step2", func(_ context.Context, user TestUser) (TestUser, error) {
+			pipz.Apply(pipz.NewIdentity("step2", ""), func(_ context.Context, user TestUser) (TestUser, error) {
 				if user.Metadata == nil {
 					user.Metadata = make(map[string]interface{})
 				}
@@ -564,7 +569,7 @@ func TestPipelineFlows_ContextCancellation(t *testing.T) {
 				return user, nil
 			}),
 
-			pipz.Transform("step3", func(_ context.Context, user TestUser) TestUser {
+			pipz.Transform(pipz.NewIdentity("step3", ""), func(_ context.Context, user TestUser) TestUser {
 				if user.Metadata == nil {
 					user.Metadata = make(map[string]interface{})
 				}
@@ -594,8 +599,8 @@ func TestPipelineFlows_ContextCancellation(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
 
-		pipeline := pipz.NewSequence[TestUser]("cancellation-test",
-			pipz.Transform("step1", func(_ context.Context, user TestUser) TestUser {
+		pipeline := pipz.NewSequence[TestUser](pipz.NewIdentity("cancellation-test", ""),
+			pipz.Transform(pipz.NewIdentity("step1", ""), func(_ context.Context, user TestUser) TestUser {
 				if user.Metadata == nil {
 					user.Metadata = make(map[string]interface{})
 				}
@@ -603,7 +608,7 @@ func TestPipelineFlows_ContextCancellation(t *testing.T) {
 				return user
 			}),
 
-			pipz.Transform("step2", func(_ context.Context, user TestUser) TestUser {
+			pipz.Transform(pipz.NewIdentity("step2", ""), func(_ context.Context, user TestUser) TestUser {
 				if user.Metadata == nil {
 					user.Metadata = make(map[string]interface{})
 				}
@@ -611,7 +616,7 @@ func TestPipelineFlows_ContextCancellation(t *testing.T) {
 				return user
 			}),
 
-			pipz.Transform("step3", func(_ context.Context, user TestUser) TestUser {
+			pipz.Transform(pipz.NewIdentity("step3", ""), func(_ context.Context, user TestUser) TestUser {
 				if user.Metadata == nil {
 					user.Metadata = make(map[string]interface{})
 				}
@@ -643,8 +648,8 @@ func TestPipelineFlows_ContextCancellation(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 		defer cancel()
 
-		pipeline := pipz.NewSequence[TestUser]("cancellation-test",
-			pipz.Transform("step1", func(_ context.Context, user TestUser) TestUser {
+		pipeline := pipz.NewSequence[TestUser](pipz.NewIdentity("cancellation-test", ""),
+			pipz.Transform(pipz.NewIdentity("step1", ""), func(_ context.Context, user TestUser) TestUser {
 				if user.Metadata == nil {
 					user.Metadata = make(map[string]interface{})
 				}
@@ -652,7 +657,7 @@ func TestPipelineFlows_ContextCancellation(t *testing.T) {
 				return user
 			}),
 
-			pipz.Apply("step2", func(_ context.Context, user TestUser) (TestUser, error) {
+			pipz.Apply(pipz.NewIdentity("step2", ""), func(_ context.Context, user TestUser) (TestUser, error) {
 				// This step will cause timeout
 				time.Sleep(20 * time.Millisecond)
 				if user.Metadata == nil {
@@ -662,7 +667,7 @@ func TestPipelineFlows_ContextCancellation(t *testing.T) {
 				return user, nil
 			}),
 
-			pipz.Transform("step3", func(_ context.Context, user TestUser) TestUser {
+			pipz.Transform(pipz.NewIdentity("step3", ""), func(_ context.Context, user TestUser) TestUser {
 				if user.Metadata == nil {
 					user.Metadata = make(map[string]interface{})
 				}
@@ -713,13 +718,13 @@ func TestPipelineFlows_ComplexComposition(t *testing.T) {
 		WithDelay(30 * time.Millisecond)
 
 	// Build the complex pipeline
-	pipeline := pipz.NewSequence[TestUser]("complex-composition",
+	pipeline := pipz.NewSequence[TestUser](pipz.NewIdentity("complex-composition", ""),
 		// Step 1: Validation with fallback
-		pipz.NewFallback[TestUser]("validation",
+		pipz.NewFallback[TestUser](pipz.NewIdentity("validation", ""),
 			// Primary: API validation
 			validateAPI,
 			// Fallback: Local validation
-			pipz.Apply("local-validate", func(_ context.Context, user TestUser) (TestUser, error) {
+			pipz.Apply(pipz.NewIdentity("local-validate", ""), func(_ context.Context, user TestUser) (TestUser, error) {
 				if user.Name == "" || user.Email == "" {
 					return user, errors.New("invalid user data")
 				}
@@ -732,13 +737,13 @@ func TestPipelineFlows_ComplexComposition(t *testing.T) {
 		),
 
 		// Step 2: Conditional processing based on user type
-		pipz.NewSwitch[TestUser, string]("user-type-processing", func(_ context.Context, user TestUser) string {
+		pipz.NewSwitch[TestUser](pipz.NewIdentity("user-type-processing", ""), func(_ context.Context, user TestUser) string {
 			if user.Premium {
 				return "premium"
 			}
 			return "standard"
 		}).AddRoute("standard",
-			pipz.Transform("standard", func(_ context.Context, user TestUser) TestUser {
+			pipz.Transform(pipz.NewIdentity("standard", ""), func(_ context.Context, user TestUser) TestUser {
 				if user.Metadata == nil {
 					user.Metadata = make(map[string]interface{})
 				}
@@ -746,7 +751,7 @@ func TestPipelineFlows_ComplexComposition(t *testing.T) {
 				return user
 			}),
 		).AddRoute("premium",
-			pipz.Transform("premium", func(_ context.Context, user TestUser) TestUser {
+			pipz.Transform(pipz.NewIdentity("premium", ""), func(_ context.Context, user TestUser) TestUser {
 				if user.Metadata == nil {
 					user.Metadata = make(map[string]interface{})
 				}
@@ -757,9 +762,9 @@ func TestPipelineFlows_ComplexComposition(t *testing.T) {
 		),
 
 		// Step 3: Parallel enrichment (note: using sequential due to Cloner requirement)
-		pipz.NewSequence[TestUser]("enrichment",
+		pipz.NewSequence[TestUser](pipz.NewIdentity("enrichment", ""),
 			// Enrich with API 1
-			pipz.Transform("enrich-1", func(_ context.Context, user TestUser) TestUser {
+			pipz.Transform(pipz.NewIdentity("enrich-1", ""), func(_ context.Context, user TestUser) TestUser {
 				_, _ = enrichAPI1.Process(ctx, user) //nolint:errcheck // Mock API call for test
 				if user.Metadata == nil {
 					user.Metadata = make(map[string]interface{})
@@ -773,7 +778,7 @@ func TestPipelineFlows_ComplexComposition(t *testing.T) {
 			}),
 
 			// Enrich with API 2
-			pipz.Transform("enrich-2", func(_ context.Context, user TestUser) TestUser {
+			pipz.Transform(pipz.NewIdentity("enrich-2", ""), func(_ context.Context, user TestUser) TestUser {
 				_, _ = enrichAPI2.Process(ctx, user) //nolint:errcheck // Mock API call for test
 				if user.Metadata == nil {
 					user.Metadata = make(map[string]interface{})
@@ -788,7 +793,7 @@ func TestPipelineFlows_ComplexComposition(t *testing.T) {
 		),
 
 		// Step 4: Final aggregation
-		pipz.Transform("aggregate", func(_ context.Context, user TestUser) TestUser {
+		pipz.Transform(pipz.NewIdentity("aggregate", ""), func(_ context.Context, user TestUser) TestUser {
 			if user.Metadata == nil {
 				user.Metadata = make(map[string]interface{})
 			}

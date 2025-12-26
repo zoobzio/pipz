@@ -40,7 +40,7 @@ import (
 //
 // This creates infinite recursion risk if all processors fail, leading to stack overflow.
 type Fallback[T any] struct {
-	name       Name
+	identity   Identity
 	processors []Chainable[T]
 	mu         sync.RWMutex
 	closeOnce  sync.Once
@@ -53,15 +53,15 @@ type Fallback[T any] struct {
 //
 // Examples:
 //
-//	fallback := pipz.NewFallback("payment", stripe, paypal, square)
-//	fallback := pipz.NewFallback("cache", redis, database)
-func NewFallback[T any](name Name, processors ...Chainable[T]) *Fallback[T] {
+//	fallback := pipz.NewFallback(PaymentID, stripe, paypal, square)
+//	fallback := pipz.NewFallback(CacheID, redis, database)
+func NewFallback[T any](identity Identity, processors ...Chainable[T]) *Fallback[T] {
 	if len(processors) == 0 {
 		panic("NewFallback requires at least one processor")
 	}
 
 	return &Fallback[T]{
-		name:       name,
+		identity:   identity,
 		processors: processors,
 	}
 }
@@ -69,7 +69,7 @@ func NewFallback[T any](name Name, processors ...Chainable[T]) *Fallback[T] {
 // Process implements the Chainable interface.
 // Tries each processor in order until one succeeds or all fail.
 func (f *Fallback[T]) Process(ctx context.Context, data T) (result T, err error) {
-	defer recoverFromPanic(&result, &err, f.name, data)
+	defer recoverFromPanic(&result, &err, f.identity, data)
 
 	f.mu.RLock()
 	processors := make([]Chainable[T], len(f.processors))
@@ -77,25 +77,24 @@ func (f *Fallback[T]) Process(ctx context.Context, data T) (result T, err error)
 	f.mu.RUnlock()
 
 	var lastErr error
-	name := string(f.name)
+	name := f.identity.Name()
 
 	for i, processor := range processors {
-		// Get processor name if available
-		procName := "unknown"
-		if named, ok := interface{}(processor).(interface{ Name() Name }); ok {
-			procName = string(named.Name())
-		}
+		// Get processor name
+		procName := processor.Identity().Name()
 
 		// Emit attempt signal (Warn if using fallback, Info if using primary)
 		if i == 0 {
 			capitan.Info(ctx, SignalFallbackAttempt,
 				FieldName.Field(name),
+				FieldIdentityID.Field(f.identity.ID().String()),
 				FieldProcessorIndex.Field(i),
 				FieldProcessorName.Field(procName),
 			)
 		} else {
 			capitan.Warn(ctx, SignalFallbackAttempt,
 				FieldName.Field(name),
+				FieldIdentityID.Field(f.identity.ID().String()),
 				FieldProcessorIndex.Field(i),
 				FieldProcessorName.Field(procName),
 			)
@@ -116,12 +115,13 @@ func (f *Fallback[T]) Process(ctx context.Context, data T) (result T, err error)
 		// Emit failed signal
 		capitan.Error(ctx, SignalFallbackFailed,
 			FieldName.Field(name),
+			FieldIdentityID.Field(f.identity.ID().String()),
 			FieldError.Field(lastErr.Error()),
 		)
 
 		var pipeErr *Error[T]
 		if errors.As(lastErr, &pipeErr) {
-			pipeErr.Path = append([]Name{f.name}, pipeErr.Path...)
+			pipeErr.Path = append([]Identity{f.identity}, pipeErr.Path...)
 			return data, pipeErr
 		}
 		// Wrap non-pipeline errors
@@ -129,7 +129,7 @@ func (f *Fallback[T]) Process(ctx context.Context, data T) (result T, err error)
 			Timestamp: time.Now(),
 			InputData: data,
 			Err:       lastErr,
-			Path:      []Name{f.name},
+			Path:      []Identity{f.identity},
 		}
 	}
 	return data, nil
@@ -180,11 +180,36 @@ func (f *Fallback[T]) RemoveAt(index int) *Fallback[T] {
 	return f
 }
 
-// Name returns the name of this connector.
-func (f *Fallback[T]) Name() Name {
+// Identity returns the identity of this connector.
+func (f *Fallback[T]) Identity() Identity {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return f.name
+	return f.identity
+}
+
+// Schema returns a Node representing this connector in the pipeline schema.
+func (f *Fallback[T]) Schema() Node {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	var primary Node
+	var backups []Node
+
+	if len(f.processors) > 0 {
+		primary = f.processors[0].Schema()
+	}
+	if len(f.processors) > 1 {
+		backups = make([]Node, len(f.processors)-1)
+		for i, proc := range f.processors[1:] {
+			backups[i] = proc.Schema()
+		}
+	}
+
+	return Node{
+		Identity: f.identity,
+		Type:     "fallback",
+		Flow:     FallbackFlow{Primary: primary, Backups: backups},
+	}
 }
 
 // Close gracefully shuts down the connector and all its child processors.

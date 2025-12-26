@@ -15,10 +15,20 @@ import (
 	"github.com/zoobzio/clockz"
 )
 
+// testIdentity creates a test identity.
+func testIdentity(name string) Identity {
+	return NewIdentity(name, "")
+}
+
+// passthroughInt creates a passthrough processor for int values.
+func passthroughInt() Chainable[int] {
+	return Transform(testIdentity("passthrough"), func(_ context.Context, x int) int { return x })
+}
+
 func TestRateLimiter_TokenBucket(t *testing.T) {
 	t.Run("Initial State", func(t *testing.T) {
 		clock := clockz.NewFakeClock()
-		limiter := NewRateLimiter[int]("test", 10, 5)
+		limiter := NewRateLimiter[int](testIdentity("test"), 10, 5, passthroughInt())
 		limiter.WithClock(clock)
 
 		// Should start with full bucket
@@ -29,7 +39,7 @@ func TestRateLimiter_TokenBucket(t *testing.T) {
 
 	t.Run("Token Consumption", func(t *testing.T) {
 		clock := clockz.NewFakeClock()
-		limiter := NewRateLimiter[int]("test", 10, 5)
+		limiter := NewRateLimiter[int](testIdentity("test"), 10, 5, passthroughInt())
 		limiter.WithClock(clock).SetMode("drop")
 
 		// Use 3 tokens
@@ -48,7 +58,7 @@ func TestRateLimiter_TokenBucket(t *testing.T) {
 
 	t.Run("Token Refill Formula", func(t *testing.T) {
 		clock := clockz.NewFakeClock()
-		limiter := NewRateLimiter[int]("test", 10, 5) // 10 tokens/sec, burst 5
+		limiter := NewRateLimiter[int](testIdentity("test"), 10, 5, passthroughInt()) // 10 tokens/sec, burst 5
 		limiter.WithClock(clock).SetMode("drop")
 
 		// Use all tokens
@@ -75,7 +85,7 @@ func TestRateLimiter_TokenBucket(t *testing.T) {
 
 	t.Run("Fractional Tokens", func(t *testing.T) {
 		clock := clockz.NewFakeClock()
-		limiter := NewRateLimiter[int]("test", 1.5, 3) // 1.5 tokens/sec
+		limiter := NewRateLimiter[int](testIdentity("test"), 1.5, 3, passthroughInt()) // 1.5 tokens/sec
 		limiter.WithClock(clock).SetMode("drop")
 
 		// Use all tokens
@@ -104,7 +114,7 @@ func TestRateLimiter_TokenBucket(t *testing.T) {
 func TestRateLimiter_EdgeCases(t *testing.T) {
 	t.Run("Infinite Rate", func(t *testing.T) {
 		clock := clockz.NewFakeClock()
-		limiter := NewRateLimiter[int]("test", math.Inf(1), 5)
+		limiter := NewRateLimiter[int](testIdentity("test"), math.Inf(1), 5, passthroughInt())
 		limiter.WithClock(clock)
 
 		// Should allow unlimited processing
@@ -124,7 +134,7 @@ func TestRateLimiter_EdgeCases(t *testing.T) {
 
 	t.Run("Zero Rate Blocks Forever", func(t *testing.T) {
 		clock := clockz.NewFakeClock()
-		limiter := NewRateLimiter[int]("test", 0, 1)
+		limiter := NewRateLimiter[int](testIdentity("test"), 0, 1, passthroughInt())
 		limiter.WithClock(clock)
 
 		// Use the initial token
@@ -165,7 +175,7 @@ func TestRateLimiter_EdgeCases(t *testing.T) {
 
 	t.Run("Context Cancellation During Wait", func(t *testing.T) {
 		clock := clockz.NewFakeClock()
-		limiter := NewRateLimiter[int]("test", 1, 1) // 1 token/sec, burst 1
+		limiter := NewRateLimiter[int](testIdentity("test"), 1, 1, passthroughInt()) // 1 token/sec, burst 1
 		limiter.WithClock(clock)
 
 		// Use the initial token
@@ -209,7 +219,7 @@ func TestRateLimiter_EdgeCases(t *testing.T) {
 func TestRateLimiter_WaitMode(t *testing.T) {
 	t.Run("Wait Formula Calculation", func(t *testing.T) {
 		clock := clockz.NewFakeClock()
-		limiter := NewRateLimiter[int]("test", 2, 1) // 2 tokens/sec, burst 1
+		limiter := NewRateLimiter[int](testIdentity("test"), 2, 1, passthroughInt()) // 2 tokens/sec, burst 1
 		limiter.WithClock(clock)
 
 		// Use the initial token
@@ -249,7 +259,7 @@ func TestRateLimiter_WaitMode(t *testing.T) {
 
 	t.Run("Burst Processing", func(t *testing.T) {
 		clock := clockz.NewFakeClock()
-		limiter := NewRateLimiter[int]("test", 10, 3) // 10 tokens/sec, burst 3
+		limiter := NewRateLimiter[int](testIdentity("test"), 10, 3, passthroughInt()) // 10 tokens/sec, burst 3
 		limiter.WithClock(clock)
 
 		start := clock.Now()
@@ -270,7 +280,7 @@ func TestRateLimiter_WaitMode(t *testing.T) {
 
 	t.Run("Rate Enforcement", func(t *testing.T) {
 		clock := clockz.NewFakeClock()
-		limiter := NewRateLimiter[int]("test", 10, 1) // 10 tokens/sec, burst 1
+		limiter := NewRateLimiter[int](testIdentity("test"), 10, 1, passthroughInt()) // 10 tokens/sec, burst 1
 		limiter.WithClock(clock)
 
 		// Process requests and track timing
@@ -311,7 +321,7 @@ func TestRateLimiter_WaitMode(t *testing.T) {
 func TestRateLimiter_DropMode(t *testing.T) {
 	t.Run("Immediate Error When No Tokens", func(t *testing.T) {
 		clock := clockz.NewFakeClock()
-		limiter := NewRateLimiter[int]("test", 1, 1) // 1 token/sec, burst 1
+		limiter := NewRateLimiter[int](testIdentity("test"), 1, 1, passthroughInt()) // 1 token/sec, burst 1
 		limiter.WithClock(clock).SetMode("drop")
 
 		// First request should succeed
@@ -338,7 +348,7 @@ func TestRateLimiter_DropMode(t *testing.T) {
 
 	t.Run("Success After Token Refill", func(t *testing.T) {
 		clock := clockz.NewFakeClock()
-		limiter := NewRateLimiter[int]("test", 2, 1) // 2 tokens/sec, burst 1
+		limiter := NewRateLimiter[int](testIdentity("test"), 2, 1, passthroughInt()) // 2 tokens/sec, burst 1
 		limiter.WithClock(clock).SetMode("drop")
 
 		// Use the token
@@ -367,7 +377,7 @@ func TestRateLimiter_DropMode(t *testing.T) {
 func TestRateLimiter_Configuration(t *testing.T) {
 	t.Run("SetRate During Operation", func(t *testing.T) {
 		clock := clockz.NewFakeClock()
-		limiter := NewRateLimiter[int]("test", 1, 3) // 1 token/sec, burst 3
+		limiter := NewRateLimiter[int](testIdentity("test"), 1, 3, passthroughInt()) // 1 token/sec, burst 3
 		limiter.WithClock(clock).SetMode("drop")
 
 		// Use all tokens
@@ -392,7 +402,7 @@ func TestRateLimiter_Configuration(t *testing.T) {
 
 	t.Run("SetBurst Caps Tokens", func(t *testing.T) {
 		clock := clockz.NewFakeClock()
-		limiter := NewRateLimiter[int]("test", 10, 5) // burst 5
+		limiter := NewRateLimiter[int](testIdentity("test"), 10, 5, passthroughInt()) // burst 5
 		limiter.WithClock(clock)
 
 		// Start with 5 tokens
@@ -410,7 +420,7 @@ func TestRateLimiter_Configuration(t *testing.T) {
 	})
 
 	t.Run("Invalid Mode Handling", func(t *testing.T) {
-		limiter := NewRateLimiter[int]("test", 10, 2)
+		limiter := NewRateLimiter[int](testIdentity("test"), 10, 2, passthroughInt())
 
 		// Set invalid mode - should be ignored
 		limiter.SetMode("invalid")
@@ -422,7 +432,7 @@ func TestRateLimiter_Configuration(t *testing.T) {
 	})
 
 	t.Run("Configuration Getters", func(t *testing.T) {
-		limiter := NewRateLimiter[int]("test-limiter", 15.5, 7)
+		limiter := NewRateLimiter[int](testIdentity("test-limiter"), 15.5, 7, passthroughInt())
 
 		if rate := limiter.GetRate(); rate != 15.5 {
 			t.Errorf("expected rate 15.5, got %f", rate)
@@ -433,13 +443,13 @@ func TestRateLimiter_Configuration(t *testing.T) {
 		if mode := limiter.GetMode(); mode != "wait" {
 			t.Errorf("expected mode wait, got %s", mode)
 		}
-		if name := limiter.Name(); name != "test-limiter" {
+		if name := limiter.Identity().Name(); name != "test-limiter" {
 			t.Errorf("expected name test-limiter, got %s", name)
 		}
 	})
 
 	t.Run("Method Chaining", func(t *testing.T) {
-		limiter := NewRateLimiter[int]("test", 10, 2)
+		limiter := NewRateLimiter[int](testIdentity("test"), 10, 2, passthroughInt())
 
 		// Update settings using method chaining
 		result := limiter.SetRate(20).SetBurst(5).SetMode("drop")
@@ -464,10 +474,10 @@ func TestRateLimiter_Configuration(t *testing.T) {
 
 func TestRateLimiter_ConcurrentAccess(t *testing.T) {
 	t.Run("Concurrent Processing", func(t *testing.T) {
-		limiter := NewRateLimiter[int]("test", 1000, 100) // High rate to avoid blocking
+		limiter := NewRateLimiter[int](testIdentity("test"), 1000, 100, passthroughInt()) // High rate to avoid blocking
 
 		var wg sync.WaitGroup
-		errors := make(chan error, 100)
+		errs := make(chan error, 100)
 
 		// Run multiple goroutines concurrently
 		for i := 0; i < 10; i++ {
@@ -477,11 +487,11 @@ func TestRateLimiter_ConcurrentAccess(t *testing.T) {
 				for j := 0; j < 10; j++ {
 					result, err := limiter.Process(context.Background(), id*10+j)
 					if err != nil {
-						errors <- err
+						errs <- err
 						return
 					}
 					if result != id*10+j {
-						errors <- err
+						errs <- err
 						return
 					}
 				}
@@ -501,10 +511,10 @@ func TestRateLimiter_ConcurrentAccess(t *testing.T) {
 		}()
 
 		wg.Wait()
-		close(errors)
+		close(errs)
 
 		// Check for any errors (ignoring rate limit errors from drop mode)
-		for err := range errors {
+		for err := range errs {
 			if err != nil && !strings.Contains(err.Error(), "rate limit exceeded") {
 				t.Errorf("concurrent access error: %v", err)
 			}
@@ -513,7 +523,7 @@ func TestRateLimiter_ConcurrentAccess(t *testing.T) {
 
 	t.Run("Thread Safety", func(_ *testing.T) {
 		clock := clockz.NewFakeClock()
-		limiter := NewRateLimiter[int]("test", 10000, 1000) // High rate/burst to avoid blocking
+		limiter := NewRateLimiter[int](testIdentity("test"), 10000, 1000, passthroughInt()) // High rate/burst to avoid blocking
 		limiter.WithClock(clock).SetMode("drop")            // Use drop mode to avoid waiting
 
 		var wg sync.WaitGroup
@@ -539,7 +549,7 @@ func TestRateLimiter_ConcurrentAccess(t *testing.T) {
 					case 4:
 						limiter.GetBurst()
 					case 5:
-						limiter.Name()
+						limiter.Identity().Name()
 					}
 				}
 			}(i)
@@ -552,7 +562,7 @@ func TestRateLimiter_ConcurrentAccess(t *testing.T) {
 
 func TestRateLimiter_InvalidModeProcessing(t *testing.T) {
 	// Test hitting the default case in Process method
-	limiter := NewRateLimiter[int]("test-limiter", 10, 0) // Zero burst to force switch statement
+	limiter := NewRateLimiter[int](testIdentity("test-limiter"), 10, 0, passthroughInt()) // Zero burst to force switch statement
 
 	// Use all tokens
 	limiter.SetBurst(1)
@@ -583,19 +593,19 @@ func TestRateLimiter_InvalidModeProcessing(t *testing.T) {
 	if pipeErr.InputData != 42 {
 		t.Errorf("expected input data 42, got %d", pipeErr.InputData)
 	}
-	if len(pipeErr.Path) == 0 || pipeErr.Path[0] != "test-limiter" {
+	if len(pipeErr.Path) == 0 || pipeErr.Path[0].Name() != "test-limiter" {
 		t.Error("expected limiter name in error path")
 	}
 }
 
 func TestRateLimiter_PanicRecovery(t *testing.T) {
 	// Test panic recovery in rate limiter chain
-	panicProcessor := Apply("panic_processor", func(_ context.Context, _ int) (int, error) {
+	panicProcessor := Apply(testIdentity("panic_processor"), func(_ context.Context, _ int) (int, error) {
 		panic("rate limiter downstream panic")
 	})
 
-	limiter := NewRateLimiter[int]("panic_limiter", 100, 10)
-	sequence := NewSequence("test_sequence", limiter, panicProcessor)
+	limiter := NewRateLimiter[int](testIdentity("panic_limiter"), 100, 10, passthroughInt())
+	sequence := NewSequence(testIdentity("test_sequence"), limiter, panicProcessor)
 
 	result, err := sequence.Process(context.Background(), 42)
 
@@ -618,15 +628,15 @@ func TestRateLimiter_Integration(t *testing.T) {
 		clock := clockz.NewFakeClock()
 		calls := atomic.Int32{}
 
-		processor := Apply("counter", func(_ context.Context, n int) (int, error) {
+		processor := Apply(testIdentity("counter"), func(_ context.Context, n int) (int, error) {
 			calls.Add(1)
 			return n * 2, nil
 		})
 
 		// Create rate-limited pipeline (10/sec)
-		limiter := NewRateLimiter[int]("rate-limit", 10, 1)
+		limiter := NewRateLimiter[int](testIdentity("rate-limit"), 10, 1, passthroughInt())
 		limiter.WithClock(clock)
-		pipeline := NewSequence[int]("test-pipeline")
+		pipeline := NewSequence[int](testIdentity("test-pipeline"))
 		pipeline.Register(limiter, processor)
 
 		// Process 3 items
@@ -664,7 +674,7 @@ func TestRateLimiter_Integration(t *testing.T) {
 func BenchmarkRateLimiter(b *testing.B) {
 	b.Run("No Limit", func(b *testing.B) {
 		// Very high rate that won't limit
-		limiter := NewRateLimiter[int]("bench-limiter", 1000000, 1000)
+		limiter := NewRateLimiter[int](testIdentity("bench-limiter"), 1000000, 1000, passthroughInt())
 		ctx := context.Background()
 
 		b.ResetTimer()
@@ -678,7 +688,7 @@ func BenchmarkRateLimiter(b *testing.B) {
 
 	b.Run("With Limiting", func(b *testing.B) {
 		// Rate that will cause some waiting
-		limiter := NewRateLimiter[int]("bench-limiter", 10000, 100)
+		limiter := NewRateLimiter[int](testIdentity("bench-limiter"), 10000, 100, passthroughInt())
 		ctx := context.Background()
 
 		b.ResetTimer()
@@ -691,7 +701,7 @@ func BenchmarkRateLimiter(b *testing.B) {
 	})
 
 	b.Run("Drop Mode", func(b *testing.B) {
-		limiter := NewRateLimiter[int]("bench-limiter", 10000, 100)
+		limiter := NewRateLimiter[int](testIdentity("bench-limiter"), 10000, 100, passthroughInt())
 		limiter.SetMode("drop")
 		ctx := context.Background()
 
@@ -707,7 +717,7 @@ func BenchmarkRateLimiter(b *testing.B) {
 	})
 
 	b.Run("Token Bucket Operations", func(b *testing.B) {
-		limiter := NewRateLimiter[int]("bench-limiter", 100, 10)
+		limiter := NewRateLimiter[int](testIdentity("bench-limiter"), 100, 10, passthroughInt())
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -720,7 +730,7 @@ func BenchmarkRateLimiter(b *testing.B) {
 func TestRateLimiterEdgeCases(t *testing.T) {
 	t.Run("Zero Rate", func(t *testing.T) {
 		// Zero rate should effectively block forever after initial burst is consumed
-		limiter := NewRateLimiter[int]("zero-rate", 0, 1)
+		limiter := NewRateLimiter[int](testIdentity("zero-rate"), 0, 1, passthroughInt())
 
 		// First call succeeds (uses the initial token)
 		_, err := limiter.Process(context.Background(), 42)
@@ -741,7 +751,7 @@ func TestRateLimiterEdgeCases(t *testing.T) {
 
 	t.Run("Infinite Rate", func(t *testing.T) {
 		// Infinite rate should allow all requests immediately
-		limiter := NewRateLimiter[int]("infinite-rate", math.Inf(1), 1)
+		limiter := NewRateLimiter[int](testIdentity("infinite-rate"), math.Inf(1), 1, passthroughInt())
 
 		for i := 0; i < 100; i++ {
 			result, err := limiter.Process(context.Background(), i)
@@ -751,6 +761,47 @@ func TestRateLimiterEdgeCases(t *testing.T) {
 			if result != i {
 				t.Errorf("expected %d, got %d", i, result)
 			}
+		}
+	})
+
+	t.Run("Schema", func(t *testing.T) {
+		proc := Transform(NewIdentity("inner-proc", ""), func(_ context.Context, n int) int { return n })
+		limiter := NewRateLimiter(NewIdentity("test-limiter", "Rate limiter"), 100.0, 10, proc)
+
+		schema := limiter.Schema()
+
+		if schema.Identity.Name() != "test-limiter" {
+			t.Errorf("Schema Identity.Name() = %v, want %v", schema.Identity.Name(), "test-limiter")
+		}
+		if schema.Type != "ratelimiter" {
+			t.Errorf("Schema Type = %v, want %v", schema.Type, "ratelimiter")
+		}
+
+		flow, ok := RateLimiterKey.From(schema)
+		if !ok {
+			t.Fatal("Expected RateLimiterFlow")
+		}
+		if flow.Processor.Identity.Name() != "inner-proc" {
+			t.Errorf("Flow.Processor.Identity.Name() = %v, want %v", flow.Processor.Identity.Name(), "inner-proc")
+		}
+		if schema.Metadata["rate"] != 100.0 {
+			t.Errorf("Metadata[rate] = %v, want 100.0", schema.Metadata["rate"])
+		}
+	})
+
+	t.Run("Close", func(t *testing.T) {
+		proc := Transform(NewIdentity("inner", ""), func(_ context.Context, n int) int { return n })
+		limiter := NewRateLimiter(NewIdentity("test", ""), 100.0, 10, proc)
+
+		err := limiter.Close()
+		if err != nil {
+			t.Errorf("Close() = %v, want nil", err)
+		}
+
+		// Test idempotency
+		err2 := limiter.Close()
+		if err2 != nil {
+			t.Errorf("Second Close() = %v, want nil", err2)
 		}
 	})
 }

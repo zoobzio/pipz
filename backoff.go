@@ -32,7 +32,7 @@ import (
 type Backoff[T any] struct {
 	processor   Chainable[T]
 	clock       clockz.Clock
-	name        Name
+	identity    Identity
 	baseDelay   time.Duration
 	mu          sync.RWMutex
 	maxAttempts int
@@ -41,13 +41,13 @@ type Backoff[T any] struct {
 }
 
 // NewBackoff creates a new Backoff connector.
-func NewBackoff[T any](name Name, processor Chainable[T], maxAttempts int, baseDelay time.Duration) *Backoff[T] {
+func NewBackoff[T any](identity Identity, processor Chainable[T], maxAttempts int, baseDelay time.Duration) *Backoff[T] {
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
 
 	return &Backoff[T]{
-		name:        name,
+		identity:    identity,
 		processor:   processor,
 		maxAttempts: maxAttempts,
 		baseDelay:   baseDelay,
@@ -56,7 +56,7 @@ func NewBackoff[T any](name Name, processor Chainable[T], maxAttempts int, baseD
 
 // Process implements the Chainable interface.
 func (b *Backoff[T]) Process(ctx context.Context, data T) (result T, err error) {
-	defer recoverFromPanic(&result, &err, b.name, data)
+	defer recoverFromPanic(&result, &err, b.identity, data)
 	b.mu.RLock()
 	processor := b.processor
 	maxAttempts := b.maxAttempts
@@ -84,7 +84,8 @@ func (b *Backoff[T]) Process(ctx context.Context, data T) (result T, err error) 
 			// Emit backoff waiting signal
 			nextDelay := delay * 2
 			capitan.Warn(context.Background(), SignalBackoffWaiting,
-				FieldName.Field(string(b.name)),
+				FieldName.Field(b.identity.Name()),
+				FieldIdentityID.Field(b.identity.ID().String()),
 				FieldAttempt.Field(i+1),
 				FieldMaxAttempts.Field(maxAttempts),
 				FieldDelay.Field(delay.Seconds()),
@@ -100,7 +101,7 @@ func (b *Backoff[T]) Process(ctx context.Context, data T) (result T, err error) 
 				return data, &Error[T]{
 					Err:       ctx.Err(),
 					InputData: data,
-					Path:      []Name{b.name},
+					Path:      []Identity{b.identity},
 					Timeout:   errors.Is(ctx.Err(), context.DeadlineExceeded),
 					Canceled:  errors.Is(ctx.Err(), context.Canceled),
 					Timestamp: time.Now(),
@@ -113,8 +114,8 @@ func (b *Backoff[T]) Process(ctx context.Context, data T) (result T, err error) 
 	if lastErr != nil {
 		var pipeErr *Error[T]
 		if errors.As(lastErr, &pipeErr) {
-			// Prepend this backoff's name to the path
-			pipeErr.Path = append([]Name{b.name}, pipeErr.Path...)
+			// Prepend this backoff's identity to the path
+			pipeErr.Path = append([]Identity{b.identity}, pipeErr.Path...)
 			return data, pipeErr
 		}
 		// Handle non-pipeline errors by wrapping them
@@ -122,7 +123,7 @@ func (b *Backoff[T]) Process(ctx context.Context, data T) (result T, err error) 
 			Timestamp: time.Now(),
 			InputData: data,
 			Err:       lastErr,
-			Path:      []Name{b.name},
+			Path:      []Identity{b.identity},
 		}
 	}
 	return lastResult, nil
@@ -161,11 +162,27 @@ func (b *Backoff[T]) GetBaseDelay() time.Duration {
 	return b.baseDelay
 }
 
-// Name returns the name of this connector.
-func (b *Backoff[T]) Name() Name {
+// Identity returns the identity of this connector.
+func (b *Backoff[T]) Identity() Identity {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	return b.name
+	return b.identity
+}
+
+// Schema returns a Node representing this connector in the pipeline schema.
+func (b *Backoff[T]) Schema() Node {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	return Node{
+		Identity: b.identity,
+		Type:     "backoff",
+		Flow:     BackoffFlow{Processor: b.processor.Schema()},
+		Metadata: map[string]any{
+			"max_attempts": b.maxAttempts,
+			"base_delay":   b.baseDelay.String(),
+		},
+	}
 }
 
 // Close gracefully shuts down the connector and its child processor.

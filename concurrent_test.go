@@ -29,20 +29,20 @@ func TestConcurrent(t *testing.T) {
 		var counter int32
 		data := TestData{Value: 1, Counter: &counter}
 
-		p1 := Effect("inc1", func(_ context.Context, d TestData) error {
+		p1 := Effect(NewIdentity("inc1", ""), func(_ context.Context, d TestData) error {
 			atomic.AddInt32(d.Counter, 1)
 			return nil
 		})
-		p2 := Effect("inc2", func(_ context.Context, d TestData) error {
+		p2 := Effect(NewIdentity("inc2", ""), func(_ context.Context, d TestData) error {
 			atomic.AddInt32(d.Counter, 10)
 			return nil
 		})
-		p3 := Effect("inc3", func(_ context.Context, d TestData) error {
+		p3 := Effect(NewIdentity("inc3", ""), func(_ context.Context, d TestData) error {
 			atomic.AddInt32(d.Counter, 100)
 			return nil
 		})
 
-		concurrent := NewConcurrent("test-concurrent", nil, p1, p2, p3)
+		concurrent := NewConcurrent(NewIdentity("test-concurrent", ""), nil, p1, p2, p3)
 		result, err := concurrent.Process(context.Background(), data)
 
 		if err != nil {
@@ -66,7 +66,7 @@ func TestConcurrent(t *testing.T) {
 		var mu sync.Mutex
 
 		makeProcessor := func(id int, delay time.Duration) Chainable[TestData] {
-			return Effect("proc", func(_ context.Context, _ TestData) error {
+			return Effect(NewIdentity("proc", ""), func(_ context.Context, _ TestData) error {
 				wg.Done()
 				wg.Wait() // Wait for all to start
 				time.Sleep(delay)
@@ -81,7 +81,7 @@ func TestConcurrent(t *testing.T) {
 		p2 := makeProcessor(2, 10*time.Millisecond)
 		p3 := makeProcessor(3, 20*time.Millisecond)
 
-		concurrent := NewConcurrent("test", nil, p1, p2, p3)
+		concurrent := NewConcurrent(NewIdentity("test", ""), nil, p1, p2, p3)
 		data := TestData{Value: 1}
 
 		_, err := concurrent.Process(context.Background(), data)
@@ -96,12 +96,12 @@ func TestConcurrent(t *testing.T) {
 	})
 
 	t.Run("Context Cancellation", func(t *testing.T) {
-		blocker := Effect("block", func(ctx context.Context, _ TestData) error {
+		blocker := Effect(NewIdentity("block", ""), func(ctx context.Context, _ TestData) error {
 			<-ctx.Done()
 			return ctx.Err()
 		})
 
-		concurrent := NewConcurrent("test", nil, blocker)
+		concurrent := NewConcurrent(NewIdentity("test", ""), nil, blocker)
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
 
@@ -114,7 +114,7 @@ func TestConcurrent(t *testing.T) {
 	})
 
 	t.Run("Empty Processors", func(t *testing.T) {
-		concurrent := NewConcurrent[TestData]("empty", nil)
+		concurrent := NewConcurrent[TestData](NewIdentity("empty", ""), nil)
 		data := TestData{Value: 42}
 
 		result, err := concurrent.Process(context.Background(), data)
@@ -127,11 +127,11 @@ func TestConcurrent(t *testing.T) {
 	})
 
 	t.Run("Configuration Methods", func(t *testing.T) {
-		p1 := Transform("p1", func(_ context.Context, d TestData) TestData { return d })
-		p2 := Transform("p2", func(_ context.Context, d TestData) TestData { return d })
-		p3 := Transform("p3", func(_ context.Context, d TestData) TestData { return d })
+		p1 := Transform(NewIdentity("p1", ""), func(_ context.Context, d TestData) TestData { return d })
+		p2 := Transform(NewIdentity("p2", ""), func(_ context.Context, d TestData) TestData { return d })
+		p3 := Transform(NewIdentity("p3", ""), func(_ context.Context, d TestData) TestData { return d })
 
-		concurrent := NewConcurrent("test", nil, p1, p2)
+		concurrent := NewConcurrent(NewIdentity("test", ""), nil, p1, p2)
 
 		if concurrent.Len() != 2 {
 			t.Errorf("expected 2 processors, got %d", concurrent.Len())
@@ -162,15 +162,15 @@ func TestConcurrent(t *testing.T) {
 	})
 
 	t.Run("Name Method", func(t *testing.T) {
-		concurrent := NewConcurrent[TestData]("my-concurrent", nil)
-		if concurrent.Name() != "my-concurrent" {
-			t.Errorf("expected 'my-concurrent', got %q", concurrent.Name())
+		concurrent := NewConcurrent[TestData](NewIdentity("my-concurrent", ""), nil)
+		if concurrent.Identity().Name() != "my-concurrent" {
+			t.Errorf("expected 'my-concurrent', got %q", concurrent.Identity().Name())
 		}
 	})
 
 	t.Run("Remove Out of Bounds", func(t *testing.T) {
-		p1 := Transform("p1", func(_ context.Context, d TestData) TestData { return d })
-		concurrent := NewConcurrent("test", nil, p1)
+		p1 := Transform(NewIdentity("p1", ""), func(_ context.Context, d TestData) TestData { return d })
+		concurrent := NewConcurrent(NewIdentity("test", ""), nil, p1)
 
 		// Test negative index
 		err := concurrent.Remove(-1)
@@ -192,14 +192,14 @@ func TestConcurrent(t *testing.T) {
 	})
 
 	t.Run("Concurrent panic recovery", func(t *testing.T) {
-		panicProcessor := Transform("panic_processor", func(_ context.Context, _ TestData) TestData {
+		panicProcessor := Transform(NewIdentity("panic_processor", ""), func(_ context.Context, _ TestData) TestData {
 			panic("concurrent processor panic")
 		})
-		normalProcessor := Transform("normal_processor", func(_ context.Context, d TestData) TestData {
+		normalProcessor := Transform(NewIdentity("normal_processor", ""), func(_ context.Context, d TestData) TestData {
 			return TestData{Value: d.Value + 1, Counter: d.Counter}
 		})
 
-		concurrent := NewConcurrent("panic_concurrent", nil, panicProcessor, normalProcessor)
+		concurrent := NewConcurrent(NewIdentity("panic_concurrent", ""), nil, panicProcessor, normalProcessor)
 		data := TestData{Value: 42}
 
 		result, err := concurrent.Process(context.Background(), data)
@@ -218,17 +218,17 @@ func TestConcurrent(t *testing.T) {
 	t.Run("No deadlock when processors panic", func(t *testing.T) {
 		// Test that verifies deadlock prevention when processor panics occur
 		// Multiple panicking processors ensure we test the WaitGroup properly
-		panicProcessor1 := Transform("panic1", func(_ context.Context, _ TestData) TestData {
+		panicProcessor1 := Transform(NewIdentity("panic1", ""), func(_ context.Context, _ TestData) TestData {
 			panic("first processor panic")
 		})
-		panicProcessor2 := Transform("panic2", func(_ context.Context, _ TestData) TestData {
+		panicProcessor2 := Transform(NewIdentity("panic2", ""), func(_ context.Context, _ TestData) TestData {
 			panic("second processor panic")
 		})
-		panicProcessor3 := Effect("panic3", func(_ context.Context, _ TestData) error {
+		panicProcessor3 := Effect(NewIdentity("panic3", ""), func(_ context.Context, _ TestData) error {
 			panic("third processor panic")
 		})
 
-		concurrent := NewConcurrent("panic_deadlock_test", nil, panicProcessor1, panicProcessor2, panicProcessor3)
+		concurrent := NewConcurrent(NewIdentity("panic_deadlock_test", ""), nil, panicProcessor1, panicProcessor2, panicProcessor3)
 		data := TestData{Value: 42}
 
 		// This should complete without deadlocking despite all processors panicking
@@ -257,17 +257,17 @@ func TestConcurrent(t *testing.T) {
 	})
 
 	t.Run("Reducer aggregates results", func(t *testing.T) {
-		p1 := Transform("add10", func(_ context.Context, d TestData) TestData {
+		p1 := Transform(NewIdentity("add10", ""), func(_ context.Context, d TestData) TestData {
 			return TestData{Value: d.Value + 10, Counter: d.Counter}
 		})
-		p2 := Transform("add20", func(_ context.Context, d TestData) TestData {
+		p2 := Transform(NewIdentity("add20", ""), func(_ context.Context, d TestData) TestData {
 			return TestData{Value: d.Value + 20, Counter: d.Counter}
 		})
-		p3 := Transform("add30", func(_ context.Context, d TestData) TestData {
+		p3 := Transform(NewIdentity("add30", ""), func(_ context.Context, d TestData) TestData {
 			return TestData{Value: d.Value + 30, Counter: d.Counter}
 		})
 
-		reducer := func(original TestData, results map[Name]TestData, _ map[Name]error) TestData {
+		reducer := func(original TestData, results map[Identity]TestData, _ map[Identity]error) TestData {
 			sum := original.Value
 			for _, res := range results {
 				sum += res.Value
@@ -275,7 +275,7 @@ func TestConcurrent(t *testing.T) {
 			return TestData{Value: sum, Counter: original.Counter}
 		}
 
-		concurrent := NewConcurrent("test-reducer", reducer, p1, p2, p3)
+		concurrent := NewConcurrent(NewIdentity("test-reducer", ""), reducer, p1, p2, p3)
 		data := TestData{Value: 5}
 
 		result, err := concurrent.Process(context.Background(), data)
@@ -294,20 +294,20 @@ func TestConcurrent(t *testing.T) {
 	})
 
 	t.Run("Reducer handles errors", func(t *testing.T) {
-		p1 := Transform("success", func(_ context.Context, d TestData) TestData {
+		p1 := Transform(NewIdentity("success", ""), func(_ context.Context, d TestData) TestData {
 			return TestData{Value: d.Value + 10, Counter: d.Counter}
 		})
-		p2 := Effect("failure", func(_ context.Context, _ TestData) error {
+		p2 := Effect(NewIdentity("failure", ""), func(_ context.Context, _ TestData) error {
 			return errors.New("processor failed")
 		})
 
-		reducer := func(original TestData, results map[Name]TestData, errs map[Name]error) TestData {
+		reducer := func(original TestData, results map[Identity]TestData, errs map[Identity]error) TestData {
 			successCount := len(results)
 			errorCount := len(errs)
 			return TestData{Value: successCount*100 + errorCount*10, Counter: original.Counter}
 		}
 
-		concurrent := NewConcurrent("test-errors", reducer, p1, p2)
+		concurrent := NewConcurrent(NewIdentity("test-errors", ""), reducer, p1, p2)
 		data := TestData{Value: 5}
 
 		result, err := concurrent.Process(context.Background(), data)
@@ -321,23 +321,25 @@ func TestConcurrent(t *testing.T) {
 		}
 	})
 
-	t.Run("Reducer uses processor names", func(t *testing.T) {
-		p1 := Transform("processor-a", func(_ context.Context, d TestData) TestData {
+	t.Run("Reducer uses processor identities", func(t *testing.T) {
+		idA := NewIdentity("processor-a", "")
+		idB := NewIdentity("processor-b", "")
+		p1 := Transform(idA, func(_ context.Context, d TestData) TestData {
 			return TestData{Value: 100, Counter: d.Counter}
 		})
-		p2 := Transform("processor-b", func(_ context.Context, d TestData) TestData {
+		p2 := Transform(idB, func(_ context.Context, d TestData) TestData {
 			return TestData{Value: 200, Counter: d.Counter}
 		})
 
-		var capturedNames []Name
-		reducer := func(original TestData, results map[Name]TestData, _ map[Name]error) TestData {
-			for name := range results {
-				capturedNames = append(capturedNames, name)
+		var capturedIdentities []Identity
+		reducer := func(original TestData, results map[Identity]TestData, _ map[Identity]error) TestData {
+			for id := range results {
+				capturedIdentities = append(capturedIdentities, id)
 			}
 			return original
 		}
 
-		concurrent := NewConcurrent("test-names", reducer, p1, p2)
+		concurrent := NewConcurrent(NewIdentity("test-identities", ""), reducer, p1, p2)
 		data := TestData{Value: 5}
 
 		_, err := concurrent.Process(context.Background(), data)
@@ -345,24 +347,24 @@ func TestConcurrent(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if len(capturedNames) != 2 {
-			t.Fatalf("expected 2 processor names, got %d", len(capturedNames))
+		if len(capturedIdentities) != 2 {
+			t.Fatalf("expected 2 processor identities, got %d", len(capturedIdentities))
 		}
 
-		// Check both names are present (order may vary)
+		// Check both identities are present (order may vary)
 		hasA := false
 		hasB := false
-		for _, name := range capturedNames {
-			if name == "processor-a" {
+		for _, id := range capturedIdentities {
+			if id == idA {
 				hasA = true
 			}
-			if name == "processor-b" {
+			if id == idB {
 				hasB = true
 			}
 		}
 
 		if !hasA || !hasB {
-			t.Errorf("expected both processor-a and processor-b, got %v", capturedNames)
+			t.Errorf("expected both processor-a and processor-b identities, got %v", capturedIdentities)
 		}
 	})
 
@@ -370,10 +372,10 @@ func TestConcurrent(t *testing.T) {
 
 func TestConcurrentClose(t *testing.T) {
 	t.Run("Closes All Children", func(t *testing.T) {
-		p1 := newTrackingProcessor[TestData]("p1")
-		p2 := newTrackingProcessor[TestData]("p2")
+		p1 := newTrackingProcessor[TestData](NewIdentity("p1", ""))
+		p2 := newTrackingProcessor[TestData](NewIdentity("p2", ""))
 
-		c := NewConcurrent("test", nil, p1, p2)
+		c := NewConcurrent(NewIdentity("test", ""), nil, p1, p2)
 		err := c.Close()
 
 		if err != nil {
@@ -385,10 +387,10 @@ func TestConcurrentClose(t *testing.T) {
 	})
 
 	t.Run("Aggregates Errors", func(t *testing.T) {
-		p1 := newTrackingProcessor[TestData]("p1").WithCloseError(errors.New("p1 error"))
-		p2 := newTrackingProcessor[TestData]("p2").WithCloseError(errors.New("p2 error"))
+		p1 := newTrackingProcessor[TestData](NewIdentity("p1", "")).WithCloseError(errors.New("p1 error"))
+		p2 := newTrackingProcessor[TestData](NewIdentity("p2", "")).WithCloseError(errors.New("p2 error"))
 
-		c := NewConcurrent("test", nil, p1, p2)
+		c := NewConcurrent(NewIdentity("test", ""), nil, p1, p2)
 		err := c.Close()
 
 		if err == nil {
@@ -400,8 +402,8 @@ func TestConcurrentClose(t *testing.T) {
 	})
 
 	t.Run("Idempotency", func(t *testing.T) {
-		p := newTrackingProcessor[TestData]("p")
-		c := NewConcurrent("test", nil, p)
+		p := newTrackingProcessor[TestData](NewIdentity("p", ""))
+		c := NewConcurrent(NewIdentity("test", ""), nil, p)
 
 		_ = c.Close()
 		_ = c.Close()
@@ -429,9 +431,9 @@ func TestConcurrentSignals(t *testing.T) {
 		})
 		defer listener.Close()
 
-		concurrent := NewConcurrent[TestData]("signal-test-concurrent", nil,
-			Transform("p1", func(_ context.Context, d TestData) TestData { return d }),
-			Transform("p2", func(_ context.Context, d TestData) TestData { return d }),
+		concurrent := NewConcurrent[TestData](NewIdentity("signal-test-concurrent", ""), nil,
+			Transform(NewIdentity("p1", ""), func(_ context.Context, d TestData) TestData { return d }),
+			Transform(NewIdentity("p2", ""), func(_ context.Context, d TestData) TestData { return d }),
 		)
 
 		data := TestData{Value: 5}
@@ -470,9 +472,9 @@ func TestConcurrentSignals(t *testing.T) {
 		})
 		defer listener.Close()
 
-		concurrent := NewConcurrent[TestData]("error-count-test", nil,
-			Transform("success", func(_ context.Context, d TestData) TestData { return d }),
-			Apply("fail", func(_ context.Context, _ TestData) (TestData, error) {
+		concurrent := NewConcurrent[TestData](NewIdentity("error-count-test", ""), nil,
+			Transform(NewIdentity("success", ""), func(_ context.Context, d TestData) TestData { return d }),
+			Apply(NewIdentity("fail", ""), func(_ context.Context, _ TestData) (TestData, error) {
 				return TestData{}, errors.New("intentional failure")
 			}),
 		)
@@ -486,6 +488,30 @@ func TestConcurrentSignals(t *testing.T) {
 
 		if signalErrorCount != 1 {
 			t.Errorf("expected error_count 1, got %d", signalErrorCount)
+		}
+	})
+
+	t.Run("Schema", func(t *testing.T) {
+		proc1 := Transform(NewIdentity("proc1", ""), func(_ context.Context, d TestData) TestData { return d })
+		proc2 := Transform(NewIdentity("proc2", ""), func(_ context.Context, d TestData) TestData { return d })
+
+		concurrent := NewConcurrent[TestData](NewIdentity("test-concurrent", "Concurrent connector"), nil, proc1, proc2)
+
+		schema := concurrent.Schema()
+
+		if schema.Identity.Name() != "test-concurrent" {
+			t.Errorf("Schema Identity.Name() = %v, want %v", schema.Identity.Name(), "test-concurrent")
+		}
+		if schema.Type != "concurrent" {
+			t.Errorf("Schema Type = %v, want %v", schema.Type, "concurrent")
+		}
+
+		flow, ok := ConcurrentKey.From(schema)
+		if !ok {
+			t.Fatal("Expected ConcurrentFlow")
+		}
+		if len(flow.Tasks) != 2 {
+			t.Errorf("len(Flow.Tasks) = %d, want 2", len(flow.Tasks))
 		}
 	})
 }

@@ -43,7 +43,7 @@ import (
 //   - Context cancellation immediately affects all processors
 //   - Preserves trace context and spans for distributed tracing
 //   - Waits for all processors to complete
-//   - Reducer receives map[Name]T for results and map[Name]error for errors
+//   - Reducer receives map[string]T for results and map[string]error for errors (keyed by processor name)
 //
 // Example without reducer (side effects):
 //
@@ -63,8 +63,9 @@ import (
 //	    }
 //	}
 //
+//	var NotifyOrderID = pipz.NewIdentity("notify-order", "Sends notifications for order")
 //	concurrent := pipz.NewConcurrent(
-//	    "notify-order",
+//	    NotifyOrderID,
 //	    nil, // no reducer, just run side effects
 //	    sendEmailNotification,
 //	    sendSMSNotification,
@@ -83,7 +84,7 @@ import (
 //	    return p
 //	}
 //
-//	reducer := func(original PriceCheck, results map[Name]PriceCheck, errors map[Name]error) PriceCheck {
+//	reducer := func(original PriceCheck, results map[string]PriceCheck, errors map[string]error) PriceCheck {
 //	    bestPrice := original.BestPrice
 //	    for _, result := range results {
 //	        if result.BestPrice < bestPrice {
@@ -93,17 +94,18 @@ import (
 //	    return PriceCheck{ProductID: original.ProductID, BestPrice: bestPrice}
 //	}
 //
+//	var CheckPricesID = pipz.NewIdentity("check-prices", "Checks prices across vendors")
 //	concurrent := pipz.NewConcurrent(
-//	    "check-prices",
+//	    CheckPricesID,
 //	    reducer,
 //	    checkAmazon,
 //	    checkWalmart,
 //	    checkTarget,
 //	)
 type Concurrent[T Cloner[T]] struct {
-	name       Name
+	identity   Identity
 	processors []Chainable[T]
-	reducer    func(original T, results map[Name]T, errors map[Name]error) T
+	reducer    func(original T, results map[Identity]T, errors map[Identity]error) T
 	mu         sync.RWMutex
 	closeOnce  sync.Once
 	closeErr   error
@@ -112,10 +114,10 @@ type Concurrent[T Cloner[T]] struct {
 // NewConcurrent creates a new Concurrent connector.
 // If reducer is nil, the original input is returned unchanged.
 // If reducer is provided, it receives the original input, all processor results,
-// and any errors, allowing you to aggregate or merge results into a new T.
-func NewConcurrent[T Cloner[T]](name Name, reducer func(original T, results map[Name]T, errors map[Name]error) T, processors ...Chainable[T]) *Concurrent[T] {
+// and any errors (keyed by processor Identity), allowing you to aggregate or merge results into a new T.
+func NewConcurrent[T Cloner[T]](identity Identity, reducer func(original T, results map[Identity]T, errors map[Identity]error) T, processors ...Chainable[T]) *Concurrent[T] {
 	return &Concurrent[T]{
-		name:       name,
+		identity:   identity,
 		reducer:    reducer,
 		processors: processors,
 	}
@@ -123,7 +125,7 @@ func NewConcurrent[T Cloner[T]](name Name, reducer func(original T, results map[
 
 // Process implements the Chainable interface.
 func (c *Concurrent[T]) Process(ctx context.Context, input T) (result T, err error) {
-	defer recoverFromPanic(&result, &err, c.name, input)
+	defer recoverFromPanic(&result, &err, c.identity, input)
 
 	start := time.Now()
 
@@ -141,11 +143,11 @@ func (c *Concurrent[T]) Process(ctx context.Context, input T) (result T, err err
 
 	// Collect results if reducer is provided
 	var resultsMu sync.Mutex
-	var results map[Name]T
-	var errs map[Name]error
+	var results map[Identity]T
+	var errs map[Identity]error
 	if c.reducer != nil {
-		results = make(map[Name]T, len(processors))
-		errs = make(map[Name]error, len(processors))
+		results = make(map[Identity]T, len(processors))
+		errs = make(map[Identity]error, len(processors))
 	}
 
 	// Track error count for signal (atomic for safe concurrent access)
@@ -175,10 +177,10 @@ func (c *Concurrent[T]) Process(ctx context.Context, input T) (result T, err err
 			if c.reducer != nil {
 				resultsMu.Lock()
 				if err != nil {
-					errs[p.Name()] = err
+					errs[p.Identity()] = err
 					errorCount.Add(1)
 				} else {
-					results[p.Name()] = res
+					results[p.Identity()] = res
 				}
 				resultsMu.Unlock()
 			} else if err != nil {
@@ -198,7 +200,8 @@ func (c *Concurrent[T]) Process(ctx context.Context, input T) (result T, err err
 	case <-done:
 		// All processors completed - emit signal
 		capitan.Info(ctx, SignalConcurrentCompleted,
-			FieldName.Field(string(c.name)),
+			FieldName.Field(c.identity.Name()),
+			FieldIdentityID.Field(c.identity.ID().String()),
 			FieldProcessorCount.Field(len(processors)),
 			FieldErrorCount.Field(int(errorCount.Load())),
 			FieldDuration.Field(time.Since(start).Seconds()),
@@ -211,7 +214,8 @@ func (c *Concurrent[T]) Process(ctx context.Context, input T) (result T, err err
 	case <-ctx.Done():
 		// Context canceled - emit signal with current state
 		capitan.Info(ctx, SignalConcurrentCompleted,
-			FieldName.Field(string(c.name)),
+			FieldName.Field(c.identity.Name()),
+			FieldIdentityID.Field(c.identity.ID().String()),
 			FieldProcessorCount.Field(len(processors)),
 			FieldErrorCount.Field(int(errorCount.Load())),
 			FieldDuration.Field(time.Since(start).Seconds()),
@@ -270,11 +274,28 @@ func (c *Concurrent[T]) SetProcessors(processors ...Chainable[T]) *Concurrent[T]
 	return c
 }
 
-// Name returns the name of this connector.
-func (c *Concurrent[T]) Name() Name {
+// Identity returns the identity of this connector.
+func (c *Concurrent[T]) Identity() Identity {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.name
+	return c.identity
+}
+
+// Schema returns a Node representing this connector in the pipeline schema.
+func (c *Concurrent[T]) Schema() Node {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	tasks := make([]Node, len(c.processors))
+	for i, proc := range c.processors {
+		tasks[i] = proc.Schema()
+	}
+
+	return Node{
+		Identity: c.identity,
+		Type:     "concurrent",
+		Flow:     ConcurrentFlow{Tasks: tasks},
+	}
 }
 
 // Close gracefully shuts down the connector and all its child processors.

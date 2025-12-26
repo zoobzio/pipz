@@ -19,7 +19,7 @@ Fire-and-forget parallel execution with context isolation.
 ## Function Signature
 
 ```go
-func NewScaffold[T Cloner[T]](name Name, processors ...Chainable[T]) *Scaffold[T]
+func NewScaffold[T Cloner[T]](identity Identity, processors ...Chainable[T]) *Scaffold[T]
 ```
 
 ## Type Constraints
@@ -33,7 +33,7 @@ func NewScaffold[T Cloner[T]](name Name, processors ...Chainable[T]) *Scaffold[T
 
 ## Parameters
 
-- `name` (`Name`) - Identifier for the connector used in debugging
+- `identity` (`Identity`) - Identifier for the connector used in debugging
 - `processors` - Variable number of processors to run asynchronously
 
 ## Returns
@@ -74,19 +74,32 @@ func (a AuditEvent) Clone() AuditEvent {
     }
 }
 
+// Define identities upfront
+var (
+    AsyncOpsID   = pipz.NewIdentity("async-operations", "Background operations for event processing")
+    AuditLogID   = pipz.NewIdentity("audit-log", "Writes to audit log")
+    AnalyticsID  = pipz.NewIdentity("analytics", "Sends to analytics")
+    CacheWarmID  = pipz.NewIdentity("cache-warm", "Warms secondary cache")
+    MetricsID    = pipz.NewIdentity("metrics", "Updates metrics")
+    UserActionID = pipz.NewIdentity("user-action", "User action pipeline")
+    ValidateID   = pipz.NewIdentity("validate", "Validates action")
+    AuthorizeID  = pipz.NewIdentity("authorize", "Checks permissions")
+    ExecuteID    = pipz.NewIdentity("execute", "Performs action")
+)
+
 // Create scaffold for background operations
-background := pipz.NewScaffold("async-operations",
-    pipz.Effect("audit-log", writeToAuditLog),      // 500ms operation
-    pipz.Effect("analytics", sendToAnalytics),      // 300ms operation
-    pipz.Effect("cache-warm", warmSecondaryCache),  // 200ms operation
-    pipz.Effect("metrics", updateMetrics),          // 100ms operation
+background := pipz.NewScaffold(AsyncOpsID,
+    pipz.Effect(AuditLogID, writeToAuditLog),      // 500ms operation
+    pipz.Effect(AnalyticsID, sendToAnalytics),      // 300ms operation
+    pipz.Effect(CacheWarmID, warmSecondaryCache),  // 200ms operation
+    pipz.Effect(MetricsID, updateMetrics),          // 100ms operation
 )
 
 // Use in a pipeline - returns immediately
-pipeline := pipz.NewSequence[AuditEvent]("user-action",
-    pipz.Apply("validate", validateAction),    // Must complete
-    pipz.Apply("authorize", checkPermissions), // Must complete
-    pipz.Apply("execute", performAction),      // Must complete
+pipeline := pipz.NewSequence[AuditEvent](UserActionID,
+    pipz.Apply(ValidateID, validateAction),    // Must complete
+    pipz.Apply(AuthorizeID, checkPermissions), // Must complete
+    pipz.Apply(ExecuteID, performAction),      // Must complete
     background,                                // Returns immediately
 )
 
@@ -137,18 +150,22 @@ Scaffold uses `context.WithoutCancel()` which:
 // Example with distributed tracing
 func handleRequest(ctx context.Context, req Request) {
     // ctx contains trace ID: "trace-123"
-    
-    scaffold := pipz.NewScaffold("background",
-        pipz.Effect("log", func(ctx context.Context, _ Request) error {
-            // ctx still contains trace ID: "trace-123"
-            // But won't be cancelled when request ends
-            traceID := ctx.Value("trace-id").(string)
-            log.Printf("[%s] Background operation", traceID)
-            time.Sleep(5 * time.Second) // Continues even after request done
-            return nil
-        }),
+
+    scaffold := pipz.NewScaffold(
+        pipz.NewIdentity("background", "Background operation with trace context"),
+        pipz.Effect(
+            pipz.NewIdentity("log", "Logs with trace ID"),
+            func(ctx context.Context, _ Request) error {
+                // ctx still contains trace ID: "trace-123"
+                // But won't be cancelled when request ends
+                traceID := ctx.Value("trace-id").(string)
+                log.Printf("[%s] Background operation", traceID)
+                time.Sleep(5 * time.Second) // Continues even after request done
+                return nil
+            },
+        ),
     )
-    
+
     // Returns immediately
     scaffold.Process(ctx, req)
 }
@@ -165,43 +182,69 @@ func handleRequest(ctx context.Context, req Request) {
 ## Common Patterns
 
 ```go
+// Define identities upfront
+var (
+    AuditID          = pipz.NewIdentity("audit", "Audit logging to multiple destinations")
+    PrimaryLogID     = pipz.NewIdentity("primary-log", "Writes to database")
+    BackupLogID      = pipz.NewIdentity("backup-log", "Writes to S3")
+    ComplianceID     = pipz.NewIdentity("compliance", "Sends to compliance system")
+    MonitoringID     = pipz.NewIdentity("monitoring", "Updates monitoring systems")
+    PrometheusID     = pipz.NewIdentity("prometheus", "Updates Prometheus metrics")
+    DatadogID        = pipz.NewIdentity("datadog", "Sends to Datadog")
+    CustomID         = pipz.NewIdentity("custom", "Updates custom dashboard")
+    CacheOpsID       = pipz.NewIdentity("cache-ops", "Cache operations")
+    RedisID          = pipz.NewIdentity("redis", "Warms Redis cache")
+    CDNID            = pipz.NewIdentity("cdn", "Purges CDN cache")
+    LocalID          = pipz.NewIdentity("local", "Updates local cache")
+    OrderProcessingID = pipz.NewIdentity("order-processing", "Order processing pipeline")
+    ValidateOrderID  = pipz.NewIdentity("validate", "Validates order")
+    PaymentID        = pipz.NewIdentity("payment", "Processes payment")
+    InventoryID      = pipz.NewIdentity("inventory", "Updates inventory")
+    CompleteID       = pipz.NewIdentity("complete", "Marks order complete")
+    PostOrderID      = pipz.NewIdentity("post-order", "Post-order notifications and analytics")
+    EmailID          = pipz.NewIdentity("email", "Sends confirmation email")
+    SMSID            = pipz.NewIdentity("sms", "Sends SMS notification")
+    OrderAnalyticsID = pipz.NewIdentity("analytics", "Tracks order metrics")
+    PartnerID        = pipz.NewIdentity("partner", "Notifies fulfillment partner")
+)
+
 // Audit logging
-auditLog := pipz.NewScaffold("audit",
-    pipz.Effect("primary-log", writeToDatabase),
-    pipz.Effect("backup-log", writeToS3),
-    pipz.Effect("compliance", sendToComplianceSystem),
+auditLog := pipz.NewScaffold(AuditID,
+    pipz.Effect(PrimaryLogID, writeToDatabase),
+    pipz.Effect(BackupLogID, writeToS3),
+    pipz.Effect(ComplianceID, sendToComplianceSystem),
 )
 
 // Metrics and monitoring
-monitoring := pipz.NewScaffold("monitoring",
-    pipz.Effect("prometheus", updatePrometheusMetrics),
-    pipz.Effect("datadog", sendToDatadog),
-    pipz.Effect("custom", updateCustomDashboard),
+monitoring := pipz.NewScaffold(MonitoringID,
+    pipz.Effect(PrometheusID, updatePrometheusMetrics),
+    pipz.Effect(DatadogID, sendToDatadog),
+    pipz.Effect(CustomID, updateCustomDashboard),
 )
 
 // Cache warming
-cacheOps := pipz.NewScaffold("cache-ops",
-    pipz.Effect("redis", warmRedisCache),
-    pipz.Effect("cdn", purgeCDNCache),
-    pipz.Effect("local", updateLocalCache),
+cacheOps := pipz.NewScaffold(CacheOpsID,
+    pipz.Effect(RedisID, warmRedisCache),
+    pipz.Effect(CDNID, purgeCDNCache),
+    pipz.Effect(LocalID, updateLocalCache),
 )
 
 // Complete pipeline with synchronous and async parts
-pipeline := pipz.NewSequence[Order]("order-processing",
+pipeline := pipz.NewSequence[Order](OrderProcessingID,
     // Synchronous - must complete
-    pipz.Apply("validate", validateOrder),
-    pipz.Apply("payment", processPayment),
-    pipz.Apply("inventory", updateInventory),
-    
+    pipz.Apply(ValidateOrderID, validateOrder),
+    pipz.Apply(PaymentID, processPayment),
+    pipz.Apply(InventoryID, updateInventory),
+
     // Returns order immediately after this
-    pipz.Transform("complete", markOrderComplete),
-    
+    pipz.Transform(CompleteID, markOrderComplete),
+
     // Async - fire and forget
-    pipz.NewScaffold("post-order",
-        pipz.Effect("email", sendConfirmationEmail),
-        pipz.Effect("sms", sendSMSNotification),
-        pipz.Effect("analytics", trackOrderMetrics),
-        pipz.Effect("partner", notifyFulfillmentPartner),
+    pipz.NewScaffold(PostOrderID,
+        pipz.Effect(EmailID, sendConfirmationEmail),
+        pipz.Effect(SMSID, sendSMSNotification),
+        pipz.Effect(OrderAnalyticsID, trackOrderMetrics),
+        pipz.Effect(PartnerID, notifyFulfillmentPartner),
     ),
 )
 ```
@@ -210,17 +253,29 @@ pipeline := pipz.NewSequence[Order]("order-processing",
 
 ### ❌ Don't use for critical operations
 ```go
+// Define identities upfront
+var (
+    CriticalID = pipz.NewIdentity("critical", "Critical payment processing")
+    PaymentID  = pipz.NewIdentity("payment", "Processes payment")
+)
+
 // WRONG - Payment must be confirmed!
-scaffold := pipz.NewScaffold("critical",
-    pipz.Apply("payment", processPayment), // No error feedback!
+scaffold := pipz.NewScaffold(CriticalID,
+    pipz.Apply(PaymentID, processPayment), // No error feedback!
 )
 ```
 
 ### ✅ Use synchronous processing for critical ops
 ```go
+// Define identities upfront
+var (
+    CriticalID = pipz.NewIdentity("critical", "Critical payment processing")
+    PaymentID  = pipz.NewIdentity("payment", "Processes payment")
+)
+
 // RIGHT - Wait for payment confirmation
-sequence := pipz.NewSequence("critical",
-    pipz.Apply("payment", processPayment),
+sequence := pipz.NewSequence(CriticalID,
+    pipz.Apply(PaymentID, processPayment),
 )
 ```
 
@@ -244,17 +299,29 @@ func (d Data) Clone() Data {
 
 ### ❌ Don't use when you need error handling
 ```go
+// Define identities upfront
+var (
+    NoErrorsID = pipz.NewIdentity("no-errors", "No error handling")
+    RiskyID    = pipz.NewIdentity("risky", "Risky operation")
+)
+
 // WRONG - Can't handle or log errors
-scaffold := pipz.NewScaffold("no-errors",
-    pipz.Apply("risky", riskyOperation), // Errors vanish!
+scaffold := pipz.NewScaffold(NoErrorsID,
+    pipz.Apply(RiskyID, riskyOperation), // Errors vanish!
 )
 ```
 
 ### ✅ Use Concurrent if you need to know about failures
 ```go
+// Define identities upfront
+var (
+    WithErrorsID = pipz.NewIdentity("with-errors", "With error handling")
+    RiskyID      = pipz.NewIdentity("risky", "Risky operation")
+)
+
 // RIGHT - Errors are reported (though not individually)
-concurrent := pipz.NewConcurrent("with-errors",
-    pipz.Apply("risky", riskyOperation),
+concurrent := pipz.NewConcurrent(WithErrorsID,
+    pipz.Apply(RiskyID, riskyOperation),
 )
 ```
 

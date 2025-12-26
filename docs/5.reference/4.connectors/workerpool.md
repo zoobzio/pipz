@@ -19,7 +19,7 @@ Bounded parallel execution with a fixed number of workers.
 ## Function Signature
 
 ```go
-func NewWorkerPool[T Cloner[T]](name Name, workers int, processors ...Chainable[T]) *WorkerPool[T]
+func NewWorkerPool[T Cloner[T]](identity Identity, workers int, processors ...Chainable[T]) *WorkerPool[T]
 ```
 
 ## Type Constraints
@@ -33,7 +33,7 @@ func NewWorkerPool[T Cloner[T]](name Name, workers int, processors ...Chainable[
 
 ## Parameters
 
-- `name` (`Name`) - Identifier for the connector used in debugging
+- `identity` (`Identity`) - Identifier with name and description for the connector used in debugging and observability
 - `workers` (`int`) - Maximum number of concurrent processors (semaphore size)
 - `processors` - Variable number of processors to execute with limited parallelism
 
@@ -61,8 +61,12 @@ Returns the same connector instance for method chaining.
 ```go
 // Use fake clock in tests
 fakeClock := clockz.NewFakeClock()
-pool := pipz.NewWorkerPool("test", 3, processor1, processor2).
-    WithClock(fakeClock)
+pool := pipz.NewWorkerPool(
+    pipz.NewIdentity("test", "Test worker pool with fake clock for controlled time testing"),
+    3,
+    processor1,
+    processor2,
+).WithClock(fakeClock)
 
 // Advance time in test for timeout testing
 fakeClock.Advance(5 * time.Second)
@@ -101,19 +105,33 @@ func (r APIRequest) Clone() APIRequest {
     }
 }
 
+// Define identities upfront
+var (
+    APIBatchID    = pipz.NewIdentity("api-batch", "Bounded parallel execution limited to 3 concurrent requests")
+    ServiceAID    = pipz.NewIdentity("service-a", "Call service A")
+    ServiceBID    = pipz.NewIdentity("service-b", "Call service B")
+    ServiceCID    = pipz.NewIdentity("service-c", "Call service C")
+    ServiceDID    = pipz.NewIdentity("service-d", "Call service D")
+    ServiceEID    = pipz.NewIdentity("service-e", "Call service E")
+    APIFlowID     = pipz.NewIdentity("api-flow", "API request flow pipeline")
+    ValidateID    = pipz.NewIdentity("validate", "Validate API request")
+    AuthID        = pipz.NewIdentity("auth", "Add authentication")
+)
+
 // Create worker pool with limited concurrency
-apiCalls := pipz.NewWorkerPool("api-batch", 3,
-    pipz.Apply("service-a", callServiceA),
-    pipz.Apply("service-b", callServiceB),
-    pipz.Apply("service-c", callServiceC),
-    pipz.Apply("service-d", callServiceD),
-    pipz.Apply("service-e", callServiceE),
+apiCalls := pipz.NewWorkerPool(APIBatchID,
+    3,
+    pipz.Apply(ServiceAID, callServiceA),
+    pipz.Apply(ServiceBID, callServiceB),
+    pipz.Apply(ServiceCID, callServiceC),
+    pipz.Apply(ServiceDID, callServiceD),
+    pipz.Apply(ServiceEID, callServiceE),
 )
 
 // Use in a pipeline
-pipeline := pipz.NewSequence[APIRequest]("api-flow",
-    pipz.Apply("validate", validateRequest),
-    pipz.Apply("auth", addAuthentication),
+pipeline := pipz.NewSequence[APIRequest](APIFlowID,
+    pipz.Apply(ValidateID, validateRequest),
+    pipz.Apply(AuthID, addAuthentication),
     apiCalls, // Only 3 API calls run concurrently
 )
 ```
@@ -176,7 +194,8 @@ See [Hooks Documentation](../../2.learn/5.hooks.md) for complete signal referenc
 ## Configuration Methods
 
 ```go
-pool := pipz.NewWorkerPool("pool", 5, processors...)
+var PoolID = pipz.NewIdentity("pool", "Worker pool")
+pool := pipz.NewWorkerPool(PoolID, 5, processors...)
 
 // Adjust worker count dynamically
 pool.SetWorkerCount(10)
@@ -207,50 +226,92 @@ active := pool.GetActiveWorkers()    // Currently active
 
 ### Rate-Limited API Calls
 ```go
+// Define identities upfront
+var (
+    APIRateLimitedID = pipz.NewIdentity("api-rate-limited", "Rate-limited API pool with 10 workers")
+    FetchUserID      = pipz.NewIdentity("fetch-user", "Fetch user data")
+    FetchOrdersID    = pipz.NewIdentity("fetch-orders", "Fetch order history")
+    FetchPrefsID     = pipz.NewIdentity("fetch-prefs", "Fetch preferences")
+    FetchActivityID  = pipz.NewIdentity("fetch-activity", "Fetch activity log")
+)
+
 // Respect API rate limits
-apiPool := pipz.NewWorkerPool("api-rate-limited", 10,
-    pipz.Apply("fetch-user", fetchUserData),
-    pipz.Apply("fetch-orders", fetchOrderHistory),
-    pipz.Apply("fetch-prefs", fetchPreferences),
-    pipz.Apply("fetch-activity", fetchActivityLog),
+apiPool := pipz.NewWorkerPool(APIRateLimitedID,
+    10,
+    pipz.Apply(FetchUserID, fetchUserData),
+    pipz.Apply(FetchOrdersID, fetchOrderHistory),
+    pipz.Apply(FetchPrefsID, fetchPreferences),
+    pipz.Apply(FetchActivityID, fetchActivityLog),
     // ... many more API calls
 ).WithTimeout(5 * time.Second)
 ```
 
 ### Database Connection Pool
 ```go
+// Define identities upfront
+var (
+    DBOpsID        = pipz.NewIdentity("db-ops", "Database operations pool with 5 workers")
+    InsertUserID   = pipz.NewIdentity("insert-user", "Insert user to database")
+    UpdateProfileID = pipz.NewIdentity("update-profile", "Update user profile")
+    LogActivityID  = pipz.NewIdentity("log-activity", "Log user activity")
+    UpdateStatsID  = pipz.NewIdentity("update-stats", "Update statistics")
+)
+
 // Limit concurrent database operations
-dbPool := pipz.NewWorkerPool("db-ops", 5,
-    pipz.Apply("insert-user", insertUser),
-    pipz.Apply("update-profile", updateProfile),
-    pipz.Apply("log-activity", logActivity),
-    pipz.Apply("update-stats", updateStatistics),
+dbPool := pipz.NewWorkerPool(DBOpsID,
+    5,
+    pipz.Apply(InsertUserID, insertUser),
+    pipz.Apply(UpdateProfileID, updateProfile),
+    pipz.Apply(LogActivityID, logActivity),
+    pipz.Apply(UpdateStatsID, updateStatistics),
 )
 ```
 
 ### CPU-Intensive Operations
 ```go
+// Define identities upfront
+var (
+    CPUBoundID       = pipz.NewIdentity("cpu-bound", "CPU-intensive processing pool")
+    ResizeImageID    = pipz.NewIdentity("resize-image", "Resize image")
+    GenThumbnailID   = pipz.NewIdentity("generate-thumbnail", "Generate thumbnail")
+    ExtractMetaID    = pipz.NewIdentity("extract-metadata", "Extract metadata")
+    ApplyWatermarkID = pipz.NewIdentity("apply-watermark", "Apply watermark")
+)
+
 // Control CPU usage
-processing := pipz.NewWorkerPool("cpu-bound", runtime.NumCPU(),
-    pipz.Transform("resize-image", resizeImage),
-    pipz.Transform("generate-thumbnail", generateThumbnail),
-    pipz.Transform("extract-metadata", extractMetadata),
-    pipz.Transform("apply-watermark", applyWatermark),
+processing := pipz.NewWorkerPool(CPUBoundID,
+    runtime.NumCPU(),
+    pipz.Transform(ResizeImageID, resizeImage),
+    pipz.Transform(GenThumbnailID, generateThumbnail),
+    pipz.Transform(ExtractMetaID, extractMetadata),
+    pipz.Transform(ApplyWatermarkID, applyWatermark),
 )
 ```
 
 ### Batch Processing with Controlled Concurrency
 ```go
+// Define identities upfront
+var (
+    BatchFlowID     = pipz.NewIdentity("batch-flow", "Batch processing flow")
+    ValidateBatchID = pipz.NewIdentity("validate", "Validate batch")
+    ProcessItemsID  = pipz.NewIdentity("process-items", "Batch item enrichment pool with 20 workers")
+    Enrich1ID       = pipz.NewIdentity("enrich-1", "Enrich from service 1")
+    Enrich2ID       = pipz.NewIdentity("enrich-2", "Enrich from service 2")
+    Enrich3ID       = pipz.NewIdentity("enrich-3", "Enrich from service 3")
+    AggregateID     = pipz.NewIdentity("aggregate", "Aggregate results")
+)
+
 // Process large batches with resource limits
-batchProcessor := pipz.NewSequence[Batch]("batch-flow",
-    pipz.Apply("validate", validateBatch),
-    pipz.NewWorkerPool("process-items", 20,
-        pipz.Apply("enrich-1", enrichWithService1),
-        pipz.Apply("enrich-2", enrichWithService2),
-        pipz.Apply("enrich-3", enrichWithService3),
+batchProcessor := pipz.NewSequence[Batch](BatchFlowID,
+    pipz.Apply(ValidateBatchID, validateBatch),
+    pipz.NewWorkerPool(ProcessItemsID,
+        20,
+        pipz.Apply(Enrich1ID, enrichWithService1),
+        pipz.Apply(Enrich2ID, enrichWithService2),
+        pipz.Apply(Enrich3ID, enrichWithService3),
         // ... potentially hundreds of items
     ),
-    pipz.Apply("aggregate", aggregateResults),
+    pipz.Apply(AggregateID, aggregateResults),
 )
 ```
 
@@ -260,15 +321,17 @@ batchProcessor := pipz.NewSequence[Batch]("batch-flow",
 ```go
 // WRONG - Creates new pool for each request!
 func handleRequest(req Request) Response {
-    pool := pipz.NewWorkerPool("pool", 5, processors...)
+    poolID := pipz.NewIdentity("pool", "Worker pool")
+    pool := pipz.NewWorkerPool(poolID, 5, processors...)
     return pool.Process(ctx, req) // Defeats the purpose
 }
 ```
 
 ### ✅ Use singleton instances
 ```go
-// RIGHT - Shared pool across requests
-var apiPool = pipz.NewWorkerPool("api", 5, processors...)
+// RIGHT - Package-level Identity and pool shared across requests
+var APIID = pipz.NewIdentity("api", "Shared API pool for all requests with 5 worker limit")
+var apiPool = pipz.NewWorkerPool(APIID, 5, processors...)
 
 func handleRequest(req Request) Response {
     return apiPool.Process(ctx, req) // Properly limited
@@ -278,8 +341,14 @@ func handleRequest(req Request) Response {
 ### ❌ Don't forget WorkerPool doesn't transform data
 ```go
 // WRONG - Expecting modified data
-pool := pipz.NewWorkerPool("transform", 3,
-    pipz.Transform("double", func(ctx context.Context, n int) int {
+var (
+    TransformPoolID = pipz.NewIdentity("transform", "Incorrectly expecting transformation results")
+    DoubleID        = pipz.NewIdentity("double", "Double the value")
+)
+
+pool := pipz.NewWorkerPool(TransformPoolID,
+    3,
+    pipz.Transform(DoubleID, func(ctx context.Context, n int) int {
         return n * 2 // Result is discarded!
     }),
 )
@@ -290,23 +359,33 @@ result, _ := pool.Process(ctx, 5)
 ### ✅ Use for side effects only
 ```go
 // RIGHT - Side effects, not transformations
-pool := pipz.NewWorkerPool("effects", 3,
-    pipz.Effect("save-db", saveToDatabase),
-    pipz.Effect("send-event", publishEvent),
-    pipz.Effect("update-cache", updateCache),
+var (
+    EffectsPoolID = pipz.NewIdentity("effects", "Side effect operations pool")
+    SaveDBID      = pipz.NewIdentity("save-db", "Save to database")
+    SendEventID   = pipz.NewIdentity("send-event", "Publish event")
+    UpdateCacheID = pipz.NewIdentity("update-cache", "Update cache")
+)
+
+pool := pipz.NewWorkerPool(EffectsPoolID,
+    3,
+    pipz.Effect(SaveDBID, saveToDatabase),
+    pipz.Effect(SendEventID, publishEvent),
+    pipz.Effect(UpdateCacheID, updateCache),
 )
 ```
 
 ### ❌ Don't set workers to 0
 ```go
 // WRONG - No workers means nothing runs!
-pool := pipz.NewWorkerPool("broken", 0, processors...)
+var BrokenID = pipz.NewIdentity("broken", "Misconfigured pool with zero workers")
+pool := pipz.NewWorkerPool(BrokenID, 0, processors...)
 ```
 
 ### ✅ Use reasonable worker counts
 ```go
 // RIGHT - Based on actual constraints
-pool := pipz.NewWorkerPool("balanced", 10, processors...)
+var BalancedID = pipz.NewIdentity("balanced", "Balanced worker pool based on resource constraints")
+pool := pipz.NewWorkerPool(BalancedID, 10, processors...)
 ```
 
 ## Implementation Requirements
@@ -352,22 +431,25 @@ func (t Task) Clone() Task {
 
 ### Dynamic Worker Adjustment
 ```go
+// Define identity upfront
+var AdaptivePoolID = pipz.NewIdentity("adaptive", "Self-adjusting worker pool that scales based on utilization")
+
 // Adjust workers based on load
-pool := pipz.NewWorkerPool("adaptive", 5, processors...)
+pool := pipz.NewWorkerPool(AdaptivePoolID, 5, processors...)
 
 // Monitor and adjust
 go func() {
     for {
         active := pool.GetActiveWorkers()
         max := pool.GetWorkerCount()
-        
+
         utilization := float64(active) / float64(max)
         if utilization > 0.8 {
             pool.SetWorkerCount(max + 5) // Scale up
         } else if utilization < 0.2 && max > 5 {
             pool.SetWorkerCount(max - 5) // Scale down
         }
-        
+
         time.Sleep(30 * time.Second)
     }
 }()
@@ -375,14 +457,24 @@ go func() {
 
 ### Combining with Circuit Breaker
 ```go
+// Define identities upfront
+var (
+    ProtectedBreakerID = pipz.NewIdentity("protected", "Circuit breaker for worker pool")
+    LimitedPoolID      = pipz.NewIdentity("limited", "Protected API pool with worker limit")
+    API1ID             = pipz.NewIdentity("api-1", "Call API 1")
+    API2ID             = pipz.NewIdentity("api-2", "Call API 2")
+    API3ID             = pipz.NewIdentity("api-3", "Call API 3")
+)
+
 // Protect external services with both patterns
-protected := pipz.NewCircuitBreaker("protected",
-    pipz.NewWorkerPool("limited", 10,
-        pipz.Apply("api-1", callAPI1),
-        pipz.Apply("api-2", callAPI2),
-        pipz.Apply("api-3", callAPI3),
+protected := pipz.NewCircuitBreaker(ProtectedBreakerID,
+    pipz.NewWorkerPool(LimitedPoolID,
+        10,
+        pipz.Apply(API1ID, callAPI1),
+        pipz.Apply(API2ID, callAPI2),
+        pipz.Apply(API3ID, callAPI3),
     ),
-    pipz.WithCircuitBreakerThreshold(5),
+    5, time.Minute,
 )
 ```
 

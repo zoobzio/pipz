@@ -15,16 +15,16 @@ func TestConfirmedCoverageGaps(t *testing.T) {
 		// This confirms the bug at line 125 of error.go
 		// The check is > 200 instead of >= 200
 		exactly200 := strings.Repeat("A", 200)
-		processor := pipz.Apply("panic-200", func(_ context.Context, _ int) (int, error) {
+		processor := pipz.Apply(pipz.NewIdentity("panic-200", ""), func(_ context.Context, _ int) (int, error) {
 			panic(exactly200)
 		})
 		var capturedMessage string
-		errorHandler := pipz.Effect("capture", func(_ context.Context, err *pipz.Error[int]) error {
+		errorHandler := pipz.Effect(pipz.NewIdentity("capture", ""), func(_ context.Context, err *pipz.Error[int]) error {
 			capturedMessage = err.Error()
 			return nil
 		})
 
-		handle := pipz.NewHandle("test", processor, errorHandler)
+		handle := pipz.NewHandle(pipz.NewIdentity("test", ""), processor, errorHandler)
 		_, _ = handle.Process(context.Background(), 42)
 
 		// Bug: 200 chars should be truncated but isn't
@@ -33,10 +33,10 @@ func TestConfirmedCoverageGaps(t *testing.T) {
 		}
 
 		// Test 201 chars - should be truncated
-		processor201 := pipz.Apply("panic-201", func(_ context.Context, _ int) (int, error) {
+		processor201 := pipz.Apply(pipz.NewIdentity("panic-201", ""), func(_ context.Context, _ int) (int, error) {
 			panic(strings.Repeat("B", 201))
 		})
-		handle201 := pipz.NewHandle("test201", processor201, errorHandler)
+		handle201 := pipz.NewHandle(pipz.NewIdentity("test201", ""), processor201, errorHandler)
 		_, _ = handle201.Process(context.Background(), 42)
 
 		if strings.Contains(capturedMessage, "truncated") {
@@ -70,17 +70,17 @@ func TestConfirmedCoverageGaps(t *testing.T) {
 		}
 
 		for _, tc := range testCases {
-			processor := pipz.Apply("panic-test", func(_ context.Context, _ int) (int, error) {
+			processor := pipz.Apply(pipz.NewIdentity("panic-test", ""), func(_ context.Context, _ int) (int, error) {
 				panic(tc.panicMsg)
 			})
 
 			var capturedErr *pipz.Error[int]
-			errorHandler := pipz.Effect("capture", func(_ context.Context, err *pipz.Error[int]) error {
+			errorHandler := pipz.Effect(pipz.NewIdentity("capture", ""), func(_ context.Context, err *pipz.Error[int]) error {
 				capturedErr = err
 				return nil
 			})
 
-			handle := pipz.NewHandle("test", processor, errorHandler)
+			handle := pipz.NewHandle(pipz.NewIdentity("test", ""), processor, errorHandler)
 			_, _ = handle.Process(context.Background(), 42)
 
 			errStr := capturedErr.Error()
@@ -96,17 +96,17 @@ func TestConfirmedCoverageGaps(t *testing.T) {
 
 	t.Run("Printf format specifiers not caught", func(t *testing.T) {
 		// Test that %p, %x, %X format specifiers aren't sanitized
-		processor := pipz.Apply("panic-format", func(_ context.Context, _ int) (int, error) {
+		processor := pipz.Apply(pipz.NewIdentity("panic-format", ""), func(_ context.Context, _ int) (int, error) {
 			panic("Error at %p with value %x")
 		})
 
 		var capturedMessage string
-		errorHandler := pipz.Effect("capture", func(_ context.Context, err *pipz.Error[int]) error {
+		errorHandler := pipz.Effect(pipz.NewIdentity("capture", ""), func(_ context.Context, err *pipz.Error[int]) error {
 			capturedMessage = err.Error()
 			return nil
 		})
 
-		handle := pipz.NewHandle("test", processor, errorHandler)
+		handle := pipz.NewHandle(pipz.NewIdentity("test", ""), processor, errorHandler)
 		_, _ = handle.Process(context.Background(), 42)
 
 		if strings.Contains(capturedMessage, "%p") || strings.Contains(capturedMessage, "%x") {
@@ -123,21 +123,21 @@ func TestRaceConditionWindows(t *testing.T) {
 		// This creates a window for modification
 
 		callOrder := make([]string, 0, 10)
-		processor1 := pipz.Transform("p1", func(_ context.Context, n int) int {
+		processor1 := pipz.Transform(pipz.NewIdentity("p1", ""), func(_ context.Context, n int) int {
 			callOrder = append(callOrder, "p1")
 			return n
 		})
 
-		processor2 := pipz.Transform("p2", func(_ context.Context, n int) int {
+		processor2 := pipz.Transform(pipz.NewIdentity("p2", ""), func(_ context.Context, n int) int {
 			callOrder = append(callOrder, "p2")
 			return n * 2
 		})
 
-		errorHandler := pipz.Effect("noop", func(_ context.Context, _ *pipz.Error[int]) error {
+		errorHandler := pipz.Effect(pipz.NewIdentity("noop", ""), func(_ context.Context, _ *pipz.Error[int]) error {
 			return nil
 		})
 
-		handle := pipz.NewHandle("race", processor1, errorHandler)
+		handle := pipz.NewHandle(pipz.NewIdentity("race", ""), processor1, errorHandler)
 
 		// Start process in goroutine
 		done := make(chan bool)

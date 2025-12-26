@@ -21,7 +21,7 @@ Filter provides conditional processing that either executes a processor or passe
 Filter creates a branch in your pipeline where processing is optional based on runtime conditions. Unlike Switch which routes to different processors, Filter either processes or skips. Unlike Mutate which only supports safe transformations, Filter can execute any Chainable including ones that may error.
 
 ```go
-filter := pipz.NewFilter(name, condition, processor)
+filter := pipz.NewFilter(identity, condition, processor)
 ```
 
 ## When to Use
@@ -45,8 +45,16 @@ Don't use `Filter` when:
 ## Basic Usage
 
 ```go
+// Define identities upfront
+var (
+    BetaFeatureID      = pipz.NewIdentity("beta-feature", "Apply new algorithm for beta users with feature flag")
+    PremiumValidID     = pipz.NewIdentity("premium-validation", "Perform enhanced validation for premium customers")
+    PremiumChecksID    = pipz.NewIdentity("premium-checks", "Premium customer validation checks")
+)
+
 // Feature flag example
-betaFeature := pipz.NewFilter("beta-feature",
+betaFeature := pipz.NewFilter(
+    BetaFeatureID,
     func(ctx context.Context, user User) bool {
         return user.BetaEnabled && isFeatureEnabled(ctx, "new-algorithm")
     },
@@ -54,11 +62,13 @@ betaFeature := pipz.NewFilter("beta-feature",
 )
 
 // Conditional validation
-validatePremium := pipz.NewFilter("premium-validation",
+validatePremium := pipz.NewFilter(
+    PremiumValidID,
     func(ctx context.Context, order Order) bool {
         return order.CustomerTier == "premium"
     },
-    pipz.NewSequence("premium-checks",
+    pipz.NewSequence(
+        PremiumChecksID,
         validateCreditLimit,
         checkFraudScore,
         verifyIdentity,
@@ -111,24 +121,33 @@ func(ctx context.Context, payment Payment) bool {
 Any Chainable can be used as the processor:
 
 ```go
+// Define identities upfront
+var (
+    DoubleID      = pipz.NewIdentity("double", "Double the value")
+    ValidateID    = pipz.NewIdentity("validate", "Validate data")
+    ComplexID     = pipz.NewIdentity("complex", "Validate, enrich, and transform data")
+    ConditionalID = pipz.NewIdentity("conditional", "Conditionally apply complex flow")
+)
+
 // Simple processor
-processor := pipz.Transform("double", func(ctx context.Context, n int) int {
+processor := pipz.Transform(DoubleID, func(ctx context.Context, n int) int {
     return n * 2
 })
 
 // Error-prone processor
-validator := pipz.Apply("validate", func(ctx context.Context, data Data) (Data, error) {
+validator := pipz.Apply(ValidateID, func(ctx context.Context, data Data) (Data, error) {
     return validateData(data)
 })
 
 // Complex pipeline
-complexFlow := pipz.NewSequence("complex",
+complexFlow := pipz.NewSequence(
+    ComplexID,
     validate,
     enrich,
     transform,
 )
 
-filter := pipz.NewFilter("conditional", condition, complexFlow)
+filter := pipz.NewFilter(ConditionalID, condition, complexFlow)
 ```
 
 ## Dynamic Behavior
@@ -136,7 +155,14 @@ filter := pipz.NewFilter("conditional", condition, complexFlow)
 Filter supports runtime updates for dynamic behavior:
 
 ```go
-filter := pipz.NewFilter("dynamic", initialCondition, initialProcessor)
+// Define identity upfront
+var DynamicID = pipz.NewIdentity("dynamic", "Filter with dynamic condition and processor")
+
+filter := pipz.NewFilter(
+    DynamicID,
+    initialCondition,
+    initialProcessor,
+)
 
 // Update condition at runtime
 filter.SetCondition(func(ctx context.Context, data Data) bool {
@@ -157,9 +183,16 @@ currentProcessor := filter.Processor()
 When the processor returns an error, Filter prepends its name to the error path:
 
 ```go
-filter := pipz.NewFilter("payment-filter", 
+// Define identities upfront
+var (
+    PaymentFilterID = pipz.NewIdentity("payment-filter", "Validate high-value payments over $100")
+    ValidateID      = pipz.NewIdentity("validate", "Validate payment")
+)
+
+filter := pipz.NewFilter(
+    PaymentFilterID,
     func(ctx context.Context, p Payment) bool { return p.Amount > 100 },
-    pipz.Apply("validate", failingValidator),
+    pipz.Apply(ValidateID, failingValidator),
 )
 
 result, err := filter.Process(ctx, payment)
@@ -174,13 +207,20 @@ if err != nil {
 Filter is thread-safe and can be safely used in concurrent scenarios:
 
 ```go
-filter := pipz.NewFilter("concurrent-safe", condition, processor)
+// Define identity upfront
+var ConcurrentSafeID = pipz.NewIdentity("concurrent-safe", "Thread-safe conditional processor")
+
+filter := pipz.NewFilter(
+    ConcurrentSafeID,
+    condition,
+    processor,
+)
 
 // Safe to call from multiple goroutines
 go func() { filter.Process(ctx, data1) }()
 go func() { filter.Process(ctx, data2) }()
 
-// Safe to update from other goroutines  
+// Safe to update from other goroutines
 go func() { filter.SetCondition(newCondition) }()
 ```
 
@@ -209,8 +249,12 @@ func (f *FeatureFlags) IsEnabled(flag string) bool {
     return f.flags[flag]
 }
 
+// Define identity upfront
+var FeatureGateID = pipz.NewIdentity("feature-gate", "Gate new feature for beta users with feature flag")
+
 // Create feature flag filter
-featureFilter := pipz.NewFilter("feature-gate",
+featureFilter := pipz.NewFilter(
+    FeatureGateID,
     func(ctx context.Context, user User) bool {
         return user.BetaEnabled && flags.IsEnabled("new-feature")
     },
@@ -221,12 +265,20 @@ featureFilter := pipz.NewFilter("feature-gate",
 ### Conditional Enrichment
 
 ```go
+// Define identities upfront
+var (
+    EnrichPremiumID     = pipz.NewIdentity("enrich-premium", "Enrich premium and enterprise customers with additional data")
+    PremiumEnrichmentID = pipz.NewIdentity("premium-enrichment", "Add personalized offers, loyalty points, and priority support")
+)
+
 // Only enrich premium customers
-enrichPremium := pipz.NewFilter("enrich-premium",
+enrichPremium := pipz.NewFilter(
+    EnrichPremiumID,
     func(ctx context.Context, customer Customer) bool {
         return customer.Tier == "premium" || customer.Tier == "enterprise"
     },
-    pipz.NewSequence("premium-enrichment",
+    pipz.NewSequence(
+        PremiumEnrichmentID,
         addPersonalizedOffers,
         calculateLoyaltyPoints,
         addPrioritySupport,
@@ -237,8 +289,12 @@ enrichPremium := pipz.NewFilter("enrich-premium",
 ### Performance Optimization
 
 ```go
+// Define identity upfront
+var CacheCheckID = pipz.NewIdentity("cache-check", "Skip expensive processing if data is cached")
+
 // Skip expensive processing for cached data
-skipIfCached := pipz.NewFilter("cache-check",
+skipIfCached := pipz.NewFilter(
+    CacheCheckID,
     func(ctx context.Context, request Request) bool {
         _, exists := cache.Get(request.CacheKey())
         return !exists // Only process if not cached
@@ -250,16 +306,20 @@ skipIfCached := pipz.NewFilter("cache-check",
 ### Time-Based Processing
 
 ```go
+// Define identity upfront
+var BusinessHoursID = pipz.NewIdentity("business-hours", "Process only during weekday business hours (9am-5pm)")
+
 // Only process during business hours
-businessHours := pipz.NewFilter("business-hours",
+businessHours := pipz.NewFilter(
+    BusinessHoursID,
     func(ctx context.Context, task Task) bool {
         now := time.Now()
         hour := now.Hour()
         weekday := now.Weekday()
-        
-        return weekday >= time.Monday && 
-               weekday <= time.Friday && 
-               hour >= 9 && 
+
+        return weekday >= time.Monday &&
+               weekday <= time.Friday &&
+               hour >= 9 &&
                hour < 17
     },
     businessProcessor,
@@ -274,11 +334,17 @@ businessHours := pipz.NewFilter("business-hours",
 - **Switch**: Route to different processors (multiple choices)
 
 ```go
+// Define identities upfront
+var (
+    OptionalID = pipz.NewIdentity("optional", "Conditionally apply processor")
+    RouterID   = pipz.NewIdentity("router", "Route to different processors")
+)
+
 // Filter: Optional processing
-filter := pipz.NewFilter("optional", condition, processor)
+filter := pipz.NewFilter(OptionalID, condition, processor)
 
 // Switch: Alternative processing
-router := pipz.NewSwitch("router", routingFunction)
+router := pipz.NewSwitch(RouterID, routingFunction)
 router.AddRoute("path-a", processorA)
 router.AddRoute("path-b", processorB)
 ```
@@ -289,18 +355,31 @@ router.AddRoute("path-b", processorB)
 - **Mutate**: Only safe transformations (no errors)
 
 ```go
+// Define identities upfront
+var (
+    ValidateIfNeededID = pipz.NewIdentity("validate-if-needed", "Conditionally validate data")
+    ModifyIfNeededID   = pipz.NewIdentity("modify-if-needed", "Conditionally transform data")
+)
+
 // Filter: Can fail
-filter := pipz.NewFilter("validate-if-needed", condition, validator)
+filter := pipz.NewFilter(ValidateIfNeededID, condition, validator)
 
 // Mutate: Cannot fail
-mutate := pipz.Mutate("modify-if-needed", transformer, condition)
+mutate := pipz.Mutate(ModifyIfNeededID, transformer, condition)
 ```
 
 ### Filter vs Conditional Logic
 
 ```go
+// Define identities upfront
+var (
+    MixedLogicID      = pipz.NewIdentity("mixed-logic", "Conditionally apply expensive operation")
+    CleanSeparationID = pipz.NewIdentity("clean-separation", "Separate condition from expensive operation")
+    ExpensiveID       = pipz.NewIdentity("expensive", "Expensive operation")
+)
+
 // Instead of embedding conditions
-processor := pipz.Apply("mixed-logic", func(ctx context.Context, data Data) (Data, error) {
+processor := pipz.Apply(MixedLogicID, func(ctx context.Context, data Data) (Data, error) {
     if shouldProcess(data) {
         return expensiveOperation(ctx, data)
     }
@@ -308,9 +387,10 @@ processor := pipz.Apply("mixed-logic", func(ctx context.Context, data Data) (Dat
 })
 
 // Use Filter for cleaner separation
-filter := pipz.NewFilter("clean-separation",
+filter := pipz.NewFilter(
+    CleanSeparationID,
     shouldProcess,
-    pipz.Apply("expensive", expensiveOperation),
+    pipz.Apply(ExpensiveID, expensiveOperation),
 )
 ```
 
@@ -320,21 +400,28 @@ Test Filter by verifying both condition paths:
 
 ```go
 func TestFilter(t *testing.T) {
-    processor := pipz.Transform("double", func(ctx context.Context, n int) int {
+    // Define identities upfront
+    var (
+        DoubleID   = pipz.NewIdentity("double", "Double the value")
+        EvenOnlyID = pipz.NewIdentity("even-only", "Double only even numbers")
+    )
+
+    processor := pipz.Transform(DoubleID, func(ctx context.Context, n int) int {
         return n * 2
     })
-    
-    filter := pipz.NewFilter("even-only",
+
+    filter := pipz.NewFilter(
+        EvenOnlyID,
         func(ctx context.Context, n int) bool { return n%2 == 0 },
         processor,
     )
-    
+
     // Test condition true
     result, err := filter.Process(context.Background(), 4)
     assert.NoError(t, err)
     assert.Equal(t, 8, result) // 4 * 2
-    
-    // Test condition false  
+
+    // Test condition false
     result, err = filter.Process(context.Background(), 3)
     assert.NoError(t, err)
     assert.Equal(t, 3, result) // unchanged
@@ -345,8 +432,12 @@ func TestFilter(t *testing.T) {
 
 ### ❌ Don't have side effects in conditions
 ```go
+// Define identity upfront
+var BadID = pipz.NewIdentity("bad", "Filter with side effects in condition")
+
 // WRONG - Condition modifies state
-filter := pipz.NewFilter("bad",
+filter := pipz.NewFilter(
+    BadID,
     func(ctx context.Context, data Data) bool {
         counter++ // Side effect!
         log.Println("Checking...") // Side effect!
@@ -358,8 +449,12 @@ filter := pipz.NewFilter("bad",
 
 ### ✅ Keep conditions pure
 ```go
+// Define identity upfront
+var GoodID = pipz.NewIdentity("good", "Filter with pure condition")
+
 // RIGHT - Pure condition function
-filter := pipz.NewFilter("good",
+filter := pipz.NewFilter(
+    GoodID,
     func(ctx context.Context, data Data) bool {
         return data.Important
     },
@@ -369,17 +464,28 @@ filter := pipz.NewFilter("good",
 
 ### ❌ Don't use for simple true/false transforms
 ```go
+// Define identities upfront
+var (
+    OverkillID = pipz.NewIdentity("overkill", "Absolute value for positive numbers only")
+    AbsID      = pipz.NewIdentity("abs", "Calculate absolute value")
+)
+
 // WRONG - Overkill for simple conditional
-filter := pipz.NewFilter("overkill",
+filter := pipz.NewFilter(
+    OverkillID,
     func(ctx context.Context, n int) bool { return n > 0 },
-    pipz.Transform("abs", math.Abs),
+    pipz.Transform(AbsID, math.Abs),
 )
 ```
 
 ### ✅ Use Mutate for simple conditional transforms
 ```go
+// Define identity upfront
+var AbsIfNegativeID = pipz.NewIdentity("abs-if-negative", "Negate negative numbers")
+
 // RIGHT - Simpler with Mutate
-mutate := pipz.Mutate("abs-if-negative",
+mutate := pipz.Mutate(
+    AbsIfNegativeID,
     func(ctx context.Context, n int) int { return -n },
     func(ctx context.Context, n int) bool { return n < 0 },
 )

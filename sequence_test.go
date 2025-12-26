@@ -12,68 +12,59 @@ import (
 	"github.com/zoobzio/capitan"
 )
 
-// Test name constants.
-const (
-	// Sequence names.
-	testSequence Name = "test"
-	mainSequence Name = "main"
-	subSequence  Name = "sub"
-	seq1         Name = "seq1"
-	seq2         Name = "seq2"
+// Test identity variables.
+var (
+	// Sequence identities.
+	testSequence = NewIdentity("test", "")
+	mainSequence = NewIdentity("main", "")
+	subSequence  = NewIdentity("sub", "")
+	seq1         = NewIdentity("seq1", "")
+	seq2         = NewIdentity("seq2", "")
 
-	// Processor names.
-	upper     Name = "upper"
-	trim      Name = "trim"
-	lower     Name = "lower"
-	nonEmpty  Name = "non_empty"
-	double    Name = "double"
-	increment Name = "increment"
-	addTen    Name = "add_ten"
-	square    Name = "square"
-	step1     Name = "step1"
-	step2     Name = "step2"
-	step3     Name = "step3"
-	errorProc Name = "error-proc"
-	slow      Name = "slow"
-	slowProc  Name = "slow-proc"
-	transform Name = "transform"
-	processor Name = "processor"
-	find      Name = "find"
-	search    Name = "search"
-	missing   Name = "missing"
+	// Processor identities.
+	upperID      = NewIdentity("upper", "")
+	trimID       = NewIdentity("trim", "")
+	lowerID      = NewIdentity("lower", "")
+	nonEmpty     = NewIdentity("non_empty", "")
+	doubleID     = NewIdentity("double", "")
+	incrementID  = NewIdentity("increment", "")
+	addTen       = NewIdentity("add_ten", "")
+	squareID     = NewIdentity("square", "")
+	step1        = NewIdentity("step1", "")
+	step2        = NewIdentity("step2", "")
+	step3        = NewIdentity("step3", "")
+	errorProc    = NewIdentity("error-proc", "")
+	slowID       = NewIdentity("slow", "")
+	slowProc    = NewIdentity("slow-proc", "")
+	transformID = NewIdentity("transform", "")
+	processorID = NewIdentity("processor", "")
 
-	// Modification test names.
-	head    Name = "head"
-	tail    Name = "tail"
-	middle  Name = "middle"
-	newProc Name = "new"
-	p0      Name = "p0"
-	p1      Name = "p1"
-	p2      Name = "p2"
-	p3      Name = "p3"
-	p4      Name = "p4"
-	move    Name = "move"
-	target  Name = "target"
-	swap1   Name = "swap1"
-	swap2   Name = "swap2"
+	// Modification test identities.
+	headID = NewIdentity("head", "")
+	tailID = NewIdentity("tail", "")
+	p0     = NewIdentity("p0", "")
+	p1ID   = NewIdentity("p1", "")
+	p2ID   = NewIdentity("p2", "")
+	p3     = NewIdentity("p3", "")
+	p4     = NewIdentity("p4", "")
 
-	// Concurrency test names.
-	concurrent Name = "concurrent"
-	modify     Name = "modify"
+	// Concurrency test identities.
+	concurrentID = NewIdentity("concurrent", "")
+	modifyID     = NewIdentity("modify", "")
 
-	// Edge case names.
-	nilCtx      Name = "nil-ctx"
-	empty       Name = ""
-	veryLong    Name = "very-long"
-	panicProc   Name = "panic"
-	recoverProc Name = "recover"
-	beforePanic Name = "before-panic"
-	custom      Name = "custom-sequence"
+	// Edge case identities.
+	nilCtx       = NewIdentity("nil-ctx", "")
+	emptyID      = NewIdentity("", "")
+	veryLong     = NewIdentity("very-long", "")
+	panicProcID  = NewIdentity("panic", "")
+	recoverProc  = NewIdentity("recover", "")
+	beforePanic  = NewIdentity("before-panic", "")
+	customSeqID  = NewIdentity("custom-sequence", "")
 
-	// Connector names.
-	risky  Name = "risky"
-	backup Name = "backup"
-	safe   Name = "safe"
+	// Connector identities.
+	riskyID  = NewIdentity("risky", "")
+	backupID = NewIdentity("backup", "")
+	safeID   = NewIdentity("safe", "")
 )
 
 func TestNewSequence(t *testing.T) {
@@ -95,7 +86,7 @@ func TestNewSequence(t *testing.T) {
 func TestSequenceRegister(t *testing.T) {
 	t.Run("Register Single Processor", func(t *testing.T) {
 		Sequence := NewSequence[string](testSequence)
-		processor := Transform(upper, func(_ context.Context, s string) string {
+		processor := Transform(upperID, func(_ context.Context, s string) string {
 			return strings.ToUpper(s)
 		})
 
@@ -110,10 +101,10 @@ func TestSequenceRegister(t *testing.T) {
 		Sequence := NewSequence[string](testSequence)
 
 		Sequence.Register(
-			Transform(trim, func(_ context.Context, s string) string {
+			Transform(trimID, func(_ context.Context, s string) string {
 				return strings.TrimSpace(s)
 			}),
-			Transform(lower, func(_ context.Context, s string) string {
+			Transform(lowerID, func(_ context.Context, s string) string {
 				return strings.ToLower(s)
 			}),
 			Effect(nonEmpty, func(_ context.Context, s string) error {
@@ -129,7 +120,7 @@ func TestSequenceRegister(t *testing.T) {
 		}
 
 		names := Sequence.Names()
-		expected := []Name{trim, lower, nonEmpty}
+		expected := []string{trimID.Name(), lowerID.Name(), nonEmpty.Name()}
 		if !reflect.DeepEqual(names, expected) {
 			t.Errorf("expected names %v, got %v", expected, names)
 		}
@@ -139,20 +130,20 @@ func TestSequenceRegister(t *testing.T) {
 		// Create a sub-sequence
 		subSeq := NewSequence[int](subSequence)
 		subSeq.Register(
-			Transform(double, func(_ context.Context, n int) int {
+			Transform(doubleID, func(_ context.Context, n int) int {
 				return n * 2
 			}),
 		)
 
 		// Create a fallback connector
-		fallback := NewFallback(safe,
-			Apply(risky, func(_ context.Context, n int) (int, error) {
+		fallback := NewFallback(safeID,
+			Apply(riskyID, func(_ context.Context, n int) (int, error) {
 				if n == 100 {
 					return 0, errors.New("error at 100")
 				}
 				return n + 1, nil
 			}),
-			Transform(backup, func(_ context.Context, n int) int {
+			Transform(backupID, func(_ context.Context, n int) int {
 				return n + 1000
 			}),
 		)
@@ -160,7 +151,7 @@ func TestSequenceRegister(t *testing.T) {
 		// Register both processors and connectors
 		mainSeq := NewSequence[int](mainSequence)
 		mainSeq.Register(
-			Transform(increment, func(_ context.Context, n int) int {
+			Transform(incrementID, func(_ context.Context, n int) int {
 				return n + 1
 			}),
 			subSeq,   // Connector registered directly
@@ -192,13 +183,13 @@ func TestSequenceRegister(t *testing.T) {
 
 	t.Run("NewSequence With Initial Processors", func(t *testing.T) {
 		// Create processors
-		upperProc := Transform(upper, func(_ context.Context, s string) string {
+		upperProc := Transform(upperID, func(_ context.Context, s string) string {
 			return strings.ToUpper(s)
 		})
-		trimProc := Transform(trim, func(_ context.Context, s string) string {
+		trimProc := Transform(trimID, func(_ context.Context, s string) string {
 			return strings.TrimSpace(s)
 		})
-		validateProc := Effect("validate", func(_ context.Context, s string) error {
+		validateProc := Effect(NewIdentity("validate", ""), func(_ context.Context, s string) error {
 			if s == "" {
 				return errors.New("empty string")
 			}
@@ -206,7 +197,7 @@ func TestSequenceRegister(t *testing.T) {
 		})
 
 		// Single line declaration with initial processors
-		seq := NewSequence("pipeline", upperProc, trimProc, validateProc)
+		seq := NewSequence(NewIdentity("pipeline", ""), upperProc, trimProc, validateProc)
 
 		// Should have 3 processors
 		if seq.Len() != 3 {
@@ -223,7 +214,7 @@ func TestSequenceRegister(t *testing.T) {
 		}
 
 		// Can still add more processors later (admin API)
-		seq.Register(Transform("exclaim", func(_ context.Context, s string) string {
+		seq.Register(Transform(NewIdentity("exclaim", ""), func(_ context.Context, s string) string {
 			return s + "!"
 		}))
 
@@ -243,7 +234,7 @@ func TestSequenceRegister(t *testing.T) {
 
 	t.Run("NewSequence With Empty Initial Processors", func(t *testing.T) {
 		// Can still create empty sequence
-		seq := NewSequence[int]("empty-pipeline")
+		seq := NewSequence[int](NewIdentity("empty-pipeline", ""))
 
 		if seq.Len() != 0 {
 			t.Errorf("expected 0 processors, got %d", seq.Len())
@@ -275,7 +266,7 @@ func TestSequenceProcess(t *testing.T) {
 
 	t.Run("Single Processor Success", func(t *testing.T) {
 		Sequence := NewSequence[int](testSequence)
-		Sequence.Register(Transform(double, func(_ context.Context, n int) int {
+		Sequence.Register(Transform(doubleID, func(_ context.Context, n int) int {
 			return n * 2
 		}))
 
@@ -292,13 +283,13 @@ func TestSequenceProcess(t *testing.T) {
 	t.Run("Multiple Processors Chain", func(t *testing.T) {
 		Sequence := NewSequence[int](testSequence)
 		Sequence.Register(
-			Transform(double, func(_ context.Context, n int) int {
+			Transform(doubleID, func(_ context.Context, n int) int {
 				return n * 2
 			}),
 			Transform(addTen, func(_ context.Context, n int) int {
 				return n + 10
 			}),
-			Transform(square, func(_ context.Context, n int) int {
+			Transform(squareID, func(_ context.Context, n int) int {
 				return n * n
 			}),
 		)
@@ -353,7 +344,7 @@ func TestSequenceProcess(t *testing.T) {
 		cancel() // Cancel immediately
 
 		Sequence := NewSequence[int](testSequence)
-		Sequence.Register(Transform(double, func(_ context.Context, n int) int {
+		Sequence.Register(Transform(doubleID, func(_ context.Context, n int) int {
 			return n * 2
 		}))
 
@@ -372,7 +363,7 @@ func TestSequenceProcess(t *testing.T) {
 		defer cancel()
 
 		Sequence := NewSequence[int](testSequence)
-		Sequence.Register(Apply(slow, func(ctx context.Context, n int) (int, error) {
+		Sequence.Register(Apply(slowID, func(ctx context.Context, n int) (int, error) {
 			select {
 			case <-time.After(100 * time.Millisecond):
 				return n * 2, nil
@@ -399,7 +390,7 @@ func TestSequenceProcess(t *testing.T) {
 	t.Run("Error Contains Input Data", func(t *testing.T) {
 		Sequence := NewSequence[int](testSequence)
 		Sequence.Register(
-			Transform(double, func(_ context.Context, n int) int {
+			Transform(doubleID, func(_ context.Context, n int) int {
 				return n * 2
 			}),
 			Apply(errorProc, func(_ context.Context, _ int) (int, error) {
@@ -424,10 +415,10 @@ func TestSequenceLink(t *testing.T) {
 
 	seq1 := NewSequence[string](seq1)
 	seq1.Register(
-		Transform(p1, func(_ context.Context, s string) string {
+		Transform(p1ID, func(_ context.Context, s string) string {
 			return s + "_p1"
 		}),
-		Transform(p2, func(_ context.Context, s string) string {
+		Transform(p2ID, func(_ context.Context, s string) string {
 			return s + "_p2"
 		}),
 	)
@@ -461,12 +452,12 @@ func TestSequenceIntrospection(t *testing.T) {
 	t.Run("Names", func(t *testing.T) {
 		Sequence := NewSequence[int](testSequence)
 		Sequence.Register(
-			Transform(transform, func(_ context.Context, n int) int { return n }),
-			Effect(processor, func(_ context.Context, _ int) error { return nil }),
+			Transform(transformID, func(_ context.Context, n int) int { return n }),
+			Effect(processorID, func(_ context.Context, _ int) error { return nil }),
 		)
 
 		names := Sequence.Names()
-		expected := []Name{transform, processor}
+		expected := []string{transformID.Name(), processorID.Name()}
 		if !reflect.DeepEqual(names, expected) {
 			t.Errorf("expected names %v, got %v", expected, names)
 		}
@@ -479,7 +470,7 @@ func TestSequenceIntrospection(t *testing.T) {
 			t.Errorf("empty sequence should have length 0, got %d", Sequence.Len())
 		}
 
-		Sequence.Register(Transform(transform, func(_ context.Context, n int) int { return n }))
+		Sequence.Register(Transform(transformID, func(_ context.Context, n int) int { return n }))
 
 		if Sequence.Len() != 1 {
 			t.Errorf("sequence should have length 1, got %d", Sequence.Len())
@@ -489,8 +480,8 @@ func TestSequenceIntrospection(t *testing.T) {
 
 func TestSequenceModification(t *testing.T) {
 
-	makeTransform := func(name Name, suffix string) Chainable[string] {
-		return Transform(name, func(_ context.Context, s string) string {
+	makeTransform := func(identity Identity, suffix string) Chainable[string] {
+		return Transform(identity, func(_ context.Context, s string) string {
 			return s + suffix
 		})
 	}
@@ -498,8 +489,8 @@ func TestSequenceModification(t *testing.T) {
 	t.Run("Clear", func(t *testing.T) {
 		Sequence := NewSequence[string](testSequence)
 		Sequence.Register(
-			makeTransform(p1, "_1"),
-			makeTransform(p2, "_2"),
+			makeTransform(p1ID, "_1"),
+			makeTransform(p2ID, "_2"),
 		)
 
 		Sequence.Clear()
@@ -511,11 +502,11 @@ func TestSequenceModification(t *testing.T) {
 
 	t.Run("Unshift", func(t *testing.T) {
 		Sequence := NewSequence[string](testSequence)
-		Sequence.Register(makeTransform(p1, "_1"))
-		Sequence.Unshift(makeTransform(head, "_head"))
+		Sequence.Register(makeTransform(p1ID, "_1"))
+		Sequence.Unshift(makeTransform(headID, "_head"))
 
 		names := Sequence.Names()
-		expected := []Name{head, p1}
+		expected := []string{headID.Name(), p1ID.Name()}
 		if !reflect.DeepEqual(names, expected) {
 			t.Errorf("expected names %v, got %v", expected, names)
 		}
@@ -523,11 +514,11 @@ func TestSequenceModification(t *testing.T) {
 
 	t.Run("Push", func(t *testing.T) {
 		Sequence := NewSequence[string](testSequence)
-		Sequence.Register(makeTransform(p1, "_1"))
-		Sequence.Push(makeTransform(tail, "_tail"))
+		Sequence.Register(makeTransform(p1ID, "_1"))
+		Sequence.Push(makeTransform(tailID, "_tail"))
 
 		names := Sequence.Names()
-		expected := []Name{p1, tail}
+		expected := []string{p1ID.Name(), tailID.Name()}
 		if !reflect.DeepEqual(names, expected) {
 			t.Errorf("expected names %v, got %v", expected, names)
 		}
@@ -535,16 +526,16 @@ func TestSequenceModification(t *testing.T) {
 
 	t.Run("Shift", func(t *testing.T) {
 		Sequence := NewSequence[string](testSequence)
-		headProc := makeTransform(head, "_head")
-		Sequence.Register(headProc, makeTransform(p1, "_1"))
+		headProc := makeTransform(headID, "_head")
+		Sequence.Register(headProc, makeTransform(p1ID, "_1"))
 
 		popped, err := Sequence.Shift()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if popped.Name() != head {
-			t.Errorf("expected popped processor name %q, got %q", head, popped.Name())
+		if popped.Identity().Name() != headID.Name() {
+			t.Errorf("expected popped processor name %q, got %q", headID.Name(), popped.Identity().Name())
 		}
 
 		if Sequence.Len() != 1 {
@@ -562,16 +553,16 @@ func TestSequenceModification(t *testing.T) {
 
 	t.Run("Pop", func(t *testing.T) {
 		Sequence := NewSequence[string](testSequence)
-		tailProc := makeTransform(tail, "_tail")
-		Sequence.Register(makeTransform(p1, "_1"), tailProc)
+		tailProc := makeTransform(tailID, "_tail")
+		Sequence.Register(makeTransform(p1ID, "_1"), tailProc)
 
 		popped, err := Sequence.Pop()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if popped.Name() != tail {
-			t.Errorf("expected popped processor name %q, got %q", tail, popped.Name())
+		if popped.Identity().Name() != tailID.Name() {
+			t.Errorf("expected popped processor name %q, got %q", tailID.Name(), popped.Identity().Name())
 		}
 
 		if Sequence.Len() != 1 {
@@ -610,9 +601,9 @@ func TestSequenceModification(t *testing.T) {
 func TestSequenceConcurrency(t *testing.T) {
 
 	t.Run("Concurrent Process", func(t *testing.T) {
-		Sequence := NewSequence[int](concurrent)
+		Sequence := NewSequence[int](concurrentID)
 		Sequence.Register(
-			Transform(double, func(_ context.Context, n int) int {
+			Transform(doubleID, func(_ context.Context, n int) int {
 				return n * 2
 			}),
 			Apply(slowProc, func(_ context.Context, n int) (int, error) {
@@ -654,11 +645,11 @@ func TestSequenceConcurrency(t *testing.T) {
 	})
 
 	t.Run("Concurrent Modification", func(_ *testing.T) {
-		Sequence := NewSequence[string](modify)
+		Sequence := NewSequence[string](modifyID)
 
 		// Pre-defined processors for concurrent testing
-		proc1 := Transform(p1, func(_ context.Context, s string) string { return s + "_1" })
-		proc2 := Transform(p2, func(_ context.Context, s string) string { return s + "_2" })
+		proc1 := Transform(p1ID, func(_ context.Context, s string) string { return s + "_1" })
+		proc2 := Transform(p2ID, func(_ context.Context, s string) string { return s + "_2" })
 		proc3 := Transform(p3, func(_ context.Context, s string) string { return s + "_3" })
 		proc4 := Transform(p4, func(_ context.Context, s string) string { return s + "_4" })
 
@@ -713,7 +704,7 @@ func TestSequenceEdgeCases(t *testing.T) {
 
 	t.Run("Process With Nil Context", func(t *testing.T) {
 		Sequence := NewSequence[int](nilCtx)
-		Sequence.Register(Transform(double, func(_ context.Context, n int) int {
+		Sequence.Register(Transform(doubleID, func(_ context.Context, n int) int {
 			return n * 2
 		}))
 
@@ -730,7 +721,7 @@ func TestSequenceEdgeCases(t *testing.T) {
 
 	t.Run("Empty Processor Name", func(t *testing.T) {
 		Sequence := NewSequence[int](testSequence)
-		Sequence.Register(Transform(empty, func(_ context.Context, n int) int {
+		Sequence.Register(Transform(emptyID, func(_ context.Context, n int) int {
 			return n * 2
 		}))
 
@@ -745,7 +736,7 @@ func TestSequenceEdgeCases(t *testing.T) {
 
 		// Use a smaller set of pre-defined processors that we reuse
 		// This tests the same functionality while following const-driven patterns
-		incrementProc := Transform(increment, func(_ context.Context, n int) int {
+		incrementProc := Transform(incrementID, func(_ context.Context, n int) int {
 			return n + 1
 		})
 
@@ -771,7 +762,7 @@ func TestSequenceEdgeCases(t *testing.T) {
 			Transform(beforePanic, func(_ context.Context, s string) string {
 				return s + "_before"
 			}),
-			Apply(panicProc, func(_ context.Context, _ string) (string, error) {
+			Apply(panicProcID, func(_ context.Context, _ string) (string, error) {
 				panic("processor panic!")
 			}),
 			Transform(recoverProc, func(_ context.Context, s string) string {
@@ -799,16 +790,16 @@ func TestSequenceEdgeCases(t *testing.T) {
 		}
 
 		// Check path includes both sequence and processor
-		if len(pipzErr.Path) != 2 || pipzErr.Path[0] != testSequence || pipzErr.Path[1] != panicProc {
-			t.Errorf("expected path [%s, %s], got %v", testSequence, panicProc, pipzErr.Path)
+		if len(pipzErr.Path) != 2 || pipzErr.Path[0].Name() != testSequence.Name() || pipzErr.Path[1].Name() != panicProcID.Name() {
+			t.Errorf("expected path [%s, %s], got %v", testSequence.Name(), panicProcID.Name(), pipzErr.Path)
 		}
 	})
 }
 
 func TestSequenceName(t *testing.T) {
-	seq := NewSequence[int](custom)
-	if seq.Name() != custom {
-		t.Errorf("expected sequence name %q, got %q", custom, seq.Name())
+	seq := NewSequence[int](customSeqID)
+	if seq.Identity().Name() != customSeqID.Name() {
+		t.Errorf("expected sequence name %q, got %q", customSeqID.Name(), seq.Identity().Name())
 	}
 }
 
@@ -816,27 +807,27 @@ func TestSequenceRemove(t *testing.T) {
 	t.Run("remove existing processor", func(t *testing.T) {
 		seq := NewSequence[string](testSequence)
 		seq.Register(
-			Transform(upper, func(_ context.Context, s string) string { return strings.ToUpper(s) }),
-			Transform(trim, func(_ context.Context, s string) string { return strings.TrimSpace(s) }),
-			Transform(lower, func(_ context.Context, s string) string { return strings.ToLower(s) }),
+			Transform(upperID, func(_ context.Context, s string) string { return strings.ToUpper(s) }),
+			Transform(trimID, func(_ context.Context, s string) string { return strings.TrimSpace(s) }),
+			Transform(lowerID, func(_ context.Context, s string) string { return strings.ToLower(s) }),
 		)
 
 		// Verify initial state
 		names := seq.Names()
-		expected := []Name{upper, trim, lower}
+		expected := []string{upperID.Name(), trimID.Name(), lowerID.Name()}
 		if !reflect.DeepEqual(names, expected) {
 			t.Errorf("expected names %v, got %v", expected, names)
 		}
 
 		// Remove middle processor
-		err := seq.Remove(trim)
+		err := seq.Remove(trimID)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 
 		// Verify removal
 		names = seq.Names()
-		expected = []Name{upper, lower}
+		expected = []string{upperID.Name(), lowerID.Name()}
 		if !reflect.DeepEqual(names, expected) {
 			t.Errorf("expected names %v after removal, got %v", expected, names)
 		}
@@ -853,9 +844,10 @@ func TestSequenceRemove(t *testing.T) {
 
 	t.Run("remove non-existent processor", func(t *testing.T) {
 		seq := NewSequence[string](testSequence)
-		seq.Register(Transform(upper, func(_ context.Context, s string) string { return strings.ToUpper(s) }))
+		seq.Register(Transform(upperID, func(_ context.Context, s string) string { return strings.ToUpper(s) }))
 
-		err := seq.Remove("nonexistent")
+		nonExistentID := NewIdentity("nonexistent", "")
+		err := seq.Remove(nonExistentID)
 		if err == nil {
 			t.Error("expected error for non-existent processor")
 		}
@@ -867,7 +859,7 @@ func TestSequenceRemove(t *testing.T) {
 	t.Run("remove from empty sequence", func(t *testing.T) {
 		seq := NewSequence[string](testSequence)
 
-		err := seq.Remove(upper)
+		err := seq.Remove(upperID)
 		if err == nil {
 			t.Error("expected error when removing from empty sequence")
 		}
@@ -878,24 +870,24 @@ func TestSequenceReplace(t *testing.T) {
 	t.Run("replace existing processor", func(t *testing.T) {
 		seq := NewSequence[string](testSequence)
 		seq.Register(
-			Transform(upper, func(_ context.Context, s string) string { return strings.ToUpper(s) }),
-			Transform(trim, func(_ context.Context, s string) string { return strings.TrimSpace(s) }),
-			Transform(lower, func(_ context.Context, s string) string { return strings.ToLower(s) }),
+			Transform(upperID, func(_ context.Context, s string) string { return strings.ToUpper(s) }),
+			Transform(trimID, func(_ context.Context, s string) string { return strings.TrimSpace(s) }),
+			Transform(lowerID, func(_ context.Context, s string) string { return strings.ToLower(s) }),
 		)
 
 		// Replace middle processor
-		newProcessor := Transform(trim, func(_ context.Context, s string) string {
+		newProcessor := Transform(trimID, func(_ context.Context, s string) string {
 			return s + "_replaced"
 		})
 
-		err := seq.Replace(trim, newProcessor)
+		err := seq.Replace(trimID, newProcessor)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 
 		// Verify names unchanged
 		names := seq.Names()
-		expected := []Name{upper, trim, lower}
+		expected := []string{upperID.Name(), trimID.Name(), lowerID.Name()}
 		if !reflect.DeepEqual(names, expected) {
 			t.Errorf("expected names %v, got %v", expected, names)
 		}
@@ -912,10 +904,11 @@ func TestSequenceReplace(t *testing.T) {
 
 	t.Run("replace non-existent processor", func(t *testing.T) {
 		seq := NewSequence[string](testSequence)
-		seq.Register(Transform(upper, func(_ context.Context, s string) string { return strings.ToUpper(s) }))
+		seq.Register(Transform(upperID, func(_ context.Context, s string) string { return strings.ToUpper(s) }))
 
-		newProcessor := Transform("replacement", func(_ context.Context, s string) string { return strings.ToLower(s) })
-		err := seq.Replace("nonexistent", newProcessor)
+		nonExistentID := NewIdentity("nonexistent", "")
+		newProcessor := Transform(NewIdentity("replacement", ""), func(_ context.Context, s string) string { return strings.ToLower(s) })
+		err := seq.Replace(nonExistentID, newProcessor)
 		if err == nil {
 			t.Error("expected error for non-existent processor")
 		}
@@ -929,20 +922,20 @@ func TestSequenceAfter(t *testing.T) {
 	t.Run("insert after existing processor", func(t *testing.T) {
 		seq := NewSequence[string](testSequence)
 		seq.Register(
-			Transform(upper, func(_ context.Context, s string) string { return strings.ToUpper(s) }),
-			Transform(lower, func(_ context.Context, s string) string { return strings.ToLower(s) }),
+			Transform(upperID, func(_ context.Context, s string) string { return strings.ToUpper(s) }),
+			Transform(lowerID, func(_ context.Context, s string) string { return strings.ToLower(s) }),
 		)
 
 		// Insert after first processor
-		trimProcessor := Transform(trim, func(_ context.Context, s string) string { return strings.TrimSpace(s) })
-		err := seq.After(upper, trimProcessor)
+		trimProcessor := Transform(trimID, func(_ context.Context, s string) string { return strings.TrimSpace(s) })
+		err := seq.After(upperID, trimProcessor)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 
 		// Verify order
 		names := seq.Names()
-		expected := []Name{upper, trim, lower}
+		expected := []string{upperID.Name(), trimID.Name(), lowerID.Name()}
 		if !reflect.DeepEqual(names, expected) {
 			t.Errorf("expected names %v, got %v", expected, names)
 		}
@@ -959,16 +952,16 @@ func TestSequenceAfter(t *testing.T) {
 
 	t.Run("insert after last processor", func(t *testing.T) {
 		seq := NewSequence[string](testSequence)
-		seq.Register(Transform(upper, func(_ context.Context, s string) string { return strings.ToUpper(s) }))
+		seq.Register(Transform(upperID, func(_ context.Context, s string) string { return strings.ToUpper(s) }))
 
-		lowerProcessor := Transform(lower, func(_ context.Context, s string) string { return strings.ToLower(s) })
-		err := seq.After(upper, lowerProcessor)
+		lowerProcessor := Transform(lowerID, func(_ context.Context, s string) string { return strings.ToLower(s) })
+		err := seq.After(upperID, lowerProcessor)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 
 		names := seq.Names()
-		expected := []Name{upper, lower}
+		expected := []string{upperID.Name(), lowerID.Name()}
 		if !reflect.DeepEqual(names, expected) {
 			t.Errorf("expected names %v, got %v", expected, names)
 		}
@@ -976,18 +969,18 @@ func TestSequenceAfter(t *testing.T) {
 
 	t.Run("insert multiple processors", func(t *testing.T) {
 		seq := NewSequence[string](testSequence)
-		seq.Register(Transform(upper, func(_ context.Context, s string) string { return strings.ToUpper(s) }))
+		seq.Register(Transform(upperID, func(_ context.Context, s string) string { return strings.ToUpper(s) }))
 
-		proc1 := Transform("proc1", func(_ context.Context, s string) string { return s + "_1" })
-		proc2 := Transform("proc2", func(_ context.Context, s string) string { return s + "_2" })
+		proc1 := Transform(NewIdentity("proc1", ""), func(_ context.Context, s string) string { return s + "_1" })
+		proc2 := Transform(NewIdentity("proc2", ""), func(_ context.Context, s string) string { return s + "_2" })
 
-		err := seq.After(upper, proc1, proc2)
+		err := seq.After(upperID, proc1, proc2)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 
 		names := seq.Names()
-		expected := []Name{upper, "proc1", "proc2"}
+		expected := []string{upperID.Name(), "proc1", "proc2"}
 		if !reflect.DeepEqual(names, expected) {
 			t.Errorf("expected names %v, got %v", expected, names)
 		}
@@ -995,9 +988,10 @@ func TestSequenceAfter(t *testing.T) {
 
 	t.Run("insert after non-existent processor", func(t *testing.T) {
 		seq := NewSequence[string](testSequence)
-		seq.Register(Transform(upper, func(_ context.Context, s string) string { return strings.ToUpper(s) }))
+		seq.Register(Transform(upperID, func(_ context.Context, s string) string { return strings.ToUpper(s) }))
 
-		err := seq.After("nonexistent", Transform(lower, func(_ context.Context, s string) string { return strings.ToLower(s) }))
+		nonExistentID := NewIdentity("nonexistent", "")
+		err := seq.After(nonExistentID, Transform(lowerID, func(_ context.Context, s string) string { return strings.ToLower(s) }))
 		if err == nil {
 			t.Error("expected error for non-existent processor")
 		}
@@ -1011,20 +1005,20 @@ func TestSequenceBefore(t *testing.T) {
 	t.Run("insert before existing processor", func(t *testing.T) {
 		seq := NewSequence[string](testSequence)
 		seq.Register(
-			Transform(upper, func(_ context.Context, s string) string { return strings.ToUpper(s) }),
-			Transform(lower, func(_ context.Context, s string) string { return strings.ToLower(s) }),
+			Transform(upperID, func(_ context.Context, s string) string { return strings.ToUpper(s) }),
+			Transform(lowerID, func(_ context.Context, s string) string { return strings.ToLower(s) }),
 		)
 
 		// Insert before second processor
-		trimProcessor := Transform(trim, func(_ context.Context, s string) string { return strings.TrimSpace(s) })
-		err := seq.Before(lower, trimProcessor)
+		trimProcessor := Transform(trimID, func(_ context.Context, s string) string { return strings.TrimSpace(s) })
+		err := seq.Before(lowerID, trimProcessor)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 
 		// Verify order
 		names := seq.Names()
-		expected := []Name{upper, trim, lower}
+		expected := []string{upperID.Name(), trimID.Name(), lowerID.Name()}
 		if !reflect.DeepEqual(names, expected) {
 			t.Errorf("expected names %v, got %v", expected, names)
 		}
@@ -1041,16 +1035,16 @@ func TestSequenceBefore(t *testing.T) {
 
 	t.Run("insert before first processor", func(t *testing.T) {
 		seq := NewSequence[string](testSequence)
-		seq.Register(Transform(lower, func(_ context.Context, s string) string { return strings.ToLower(s) }))
+		seq.Register(Transform(lowerID, func(_ context.Context, s string) string { return strings.ToLower(s) }))
 
-		upperProcessor := Transform(upper, func(_ context.Context, s string) string { return strings.ToUpper(s) })
-		err := seq.Before(lower, upperProcessor)
+		upperProcessor := Transform(upperID, func(_ context.Context, s string) string { return strings.ToUpper(s) })
+		err := seq.Before(lowerID, upperProcessor)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 
 		names := seq.Names()
-		expected := []Name{upper, lower}
+		expected := []string{upperID.Name(), lowerID.Name()}
 		if !reflect.DeepEqual(names, expected) {
 			t.Errorf("expected names %v, got %v", expected, names)
 		}
@@ -1058,18 +1052,18 @@ func TestSequenceBefore(t *testing.T) {
 
 	t.Run("insert multiple processors", func(t *testing.T) {
 		seq := NewSequence[string](testSequence)
-		seq.Register(Transform(lower, func(_ context.Context, s string) string { return strings.ToLower(s) }))
+		seq.Register(Transform(lowerID, func(_ context.Context, s string) string { return strings.ToLower(s) }))
 
-		proc1 := Transform("proc1", func(_ context.Context, s string) string { return s + "_1" })
-		proc2 := Transform("proc2", func(_ context.Context, s string) string { return s + "_2" })
+		proc1 := Transform(NewIdentity("proc1", ""), func(_ context.Context, s string) string { return s + "_1" })
+		proc2 := Transform(NewIdentity("proc2", ""), func(_ context.Context, s string) string { return s + "_2" })
 
-		err := seq.Before(lower, proc1, proc2)
+		err := seq.Before(lowerID, proc1, proc2)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 
 		names := seq.Names()
-		expected := []Name{"proc1", "proc2", lower}
+		expected := []string{"proc1", "proc2", lowerID.Name()}
 		if !reflect.DeepEqual(names, expected) {
 			t.Errorf("expected names %v, got %v", expected, names)
 		}
@@ -1077,9 +1071,10 @@ func TestSequenceBefore(t *testing.T) {
 
 	t.Run("insert before non-existent processor", func(t *testing.T) {
 		seq := NewSequence[string](testSequence)
-		seq.Register(Transform(upper, func(_ context.Context, s string) string { return strings.ToUpper(s) }))
+		seq.Register(Transform(upperID, func(_ context.Context, s string) string { return strings.ToUpper(s) }))
 
-		err := seq.Before("nonexistent", Transform(lower, func(_ context.Context, s string) string { return strings.ToLower(s) }))
+		nonExistentID := NewIdentity("nonexistent", "")
+		err := seq.Before(nonExistentID, Transform(lowerID, func(_ context.Context, s string) string { return strings.ToLower(s) }))
 		if err == nil {
 			t.Error("expected error for non-existent processor")
 		}
@@ -1093,8 +1088,8 @@ func TestSequenceNameBasedOperationsConcurrency(t *testing.T) {
 	t.Run("concurrent modifications", func(t *testing.T) {
 		seq := NewSequence[int](testSequence)
 		seq.Register(
-			Transform(increment, func(_ context.Context, n int) int { return n + 1 }),
-			Transform(double, func(_ context.Context, n int) int { return n * 2 }),
+			Transform(incrementID, func(_ context.Context, n int) int { return n + 1 }),
+			Transform(doubleID, func(_ context.Context, n int) int { return n * 2 }),
 			Transform(addTen, func(_ context.Context, n int) int { return n + 10 }),
 		)
 
@@ -1104,7 +1099,7 @@ func TestSequenceNameBasedOperationsConcurrency(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			_ = seq.Remove(double) //nolint:errcheck // Testing race conditions
+			_ = seq.Remove(doubleID) //nolint:errcheck // Testing race conditions
 		}()
 		go func() {
 			defer wg.Done()
@@ -1115,21 +1110,21 @@ func TestSequenceNameBasedOperationsConcurrency(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			newProc := Transform(square, func(_ context.Context, n int) int { return n * n })
-			_ = seq.After(increment, newProc) //nolint:errcheck // Testing race conditions
+			newProc := Transform(squareID, func(_ context.Context, n int) int { return n * n })
+			_ = seq.After(incrementID, newProc) //nolint:errcheck // Testing race conditions
 		}()
 		go func() {
 			defer wg.Done()
-			newProc := Transform("multiply_5", func(_ context.Context, n int) int { return n * 5 })
-			_ = seq.Before(increment, newProc) //nolint:errcheck // Testing race conditions
+			newProc := Transform(NewIdentity("multiply_5", ""), func(_ context.Context, n int) int { return n * 5 })
+			_ = seq.Before(incrementID, newProc) //nolint:errcheck // Testing race conditions
 		}()
 
 		// Concurrent replacements
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			newProc := Transform(increment, func(_ context.Context, n int) int { return n + 100 })
-			_ = seq.Replace(increment, newProc) //nolint:errcheck // Testing race conditions
+			newProc := Transform(incrementID, func(_ context.Context, n int) int { return n + 100 })
+			_ = seq.Replace(incrementID, newProc) //nolint:errcheck // Testing race conditions
 		}()
 
 		wg.Wait()
@@ -1143,10 +1138,10 @@ func TestSequenceNameBasedOperationsConcurrency(t *testing.T) {
 
 	t.Run("Sequence panic recovery", func(t *testing.T) {
 		// Create a sequence where one processor panics
-		seq := NewSequence("panic_sequence",
-			Transform("step1", func(_ context.Context, s string) string { return s + "_step1" }),
-			Transform("panic_step", func(_ context.Context, _ string) string { panic("sequence panic") }),
-			Transform("step3", func(_ context.Context, s string) string { return s + "_step3" }), // Never reached
+		seq := NewSequence(NewIdentity("panic_sequence", ""),
+			Transform(NewIdentity("step1", ""), func(_ context.Context, s string) string { return s + "_step1" }),
+			Transform(NewIdentity("panic_step", ""), func(_ context.Context, _ string) string { panic("sequence panic") }),
+			Transform(NewIdentity("step3", ""), func(_ context.Context, s string) string { return s + "_step3" }), // Never reached
 		)
 
 		result, err := seq.Process(context.Background(), "start")
@@ -1161,11 +1156,11 @@ func TestSequenceNameBasedOperationsConcurrency(t *testing.T) {
 		}
 
 		// Path should include both sequence name and processor name
-		expectedPath := []Name{"panic_sequence", "panic_step"}
+		expectedPath := []string{"panic_sequence", "panic_step"}
 		if len(pipzErr.Path) != 2 {
 			t.Errorf("expected path length 2, got %d: %v", len(pipzErr.Path), pipzErr.Path)
 		}
-		if pipzErr.Path[0] != expectedPath[0] || pipzErr.Path[1] != expectedPath[1] {
+		if pipzErr.Path[0].Name() != expectedPath[0] || pipzErr.Path[1].Name() != expectedPath[1] {
 			t.Errorf("expected path %v, got %v", expectedPath, pipzErr.Path)
 		}
 
@@ -1190,9 +1185,9 @@ func TestSequenceSignals(t *testing.T) {
 		})
 		defer listener.Close()
 
-		seq := NewSequence[int]("signal-test-seq",
-			Transform("double", func(_ context.Context, n int) int { return n * 2 }),
-			Transform("add-one", func(_ context.Context, n int) int { return n + 1 }),
+		seq := NewSequence[int](NewIdentity("signal-test-seq", ""),
+			Transform(NewIdentity("double", ""), func(_ context.Context, n int) int { return n * 2 }),
+			Transform(NewIdentity("add-one", ""), func(_ context.Context, n int) int { return n + 1 }),
 		)
 
 		result, err := seq.Process(context.Background(), 5)
@@ -1227,8 +1222,8 @@ func TestSequenceSignals(t *testing.T) {
 		})
 		defer listener.Close()
 
-		seq := NewSequence[int]("signal-fail-seq",
-			Apply("fail", func(_ context.Context, _ int) (int, error) {
+		seq := NewSequence[int](NewIdentity("signal-fail-seq", ""),
+			Apply(NewIdentity("fail", ""), func(_ context.Context, _ int) (int, error) {
 				return 0, errors.New("intentional failure")
 			}),
 		)
@@ -1251,21 +1246,28 @@ func TestSequenceSignals(t *testing.T) {
 
 // trackingProcessor tracks Close() calls for testing.
 type trackingProcessor[T any] struct {
-	name       Name
+	identity   Identity
 	closeCalls int32
 	closeErr   error
 }
 
-func newTrackingProcessor[T any](name Name) *trackingProcessor[T] {
-	return &trackingProcessor[T]{name: name}
+func newTrackingProcessor[T any](identity Identity) *trackingProcessor[T] {
+	return &trackingProcessor[T]{identity: identity}
 }
 
 func (*trackingProcessor[T]) Process(_ context.Context, data T) (T, error) {
 	return data, nil
 }
 
-func (t *trackingProcessor[T]) Name() Name {
-	return t.name
+func (t *trackingProcessor[T]) Identity() Identity {
+	return t.identity
+}
+
+func (t *trackingProcessor[T]) Schema() Node {
+	return Node{
+		Identity: t.identity,
+		Type:     "tracking_processor",
+	}
 }
 
 func (t *trackingProcessor[T]) Close() error {
@@ -1284,11 +1286,11 @@ func (t *trackingProcessor[T]) WithCloseError(err error) *trackingProcessor[T] {
 
 func TestSequenceClose(t *testing.T) {
 	t.Run("Closes All Children", func(t *testing.T) {
-		p1 := newTrackingProcessor[int]("p1")
-		p2 := newTrackingProcessor[int]("p2")
-		p3 := newTrackingProcessor[int]("p3")
+		p1 := newTrackingProcessor[int](NewIdentity("p1", ""))
+		p2 := newTrackingProcessor[int](NewIdentity("p2", ""))
+		p3 := newTrackingProcessor[int](NewIdentity("p3", ""))
 
-		seq := NewSequence("test", p1, p2, p3)
+		seq := NewSequence(NewIdentity("test", ""), p1, p2, p3)
 		err := seq.Close()
 
 		if err != nil {
@@ -1306,11 +1308,11 @@ func TestSequenceClose(t *testing.T) {
 	})
 
 	t.Run("Aggregates Errors", func(t *testing.T) {
-		p1 := newTrackingProcessor[int]("p1").WithCloseError(errors.New("p1 error"))
-		p2 := newTrackingProcessor[int]("p2")
-		p3 := newTrackingProcessor[int]("p3").WithCloseError(errors.New("p3 error"))
+		p1 := newTrackingProcessor[int](NewIdentity("p1", "")).WithCloseError(errors.New("p1 error"))
+		p2 := newTrackingProcessor[int](NewIdentity("p2", ""))
+		p3 := newTrackingProcessor[int](NewIdentity("p3", "")).WithCloseError(errors.New("p3 error"))
 
-		seq := NewSequence("test", p1, p2, p3)
+		seq := NewSequence(NewIdentity("test", ""), p1, p2, p3)
 		err := seq.Close()
 
 		if err == nil {
@@ -1323,7 +1325,7 @@ func TestSequenceClose(t *testing.T) {
 	})
 
 	t.Run("Empty Sequence", func(t *testing.T) {
-		seq := NewSequence[int]("empty")
+		seq := NewSequence[int](NewIdentity("empty", ""))
 		err := seq.Close()
 		if err != nil {
 			t.Errorf("expected no error, got %v", err)
@@ -1331,8 +1333,8 @@ func TestSequenceClose(t *testing.T) {
 	})
 
 	t.Run("Idempotency", func(t *testing.T) {
-		p := newTrackingProcessor[int]("p")
-		seq := NewSequence("test", p)
+		p := newTrackingProcessor[int](NewIdentity("p", ""))
+		seq := NewSequence(NewIdentity("test", ""), p)
 
 		// Call Close multiple times
 		err1 := seq.Close()
@@ -1348,8 +1350,8 @@ func TestSequenceClose(t *testing.T) {
 	})
 
 	t.Run("Idempotency With Error", func(t *testing.T) {
-		p := newTrackingProcessor[int]("p").WithCloseError(errors.New("close error"))
-		seq := NewSequence("test", p)
+		p := newTrackingProcessor[int](NewIdentity("p", "")).WithCloseError(errors.New("close error"))
+		seq := NewSequence(NewIdentity("test", ""), p)
 
 		err1 := seq.Close()
 		err2 := seq.Close()
@@ -1368,12 +1370,12 @@ func TestSequenceClose(t *testing.T) {
 
 	t.Run("Nested Close", func(t *testing.T) {
 		// Test that Close propagates through nested structures
-		inner1 := newTrackingProcessor[int]("inner1")
-		inner2 := newTrackingProcessor[int]("inner2")
-		innerSeq := NewSequence("inner", inner1, inner2)
+		inner1 := newTrackingProcessor[int](NewIdentity("inner1", ""))
+		inner2 := newTrackingProcessor[int](NewIdentity("inner2", ""))
+		innerSeq := NewSequence(NewIdentity("inner", ""), inner1, inner2)
 
-		outer1 := newTrackingProcessor[int]("outer1")
-		outerSeq := NewSequence[int]("outer", outer1, innerSeq)
+		outer1 := newTrackingProcessor[int](NewIdentity("outer1", ""))
+		outerSeq := NewSequence[int](NewIdentity("outer", ""), outer1, innerSeq)
 
 		err := outerSeq.Close()
 

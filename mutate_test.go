@@ -10,7 +10,7 @@ import (
 func TestMutate(t *testing.T) {
 	t.Run("Mutate When Condition True", func(t *testing.T) {
 		// Uppercase only long strings
-		upperLong := Mutate("upper_long",
+		upperLong := Mutate(NewIdentity("upper_long", ""),
 			func(_ context.Context, s string) string {
 				return strings.ToUpper(s)
 			},
@@ -31,7 +31,7 @@ func TestMutate(t *testing.T) {
 
 	t.Run("Mutate When Condition False", func(t *testing.T) {
 		// Uppercase only long strings
-		upperLong := Mutate("upper_long",
+		upperLong := Mutate(NewIdentity("upper_long", ""),
 			func(_ context.Context, s string) string {
 				return strings.ToUpper(s)
 			},
@@ -52,7 +52,7 @@ func TestMutate(t *testing.T) {
 
 	t.Run("Mutate Never Returns Error", func(t *testing.T) {
 		// Even if we do something that might panic, no error
-		divider := Mutate("divide_even",
+		divider := Mutate(NewIdentity("divide_even", ""),
 			func(_ context.Context, n int) int {
 				return 100 / n // Could panic if n is 0
 			},
@@ -89,7 +89,7 @@ func TestMutate(t *testing.T) {
 		}
 
 		// Apply discount for premium users over 65
-		applyDiscount := Mutate("senior_discount",
+		applyDiscount := Mutate(NewIdentity("senior_discount", ""),
 			func(_ context.Context, u User) User {
 				u.Discount = 0.2 // 20% discount
 				return u
@@ -136,7 +136,7 @@ func TestMutate(t *testing.T) {
 
 	t.Run("Mutate panic recovery in condition", func(t *testing.T) {
 		// Panic in condition function
-		panicCondition := Mutate("panic_condition",
+		panicCondition := Mutate(NewIdentity("panic_condition", ""),
 			func(_ context.Context, s string) string { return s + "_transformed" },
 			func(_ context.Context, _ string) bool { panic("condition panic") },
 		)
@@ -169,7 +169,7 @@ func TestMutate(t *testing.T) {
 
 	t.Run("Mutate panic recovery in transformer", func(t *testing.T) {
 		// Panic in transformer function
-		panicTransformer := Mutate("panic_transformer",
+		panicTransformer := Mutate(NewIdentity("panic_transformer", ""),
 			func(_ context.Context, _ string) string { panic("transformer panic") },
 			func(_ context.Context, _ string) bool { return true },
 		)

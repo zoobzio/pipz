@@ -24,8 +24,8 @@ import (
 //
 // Example:
 //
-//	const AddCustomerName = pipz.Name("add_customer_name")
-//	addCustomerName := pipz.Enrich(AddCustomerName, func(ctx context.Context, order Order) (Order, error) {
+//	var AddCustomerNameID = pipz.NewIdentity("add-customer-name", "Enriches order with customer name from CRM")
+//	addCustomerName := pipz.Enrich(AddCustomerNameID, func(ctx context.Context, order Order) (Order, error) {
 //	    customer, err := customerService.Get(ctx, order.CustomerID)
 //	    if err != nil {
 //	        // Log but don't fail - order processing continues without name
@@ -35,11 +35,11 @@ import (
 //	    order.CustomerName = customer.Name
 //	    return order, nil
 //	})
-func Enrich[T any](name Name, fn func(context.Context, T) (T, error)) Processor[T] {
+func Enrich[T any](identity Identity, fn func(context.Context, T) (T, error)) Processor[T] {
 	return Processor[T]{
-		name: name,
+		identity: identity,
 		fn: func(ctx context.Context, value T) (result T, err error) {
-			defer recoverFromPanic(&result, &err, name, value)
+			defer recoverFromPanic(&result, &err, identity, value)
 			enriched, enrichErr := fn(ctx, value)
 			if enrichErr != nil {
 				// Continue with original data - enrichment is best-effort

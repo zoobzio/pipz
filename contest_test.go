@@ -17,23 +17,23 @@ func TestContest(t *testing.T) {
 			return d.Value > 150
 		}
 
-		fast := Apply("fast", func(_ context.Context, d TestData) (TestData, error) {
+		fast := Apply(NewIdentity("fast", ""), func(_ context.Context, d TestData) (TestData, error) {
 			time.Sleep(10 * time.Millisecond)
 			d.Value = 100 // Doesn't meet condition
 			return d, nil
 		})
-		medium := Apply("medium", func(_ context.Context, d TestData) (TestData, error) {
+		medium := Apply(NewIdentity("medium", ""), func(_ context.Context, d TestData) (TestData, error) {
 			time.Sleep(30 * time.Millisecond)
 			d.Value = 200 // Meets condition
 			return d, nil
 		})
-		slow := Apply("slow", func(_ context.Context, d TestData) (TestData, error) {
+		slow := Apply(NewIdentity("slow", ""), func(_ context.Context, d TestData) (TestData, error) {
 			time.Sleep(50 * time.Millisecond)
 			d.Value = 300 // Also meets condition but slower
 			return d, nil
 		})
 
-		contest := NewContest("test-contest", condition, fast, medium, slow)
+		contest := NewContest(NewIdentity("test-contest", ""), condition, fast, medium, slow)
 		data := TestData{Value: 1}
 
 		result, err := contest.Process(context.Background(), data)
@@ -51,20 +51,20 @@ func TestContest(t *testing.T) {
 			return d.Value > 500
 		}
 
-		p1 := Apply("p1", func(_ context.Context, d TestData) (TestData, error) {
+		p1 := Apply(NewIdentity("p1", ""), func(_ context.Context, d TestData) (TestData, error) {
 			d.Value = 100
 			return d, nil
 		})
-		p2 := Apply("p2", func(_ context.Context, d TestData) (TestData, error) {
+		p2 := Apply(NewIdentity("p2", ""), func(_ context.Context, d TestData) (TestData, error) {
 			d.Value = 200
 			return d, nil
 		})
-		p3 := Apply("p3", func(_ context.Context, d TestData) (TestData, error) {
+		p3 := Apply(NewIdentity("p3", ""), func(_ context.Context, d TestData) (TestData, error) {
 			d.Value = 300
 			return d, nil
 		})
 
-		contest := NewContest("test-contest", condition, p1, p2, p3)
+		contest := NewContest(NewIdentity("test-contest", ""), condition, p1, p2, p3)
 		data := TestData{Value: 1}
 
 		result, err := contest.Process(context.Background(), data)
@@ -85,17 +85,17 @@ func TestContest(t *testing.T) {
 			return d.Value > 100
 		}
 
-		p1 := Apply("p1", func(_ context.Context, d TestData) (TestData, error) {
+		p1 := Apply(NewIdentity("p1", ""), func(_ context.Context, d TestData) (TestData, error) {
 			return d, errors.New("error 1")
 		})
-		p2 := Apply("p2", func(_ context.Context, d TestData) (TestData, error) {
+		p2 := Apply(NewIdentity("p2", ""), func(_ context.Context, d TestData) (TestData, error) {
 			return d, errors.New("error 2")
 		})
-		p3 := Apply("p3", func(_ context.Context, d TestData) (TestData, error) {
+		p3 := Apply(NewIdentity("p3", ""), func(_ context.Context, d TestData) (TestData, error) {
 			return d, errors.New("error 3")
 		})
 
-		contest := NewContest("test-contest", condition, p1, p2, p3)
+		contest := NewContest(NewIdentity("test-contest", ""), condition, p1, p2, p3)
 		data := TestData{Value: 1}
 
 		_, err := contest.Process(context.Background(), data)
@@ -113,22 +113,22 @@ func TestContest(t *testing.T) {
 			return d.Value%3 == 0
 		}
 
-		failing := Apply("failing", func(_ context.Context, d TestData) (TestData, error) {
+		failing := Apply(NewIdentity("failing", ""), func(_ context.Context, d TestData) (TestData, error) {
 			time.Sleep(5 * time.Millisecond)
 			return d, errors.New("service unavailable")
 		})
-		wrongValue := Apply("wrong-value", func(_ context.Context, d TestData) (TestData, error) {
+		wrongValue := Apply(NewIdentity("wrong-value", ""), func(_ context.Context, d TestData) (TestData, error) {
 			time.Sleep(10 * time.Millisecond)
 			d.Value = 100 // Not divisible by 3
 			return d, nil
 		})
-		correct := Apply("correct", func(_ context.Context, d TestData) (TestData, error) {
+		correct := Apply(NewIdentity("correct", ""), func(_ context.Context, d TestData) (TestData, error) {
 			time.Sleep(20 * time.Millisecond)
 			d.Value = 99 // Divisible by 3
 			return d, nil
 		})
 
-		contest := NewContest("test-contest", condition, failing, wrongValue, correct)
+		contest := NewContest(NewIdentity("test-contest", ""), condition, failing, wrongValue, correct)
 		data := TestData{Value: 1}
 
 		result, err := contest.Process(context.Background(), data)
@@ -145,7 +145,7 @@ func TestContest(t *testing.T) {
 			return d.Value > 100
 		}
 
-		slow := Apply("slow", func(ctx context.Context, d TestData) (TestData, error) {
+		slow := Apply(NewIdentity("slow", ""), func(ctx context.Context, d TestData) (TestData, error) {
 			select {
 			case <-time.After(100 * time.Millisecond):
 				d.Value = 200
@@ -155,7 +155,7 @@ func TestContest(t *testing.T) {
 			}
 		})
 
-		contest := NewContest("test-contest", condition, slow)
+		contest := NewContest(NewIdentity("test-contest", ""), condition, slow)
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
 
@@ -176,7 +176,7 @@ func TestContest(t *testing.T) {
 			return true
 		}
 
-		contest := NewContest[TestData]("empty", condition)
+		contest := NewContest[TestData](NewIdentity("empty", ""), condition)
 		data := TestData{Value: 42}
 
 		_, err := contest.Process(context.Background(), data)
@@ -189,8 +189,8 @@ func TestContest(t *testing.T) {
 	})
 
 	t.Run("Nil Condition", func(t *testing.T) {
-		p1 := Transform("p1", func(_ context.Context, d TestData) TestData { return d })
-		contest := NewContest[TestData]("no-condition", nil, p1)
+		p1 := Transform(NewIdentity("p1", ""), func(_ context.Context, d TestData) TestData { return d })
+		contest := NewContest[TestData](NewIdentity("no-condition", ""), nil, p1)
 		data := TestData{Value: 42}
 
 		_, err := contest.Process(context.Background(), data)
@@ -212,13 +212,13 @@ func TestContest(t *testing.T) {
 		slowStartedCh := make(chan bool, 1)
 		slowCanceledCh := make(chan bool, 1)
 
-		fast := Apply("fast", func(_ context.Context, d TestData) (TestData, error) {
+		fast := Apply(NewIdentity("fast", ""), func(_ context.Context, d TestData) (TestData, error) {
 			// Small delay to ensure slow processor starts
 			time.Sleep(10 * time.Millisecond)
 			d.Value = 100 // Meets condition
 			return d, nil
 		})
-		slow := Apply("slow", func(ctx context.Context, d TestData) (TestData, error) {
+		slow := Apply(NewIdentity("slow", ""), func(ctx context.Context, d TestData) (TestData, error) {
 			slowStartedCh <- true
 			select {
 			case <-time.After(200 * time.Millisecond):
@@ -230,7 +230,7 @@ func TestContest(t *testing.T) {
 			}
 		})
 
-		contest := NewContest("test-contest", condition, fast, slow)
+		contest := NewContest(NewIdentity("test-contest", ""), condition, fast, slow)
 		data := TestData{Value: 1}
 
 		result, err := contest.Process(context.Background(), data)
@@ -258,11 +258,11 @@ func TestContest(t *testing.T) {
 			return d.Value > 50
 		}
 
-		p1 := Transform("p1", func(_ context.Context, d TestData) TestData { return d })
-		p2 := Transform("p2", func(_ context.Context, d TestData) TestData { return d })
-		p3 := Transform("p3", func(_ context.Context, d TestData) TestData { return d })
+		p1 := Transform(NewIdentity("p1", ""), func(_ context.Context, d TestData) TestData { return d })
+		p2 := Transform(NewIdentity("p2", ""), func(_ context.Context, d TestData) TestData { return d })
+		p3 := Transform(NewIdentity("p3", ""), func(_ context.Context, d TestData) TestData { return d })
 
-		contest := NewContest("test", condition, p1, p2)
+		contest := NewContest(NewIdentity("test", ""), condition, p1, p2)
 
 		if contest.Len() != 2 {
 			t.Errorf("expected 2 processors, got %d", contest.Len())
@@ -298,12 +298,12 @@ func TestContest(t *testing.T) {
 			return d.Value > 100
 		}
 
-		p1 := Apply("p1", func(_ context.Context, d TestData) (TestData, error) {
+		p1 := Apply(NewIdentity("p1", ""), func(_ context.Context, d TestData) (TestData, error) {
 			d.Value = 50 // Doesn't meet initial condition
 			return d, nil
 		})
 
-		contest := NewContest("test", initialCondition, p1)
+		contest := NewContest(NewIdentity("test", ""), initialCondition, p1)
 		data := TestData{Value: 1}
 
 		// First run - should fail with initial condition
@@ -330,16 +330,16 @@ func TestContest(t *testing.T) {
 
 	t.Run("Name Method", func(t *testing.T) {
 		condition := func(_ context.Context, _ TestData) bool { return true }
-		contest := NewContest[TestData]("my-contest", condition)
-		if contest.Name() != "my-contest" {
-			t.Errorf("expected 'my-contest', got %q", contest.Name())
+		contest := NewContest[TestData](NewIdentity("my-contest", ""), condition)
+		if contest.Identity().Name() != "my-contest" {
+			t.Errorf("expected 'my-contest', got %q", contest.Identity().Name())
 		}
 	})
 
 	t.Run("Remove Out of Bounds", func(t *testing.T) {
 		condition := func(_ context.Context, _ TestData) bool { return true }
-		p1 := Transform("p1", func(_ context.Context, d TestData) TestData { return d })
-		contest := NewContest("test", condition, p1)
+		p1 := Transform(NewIdentity("p1", ""), func(_ context.Context, d TestData) TestData { return d })
+		contest := NewContest(NewIdentity("test", ""), condition, p1)
 
 		// Test negative index
 		err := contest.Remove(-1)
@@ -375,18 +375,18 @@ func TestContest(t *testing.T) {
 			return d.Value > 100
 		}
 
-		slow := Apply("slow", func(_ context.Context, d TestData) (TestData, error) {
+		slow := Apply(NewIdentity("slow", ""), func(_ context.Context, d TestData) (TestData, error) {
 			time.Sleep(30 * time.Millisecond)
 			d.Value = 75 // Only acceptable if running out of time
 			return d, nil
 		})
-		slower := Apply("slower", func(_ context.Context, d TestData) (TestData, error) {
+		slower := Apply(NewIdentity("slower", ""), func(_ context.Context, d TestData) (TestData, error) {
 			time.Sleep(60 * time.Millisecond)
 			d.Value = 150 // Always acceptable
 			return d, nil
 		})
 
-		contest := NewContest("deadline-aware", condition, slow, slower)
+		contest := NewContest(NewIdentity("deadline-aware", ""), condition, slow, slower)
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Millisecond)
 		defer cancel()
 
@@ -405,12 +405,12 @@ func TestContest(t *testing.T) {
 		panicCondition := func(_ context.Context, _ TestData) bool {
 			panic("contest condition panic")
 		}
-		processor := Apply("processor", func(_ context.Context, d TestData) (TestData, error) {
+		processor := Apply(NewIdentity("processor", ""), func(_ context.Context, d TestData) (TestData, error) {
 			d.Value = 100
 			return d, nil
 		})
 
-		contest := NewContest("panic_contest", panicCondition, processor)
+		contest := NewContest(NewIdentity("panic_contest", ""), panicCondition, processor)
 		data := TestData{Value: 42}
 
 		result, err := contest.Process(context.Background(), data)
@@ -425,7 +425,7 @@ func TestContest(t *testing.T) {
 			t.Fatal("expected pipz.Error")
 		}
 
-		if pipzErr.Path[0] != "panic_contest" {
+		if pipzErr.Path[0].Name() != "panic_contest" {
 			t.Errorf("expected path to start with 'panic_contest', got %v", pipzErr.Path)
 		}
 
@@ -438,15 +438,15 @@ func TestContest(t *testing.T) {
 		condition := func(_ context.Context, d TestData) bool {
 			return d.Value > 50
 		}
-		panicProcessor := Apply("panic_processor", func(_ context.Context, _ TestData) (TestData, error) {
+		panicProcessor := Apply(NewIdentity("panic_processor", ""), func(_ context.Context, _ TestData) (TestData, error) {
 			panic("contest processor panic")
 		})
-		normalProcessor := Apply("normal_processor", func(_ context.Context, d TestData) (TestData, error) {
+		normalProcessor := Apply(NewIdentity("normal_processor", ""), func(_ context.Context, d TestData) (TestData, error) {
 			d.Value = 100
 			return d, nil
 		})
 
-		contest := NewContest("panic_contest", condition, panicProcessor, normalProcessor)
+		contest := NewContest(NewIdentity("panic_contest", ""), condition, panicProcessor, normalProcessor)
 		data := TestData{Value: 42}
 
 		result, err := contest.Process(context.Background(), data)
@@ -464,10 +464,10 @@ func TestContest(t *testing.T) {
 
 func TestContestClose(t *testing.T) {
 	t.Run("Closes All Children", func(t *testing.T) {
-		p1 := newTrackingProcessor[TestData]("p1")
-		p2 := newTrackingProcessor[TestData]("p2")
+		p1 := newTrackingProcessor[TestData](NewIdentity("p1", ""))
+		p2 := newTrackingProcessor[TestData](NewIdentity("p2", ""))
 
-		c := NewContest("test", func(_ context.Context, _ TestData) bool { return true }, p1, p2)
+		c := NewContest(NewIdentity("test", ""), func(_ context.Context, _ TestData) bool { return true }, p1, p2)
 		err := c.Close()
 
 		if err != nil {
@@ -479,10 +479,10 @@ func TestContestClose(t *testing.T) {
 	})
 
 	t.Run("Aggregates Errors", func(t *testing.T) {
-		p1 := newTrackingProcessor[TestData]("p1").WithCloseError(errors.New("p1 error"))
-		p2 := newTrackingProcessor[TestData]("p2").WithCloseError(errors.New("p2 error"))
+		p1 := newTrackingProcessor[TestData](NewIdentity("p1", "")).WithCloseError(errors.New("p1 error"))
+		p2 := newTrackingProcessor[TestData](NewIdentity("p2", "")).WithCloseError(errors.New("p2 error"))
 
-		c := NewContest("test", func(_ context.Context, _ TestData) bool { return true }, p1, p2)
+		c := NewContest(NewIdentity("test", ""), func(_ context.Context, _ TestData) bool { return true }, p1, p2)
 		err := c.Close()
 
 		if err == nil {
@@ -494,8 +494,8 @@ func TestContestClose(t *testing.T) {
 	})
 
 	t.Run("Idempotency", func(t *testing.T) {
-		p := newTrackingProcessor[TestData]("p")
-		c := NewContest("test", func(_ context.Context, _ TestData) bool { return true }, p)
+		p := newTrackingProcessor[TestData](NewIdentity("p", ""))
+		c := NewContest(NewIdentity("test", ""), func(_ context.Context, _ TestData) bool { return true }, p)
 
 		_ = c.Close()
 		_ = c.Close()
@@ -526,16 +526,16 @@ func TestContestSignals(t *testing.T) {
 			return d.Value > 50
 		}
 
-		winner := Transform("the-winner", func(_ context.Context, d TestData) TestData {
+		winner := Transform(NewIdentity("the-winner", ""), func(_ context.Context, d TestData) TestData {
 			d.Value = 100
 			return d
 		})
-		loser := Transform("the-loser", func(_ context.Context, d TestData) TestData {
+		loser := Transform(NewIdentity("the-loser", ""), func(_ context.Context, d TestData) TestData {
 			d.Value = 10 // Doesn't meet condition
 			return d
 		})
 
-		contest := NewContest("signal-test-contest", condition, winner, loser)
+		contest := NewContest(NewIdentity("signal-test-contest", ""), condition, winner, loser)
 		data := TestData{Value: 5}
 
 		_, err := contest.Process(context.Background(), data)
@@ -575,16 +575,16 @@ func TestContestSignals(t *testing.T) {
 			return d.Value > 1000
 		}
 
-		p1 := Transform("p1", func(_ context.Context, d TestData) TestData {
+		p1 := Transform(NewIdentity("p1", ""), func(_ context.Context, d TestData) TestData {
 			d.Value = 10
 			return d
 		})
-		p2 := Transform("p2", func(_ context.Context, d TestData) TestData {
+		p2 := Transform(NewIdentity("p2", ""), func(_ context.Context, d TestData) TestData {
 			d.Value = 20
 			return d
 		})
 
-		contest := NewContest("signal-no-winner", condition, p1, p2)
+		contest := NewContest(NewIdentity("signal-no-winner", ""), condition, p1, p2)
 		data := TestData{Value: 5}
 
 		_, err := contest.Process(context.Background(), data)
@@ -599,6 +599,31 @@ func TestContestSignals(t *testing.T) {
 
 		if signalReceived {
 			t.Error("signal should not be emitted when no winner")
+		}
+	})
+
+	t.Run("Schema", func(t *testing.T) {
+		proc1 := Transform(NewIdentity("proc1", ""), func(_ context.Context, d TestData) TestData { return d })
+		proc2 := Transform(NewIdentity("proc2", ""), func(_ context.Context, d TestData) TestData { return d })
+		condition := func(_ context.Context, _ TestData) bool { return true }
+
+		contest := NewContest(NewIdentity("test-contest", "Contest connector"), condition, proc1, proc2)
+
+		schema := contest.Schema()
+
+		if schema.Identity.Name() != "test-contest" {
+			t.Errorf("Schema Identity.Name() = %v, want %v", schema.Identity.Name(), "test-contest")
+		}
+		if schema.Type != "contest" {
+			t.Errorf("Schema Type = %v, want %v", schema.Type, "contest")
+		}
+
+		flow, ok := ContestKey.From(schema)
+		if !ok {
+			t.Fatal("Expected ContestFlow")
+		}
+		if len(flow.Competitors) != 2 {
+			t.Errorf("len(Flow.Competitors) = %d, want 2", len(flow.Competitors))
 		}
 	})
 }

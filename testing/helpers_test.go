@@ -142,8 +142,8 @@ func TestMockProcessor(t *testing.T) {
 
 	t.Run("Name Returns Configured Name", func(t *testing.T) {
 		mock := NewMockProcessor[int](t, "my-mock")
-		if mock.Name() != "my-mock" {
-			t.Errorf("expected name 'my-mock', got %q", mock.Name())
+		if mock.Identity().Name() != "my-mock" {
+			t.Errorf("expected name 'my-mock', got %q", mock.Identity().Name())
 		}
 	})
 
@@ -151,6 +151,19 @@ func TestMockProcessor(t *testing.T) {
 		mock := NewMockProcessor[int](t, "mock")
 		if err := mock.Close(); err != nil {
 			t.Errorf("expected nil from Close, got %v", err)
+		}
+	})
+
+	t.Run("Schema", func(t *testing.T) {
+		mock := NewMockProcessor[int](t, "mock-schema")
+
+		schema := mock.Schema()
+
+		if schema.Type != "mock" {
+			t.Errorf("Schema Type = %v, want %v", schema.Type, "mock")
+		}
+		if schema.Identity.Name() != "mock-schema" {
+			t.Errorf("Schema Identity.Name() = %v, want %v", schema.Identity.Name(), "mock-schema")
 		}
 	})
 }
@@ -199,7 +212,7 @@ func TestChaosProcessor(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("No Chaos Passes Through", func(t *testing.T) {
-		base := pipz.Transform("base", func(_ context.Context, s string) string {
+		base := pipz.Transform(pipz.NewIdentity("base", ""), func(_ context.Context, s string) string {
 			return s + "_processed"
 		})
 
@@ -218,7 +231,7 @@ func TestChaosProcessor(t *testing.T) {
 	})
 
 	t.Run("Tracks Statistics", func(t *testing.T) {
-		base := pipz.Transform("base", func(_ context.Context, n int) int {
+		base := pipz.Transform(pipz.NewIdentity("base", ""), func(_ context.Context, n int) int {
 			return n * 2
 		})
 
@@ -238,7 +251,7 @@ func TestChaosProcessor(t *testing.T) {
 	})
 
 	t.Run("Injects Failures At Configured Rate", func(t *testing.T) {
-		base := pipz.Transform("base", func(_ context.Context, n int) int {
+		base := pipz.Transform(pipz.NewIdentity("base", ""), func(_ context.Context, n int) int {
 			return n
 		})
 
@@ -262,7 +275,7 @@ func TestChaosProcessor(t *testing.T) {
 	})
 
 	t.Run("Simulates Timeouts", func(t *testing.T) {
-		base := pipz.Transform("base", func(_ context.Context, n int) int {
+		base := pipz.Transform(pipz.NewIdentity("base", ""), func(_ context.Context, n int) int {
 			return n
 		})
 
@@ -324,15 +337,15 @@ func TestChaosProcessor(t *testing.T) {
 	})
 
 	t.Run("Name Returns Configured Name", func(t *testing.T) {
-		base := pipz.Transform("base", func(_ context.Context, n int) int { return n })
+		base := pipz.Transform(pipz.NewIdentity("base", ""), func(_ context.Context, n int) int { return n })
 		chaos := NewChaosProcessor("my-chaos", base, ChaosConfig{})
-		if chaos.Name() != "my-chaos" {
-			t.Errorf("expected name 'my-chaos', got %q", chaos.Name())
+		if chaos.Identity().Name() != "my-chaos" {
+			t.Errorf("expected name 'my-chaos', got %q", chaos.Identity().Name())
 		}
 	})
 
 	t.Run("Close Returns Nil", func(t *testing.T) {
-		base := pipz.Transform("base", func(_ context.Context, n int) int { return n })
+		base := pipz.Transform(pipz.NewIdentity("base", ""), func(_ context.Context, n int) int { return n })
 		chaos := NewChaosProcessor("chaos", base, ChaosConfig{})
 		if err := chaos.Close(); err != nil {
 			t.Errorf("expected nil from Close, got %v", err)
@@ -478,7 +491,7 @@ func TestChaosProcessorEdgeCases(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Panic Injection", func(t *testing.T) {
-		base := pipz.Transform("base", func(_ context.Context, n int) int { return n })
+		base := pipz.Transform(pipz.NewIdentity("base", ""), func(_ context.Context, n int) int { return n })
 		chaos := NewChaosProcessor("chaos", base, ChaosConfig{
 			PanicRate: 1.0, // Always panic
 			Seed:      12345,
@@ -494,7 +507,7 @@ func TestChaosProcessorEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Latency Injection With Range", func(t *testing.T) {
-		base := pipz.Transform("base", func(_ context.Context, n int) int { return n })
+		base := pipz.Transform(pipz.NewIdentity("base", ""), func(_ context.Context, n int) int { return n })
 		chaos := NewChaosProcessor("chaos", base, ChaosConfig{
 			LatencyMin: 10 * time.Millisecond,
 			LatencyMax: 20 * time.Millisecond,
@@ -514,7 +527,7 @@ func TestChaosProcessorEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Latency Injection Min Only", func(t *testing.T) {
-		base := pipz.Transform("base", func(_ context.Context, n int) int { return n })
+		base := pipz.Transform(pipz.NewIdentity("base", ""), func(_ context.Context, n int) int { return n })
 		chaos := NewChaosProcessor("chaos", base, ChaosConfig{
 			LatencyMin: 10 * time.Millisecond,
 			LatencyMax: 0, // No max, should use min
@@ -531,7 +544,7 @@ func TestChaosProcessorEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Context Cancellation During Latency", func(t *testing.T) {
-		base := pipz.Transform("base", func(_ context.Context, n int) int { return n })
+		base := pipz.Transform(pipz.NewIdentity("base", ""), func(_ context.Context, n int) int { return n })
 		chaos := NewChaosProcessor("chaos", base, ChaosConfig{
 			LatencyMin: 1 * time.Second,
 			LatencyMax: 2 * time.Second,
@@ -563,7 +576,7 @@ func TestChaosProcessorEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Random Seed From Crypto", func(t *testing.T) {
-		base := pipz.Transform("base", func(_ context.Context, n int) int { return n })
+		base := pipz.Transform(pipz.NewIdentity("base", ""), func(_ context.Context, n int) int { return n })
 		// Seed=0 triggers crypto/rand path
 		chaos := NewChaosProcessor("chaos", base, ChaosConfig{
 			Seed: 0,
@@ -573,6 +586,20 @@ func TestChaosProcessorEdgeCases(t *testing.T) {
 		_, err := chaos.Process(ctx, 1)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("ChaosProcessor Schema", func(t *testing.T) {
+		base := pipz.Transform(pipz.NewIdentity("base", ""), func(_ context.Context, n int) int { return n })
+		chaos := NewChaosProcessor("chaos-schema", base, ChaosConfig{})
+
+		schema := chaos.Schema()
+
+		if schema.Type != "chaos" {
+			t.Errorf("Schema Type = %v, want %v", schema.Type, "chaos")
+		}
+		if schema.Identity.Name() != "chaos-schema" {
+			t.Errorf("Schema Identity.Name() = %v, want %v", schema.Identity.Name(), "chaos-schema")
 		}
 	})
 }

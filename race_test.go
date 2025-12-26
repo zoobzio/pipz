@@ -12,18 +12,18 @@ import (
 
 func TestRace(t *testing.T) {
 	t.Run("First Success Wins", func(t *testing.T) {
-		fast := Apply("fast", func(_ context.Context, d TestData) (TestData, error) {
+		fast := Apply(NewIdentity("fast", ""), func(_ context.Context, d TestData) (TestData, error) {
 			time.Sleep(10 * time.Millisecond)
 			d.Value = 100
 			return d, nil
 		})
-		slow := Apply("slow", func(_ context.Context, d TestData) (TestData, error) {
+		slow := Apply(NewIdentity("slow", ""), func(_ context.Context, d TestData) (TestData, error) {
 			time.Sleep(50 * time.Millisecond)
 			d.Value = 200
 			return d, nil
 		})
 
-		race := NewRace("test-race", fast, slow)
+		race := NewRace(NewIdentity("test-race", ""), fast, slow)
 		data := TestData{Value: 1}
 
 		result, err := race.Process(context.Background(), data)
@@ -36,20 +36,20 @@ func TestRace(t *testing.T) {
 	})
 
 	t.Run("All Fail Returns Last Error", func(t *testing.T) {
-		p1 := Apply("p1", func(_ context.Context, d TestData) (TestData, error) {
+		p1 := Apply(NewIdentity("p1", ""), func(_ context.Context, d TestData) (TestData, error) {
 			time.Sleep(10 * time.Millisecond)
 			return d, errors.New("error 1")
 		})
-		p2 := Apply("p2", func(_ context.Context, d TestData) (TestData, error) {
+		p2 := Apply(NewIdentity("p2", ""), func(_ context.Context, d TestData) (TestData, error) {
 			time.Sleep(20 * time.Millisecond)
 			return d, errors.New("error 2")
 		})
-		p3 := Apply("p3", func(_ context.Context, d TestData) (TestData, error) {
+		p3 := Apply(NewIdentity("p3", ""), func(_ context.Context, d TestData) (TestData, error) {
 			time.Sleep(30 * time.Millisecond)
 			return d, errors.New("error 3")
 		})
 
-		race := NewRace("test-race", p1, p2, p3)
+		race := NewRace(NewIdentity("test-race", ""), p1, p2, p3)
 		data := TestData{Value: 1}
 
 		_, err := race.Process(context.Background(), data)
@@ -63,7 +63,7 @@ func TestRace(t *testing.T) {
 	})
 
 	t.Run("Context Cancellation", func(t *testing.T) {
-		slow := Apply("slow", func(ctx context.Context, d TestData) (TestData, error) {
+		slow := Apply(NewIdentity("slow", ""), func(ctx context.Context, d TestData) (TestData, error) {
 			select {
 			case <-time.After(100 * time.Millisecond):
 				return d, nil
@@ -72,7 +72,7 @@ func TestRace(t *testing.T) {
 			}
 		})
 
-		race := NewRace("test-race", slow)
+		race := NewRace(NewIdentity("test-race", ""), slow)
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
 
@@ -85,7 +85,7 @@ func TestRace(t *testing.T) {
 	})
 
 	t.Run("Empty Processors", func(t *testing.T) {
-		race := NewRace[TestData]("empty")
+		race := NewRace[TestData](NewIdentity("empty", ""))
 		data := TestData{Value: 42}
 
 		_, err := race.Process(context.Background(), data)
@@ -102,13 +102,13 @@ func TestRace(t *testing.T) {
 		slowStartedCh := make(chan bool, 1)
 		slowCanceledCh := make(chan bool, 1)
 
-		fast := Apply("fast", func(_ context.Context, d TestData) (TestData, error) {
+		fast := Apply(NewIdentity("fast", ""), func(_ context.Context, d TestData) (TestData, error) {
 			// Add a small delay to ensure slow processor starts
 			time.Sleep(10 * time.Millisecond)
 			d.Value = 100
 			return d, nil
 		})
-		slow := Apply("slow", func(ctx context.Context, d TestData) (TestData, error) {
+		slow := Apply(NewIdentity("slow", ""), func(ctx context.Context, d TestData) (TestData, error) {
 			slowStartedCh <- true
 			select {
 			case <-time.After(200 * time.Millisecond):
@@ -120,7 +120,7 @@ func TestRace(t *testing.T) {
 			}
 		})
 
-		race := NewRace("test-race", fast, slow)
+		race := NewRace(NewIdentity("test-race", ""), fast, slow)
 		data := TestData{Value: 1}
 
 		result, err := race.Process(context.Background(), data)
@@ -148,11 +148,11 @@ func TestRace(t *testing.T) {
 	})
 
 	t.Run("Configuration Methods", func(t *testing.T) {
-		p1 := Transform("p1", func(_ context.Context, d TestData) TestData { return d })
-		p2 := Transform("p2", func(_ context.Context, d TestData) TestData { return d })
-		p3 := Transform("p3", func(_ context.Context, d TestData) TestData { return d })
+		p1 := Transform(NewIdentity("p1", ""), func(_ context.Context, d TestData) TestData { return d })
+		p2 := Transform(NewIdentity("p2", ""), func(_ context.Context, d TestData) TestData { return d })
+		p3 := Transform(NewIdentity("p3", ""), func(_ context.Context, d TestData) TestData { return d })
 
-		race := NewRace("test", p1, p2)
+		race := NewRace(NewIdentity("test", ""), p1, p2)
 
 		if race.Len() != 2 {
 			t.Errorf("expected 2 processors, got %d", race.Len())
@@ -183,15 +183,15 @@ func TestRace(t *testing.T) {
 	})
 
 	t.Run("Name Method", func(t *testing.T) {
-		race := NewRace[TestData]("my-race")
-		if race.Name() != "my-race" {
-			t.Errorf("expected 'my-race', got %q", race.Name())
+		race := NewRace[TestData](NewIdentity("my-race", ""))
+		if race.Identity().Name() != "my-race" {
+			t.Errorf("expected 'my-race', got %q", race.Identity().Name())
 		}
 	})
 
 	t.Run("Remove Out of Bounds", func(t *testing.T) {
-		p1 := Transform("p1", func(_ context.Context, d TestData) TestData { return d })
-		race := NewRace("test", p1)
+		p1 := Transform(NewIdentity("p1", ""), func(_ context.Context, d TestData) TestData { return d })
+		race := NewRace(NewIdentity("test", ""), p1)
 
 		// Test negative index
 		err := race.Remove(-1)
@@ -213,16 +213,16 @@ func TestRace(t *testing.T) {
 	})
 
 	t.Run("Race processor panic recovery", func(t *testing.T) {
-		panicProcessor := Apply("panic_processor", func(_ context.Context, _ TestData) (TestData, error) {
+		panicProcessor := Apply(NewIdentity("panic_processor", ""), func(_ context.Context, _ TestData) (TestData, error) {
 			panic("race processor panic")
 		})
-		successProcessor := Apply("success_processor", func(_ context.Context, d TestData) (TestData, error) {
+		successProcessor := Apply(NewIdentity("success_processor", ""), func(_ context.Context, d TestData) (TestData, error) {
 			time.Sleep(10 * time.Millisecond) // Small delay to ensure panic happens first
 			d.Value = 100
 			return d, nil
 		})
 
-		race := NewRace("panic_race", panicProcessor, successProcessor)
+		race := NewRace(NewIdentity("panic_race", ""), panicProcessor, successProcessor)
 		data := TestData{Value: 42}
 
 		result, err := race.Process(context.Background(), data)
@@ -238,14 +238,14 @@ func TestRace(t *testing.T) {
 	})
 
 	t.Run("All race processors panic", func(t *testing.T) {
-		panic1 := Apply("panic1", func(_ context.Context, _ TestData) (TestData, error) {
+		panic1 := Apply(NewIdentity("panic1", ""), func(_ context.Context, _ TestData) (TestData, error) {
 			panic("first processor panic")
 		})
-		panic2 := Apply("panic2", func(_ context.Context, _ TestData) (TestData, error) {
+		panic2 := Apply(NewIdentity("panic2", ""), func(_ context.Context, _ TestData) (TestData, error) {
 			panic("second processor panic")
 		})
 
-		race := NewRace("all_panic_race", panic1, panic2)
+		race := NewRace(NewIdentity("all_panic_race", ""), panic1, panic2)
 		data := TestData{Value: 42}
 
 		result, err := race.Process(context.Background(), data)
@@ -259,7 +259,7 @@ func TestRace(t *testing.T) {
 			t.Fatal("expected pipz.Error")
 		}
 
-		if pipzErr.Path[0] != "all_panic_race" {
+		if pipzErr.Path[0].Name() != "all_panic_race" {
 			t.Errorf("expected path to start with 'all_panic_race', got %v", pipzErr.Path)
 		}
 
@@ -272,10 +272,10 @@ func TestRace(t *testing.T) {
 
 func TestRaceClose(t *testing.T) {
 	t.Run("Closes All Children", func(t *testing.T) {
-		p1 := newTrackingProcessor[TestData]("p1")
-		p2 := newTrackingProcessor[TestData]("p2")
+		p1 := newTrackingProcessor[TestData](NewIdentity("p1", ""))
+		p2 := newTrackingProcessor[TestData](NewIdentity("p2", ""))
 
-		r := NewRace("test", p1, p2)
+		r := NewRace(NewIdentity("test", ""), p1, p2)
 		err := r.Close()
 
 		if err != nil {
@@ -287,10 +287,10 @@ func TestRaceClose(t *testing.T) {
 	})
 
 	t.Run("Aggregates Errors", func(t *testing.T) {
-		p1 := newTrackingProcessor[TestData]("p1").WithCloseError(errors.New("p1 error"))
-		p2 := newTrackingProcessor[TestData]("p2").WithCloseError(errors.New("p2 error"))
+		p1 := newTrackingProcessor[TestData](NewIdentity("p1", "")).WithCloseError(errors.New("p1 error"))
+		p2 := newTrackingProcessor[TestData](NewIdentity("p2", "")).WithCloseError(errors.New("p2 error"))
 
-		r := NewRace("test", p1, p2)
+		r := NewRace(NewIdentity("test", ""), p1, p2)
 		err := r.Close()
 
 		if err == nil {
@@ -302,8 +302,8 @@ func TestRaceClose(t *testing.T) {
 	})
 
 	t.Run("Idempotency", func(t *testing.T) {
-		p := newTrackingProcessor[TestData]("p")
-		r := NewRace("test", p)
+		p := newTrackingProcessor[TestData](NewIdentity("p", ""))
+		r := NewRace(NewIdentity("test", ""), p)
 
 		_ = r.Close()
 		_ = r.Close()
@@ -329,17 +329,17 @@ func TestRaceSignals(t *testing.T) {
 		})
 		defer listener.Close()
 
-		fast := Transform("fast-winner", func(_ context.Context, d TestData) TestData {
+		fast := Transform(NewIdentity("fast-winner", ""), func(_ context.Context, d TestData) TestData {
 			d.Value = 100
 			return d
 		})
-		slow := Apply("slow-loser", func(_ context.Context, d TestData) (TestData, error) {
+		slow := Apply(NewIdentity("slow-loser", ""), func(_ context.Context, d TestData) (TestData, error) {
 			time.Sleep(50 * time.Millisecond)
 			d.Value = 200
 			return d, nil
 		})
 
-		race := NewRace("signal-test-race", fast, slow)
+		race := NewRace(NewIdentity("signal-test-race", ""), fast, slow)
 		data := TestData{Value: 5}
 
 		_, err := race.Process(context.Background(), data)
@@ -374,14 +374,14 @@ func TestRaceSignals(t *testing.T) {
 		})
 		defer listener.Close()
 
-		fail1 := Apply("fail1", func(_ context.Context, _ TestData) (TestData, error) {
+		fail1 := Apply(NewIdentity("fail1", ""), func(_ context.Context, _ TestData) (TestData, error) {
 			return TestData{}, errors.New("fail1")
 		})
-		fail2 := Apply("fail2", func(_ context.Context, _ TestData) (TestData, error) {
+		fail2 := Apply(NewIdentity("fail2", ""), func(_ context.Context, _ TestData) (TestData, error) {
 			return TestData{}, errors.New("fail2")
 		})
 
-		race := NewRace("signal-fail-race", fail1, fail2)
+		race := NewRace(NewIdentity("signal-fail-race", ""), fail1, fail2)
 		data := TestData{Value: 5}
 
 		_, err := race.Process(context.Background(), data)
@@ -396,6 +396,30 @@ func TestRaceSignals(t *testing.T) {
 
 		if signalReceived {
 			t.Error("signal should not be emitted when all processors fail")
+		}
+	})
+
+	t.Run("Schema", func(t *testing.T) {
+		proc1 := Transform(NewIdentity("proc1", ""), func(_ context.Context, d TestData) TestData { return d })
+		proc2 := Transform(NewIdentity("proc2", ""), func(_ context.Context, d TestData) TestData { return d })
+
+		race := NewRace(NewIdentity("test-race", "Race connector"), proc1, proc2)
+
+		schema := race.Schema()
+
+		if schema.Identity.Name() != "test-race" {
+			t.Errorf("Schema Identity.Name() = %v, want %v", schema.Identity.Name(), "test-race")
+		}
+		if schema.Type != "race" {
+			t.Errorf("Schema Type = %v, want %v", schema.Type, "race")
+		}
+
+		flow, ok := RaceKey.From(schema)
+		if !ok {
+			t.Fatal("Expected RaceFlow")
+		}
+		if len(flow.Competitors) != 2 {
+			t.Errorf("len(Flow.Competitors) = %d, want 2", len(flow.Competitors))
 		}
 	})
 }

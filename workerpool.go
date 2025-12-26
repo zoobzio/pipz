@@ -29,7 +29,7 @@ import (
 type WorkerPool[T Cloner[T]] struct {
 	processors []Chainable[T]
 	sem        chan struct{} // Semaphore for worker limit
-	name       Name
+	identity   Identity
 	mu         sync.RWMutex  // Thread safety
 	timeout    time.Duration // Optional per-task timeout
 	queueSize  int           // Optional queue size (unused but kept for future)
@@ -40,7 +40,7 @@ type WorkerPool[T Cloner[T]] struct {
 
 // NewWorkerPool creates a WorkerPool with specified worker count.
 // Workers parameter controls maximum concurrent processors (semaphore slots).
-func NewWorkerPool[T Cloner[T]](name Name, workers int, processors ...Chainable[T]) *WorkerPool[T] {
+func NewWorkerPool[T Cloner[T]](identity Identity, workers int, processors ...Chainable[T]) *WorkerPool[T] {
 	if workers <= 0 {
 		workers = 1 // Sensible default
 	}
@@ -48,7 +48,7 @@ func NewWorkerPool[T Cloner[T]](name Name, workers int, processors ...Chainable[
 	wp := &WorkerPool[T]{
 		processors: make([]Chainable[T], len(processors)),
 		sem:        make(chan struct{}, workers),
-		name:       name,
+		identity:   identity,
 		timeout:    0, // Default no timeout
 		queueSize:  0, // Default no buffering
 		clock:      clockz.RealClock,
@@ -58,16 +58,37 @@ func NewWorkerPool[T Cloner[T]](name Name, workers int, processors ...Chainable[
 	return wp
 }
 
-// Name returns the name of this connector.
-func (w *WorkerPool[T]) Name() Name {
+// Identity returns the identity of this connector.
+func (w *WorkerPool[T]) Identity() Identity {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
-	return w.name
+	return w.identity
+}
+
+// Schema returns a Node representing this connector in the pipeline schema.
+func (w *WorkerPool[T]) Schema() Node {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	processors := make([]Node, len(w.processors))
+	for i, proc := range w.processors {
+		processors[i] = proc.Schema()
+	}
+
+	return Node{
+		Identity: w.identity,
+		Type:     "workerpool",
+		Flow:     WorkerpoolFlow{Processors: processors},
+		Metadata: map[string]any{
+			"workers": cap(w.sem),
+			"timeout": w.timeout.String(),
+		},
+	}
 }
 
 // Process implements the Chainable interface.
 func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err error) {
-	defer recoverFromPanic(&result, &err, w.name, input)
+	defer recoverFromPanic(&result, &err, w.identity, input)
 	w.mu.RLock()
 	processors := make([]Chainable[T], len(w.processors))
 	copy(processors, w.processors)
@@ -80,7 +101,7 @@ func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err err
 	}
 
 	var wg sync.WaitGroup
-	errors := make(chan error, len(processors))
+	errs := make(chan error, len(processors))
 
 	for _, processor := range processors {
 		wg.Add(1)
@@ -94,7 +115,8 @@ func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err err
 			if activeWorkers >= workerCount {
 				// Emit saturated signal
 				capitan.Warn(ctx, SignalWorkerPoolSaturated,
-					FieldName.Field(string(w.name)),
+					FieldName.Field(w.identity.Name()),
+					FieldIdentityID.Field(w.identity.ID().String()),
 					FieldWorkerCount.Field(workerCount),
 					FieldActiveWorkers.Field(activeWorkers),
 					FieldTimestamp.Field(float64(clock.Now().Unix())),
@@ -106,7 +128,8 @@ func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err err
 			case w.sem <- struct{}{}:
 				// Emit acquired signal
 				capitan.Info(ctx, SignalWorkerPoolAcquired,
-					FieldName.Field(string(w.name)),
+					FieldName.Field(w.identity.Name()),
+					FieldIdentityID.Field(w.identity.ID().String()),
 					FieldWorkerCount.Field(workerCount),
 					FieldActiveWorkers.Field(len(w.sem)),
 					FieldTimestamp.Field(float64(clock.Now().Unix())),
@@ -117,14 +140,15 @@ func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err err
 
 					// Emit released signal
 					capitan.Info(ctx, SignalWorkerPoolReleased,
-						FieldName.Field(string(w.name)),
+						FieldName.Field(w.identity.Name()),
+						FieldIdentityID.Field(w.identity.ID().String()),
 						FieldWorkerCount.Field(workerCount),
 						FieldActiveWorkers.Field(len(w.sem)),
 						FieldTimestamp.Field(float64(clock.Now().Unix())),
 					)
 				}()
 			case <-ctx.Done():
-				errors <- ctx.Err()
+				errs <- ctx.Err()
 				return
 			}
 
@@ -141,22 +165,22 @@ func (w *WorkerPool[T]) Process(ctx context.Context, input T) (result T, err err
 			_, taskErr := p.Process(taskCtx, inputCopy)
 
 			if taskErr != nil {
-				errors <- taskErr
+				errs <- taskErr
 			}
 		}(processor)
 	}
 
 	// Wait for all processors to complete
 	wg.Wait()
-	close(errors)
+	close(errs)
 
 	// Handle errors (first error wins)
-	for err := range errors {
+	for err := range errs {
 		if err != nil {
 			return input, &Error[T]{
 				Err:       err,
 				InputData: input,
-				Path:      []Name{w.name},
+				Path:      []Identity{w.identity},
 				Timestamp: clock.Now(),
 				Duration:  0, // Duration not tracked at connector level
 			}

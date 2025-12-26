@@ -21,7 +21,7 @@ Creates a processor that conditionally modifies data based on a predicate.
 
 ```go
 func Mutate[T any](
-    name Name,
+    identity Identity,
     transformer func(context.Context, T) T,
     condition func(context.Context, T) bool,
 ) Processor[T]
@@ -29,7 +29,7 @@ func Mutate[T any](
 
 ## Parameters
 
-- `name` (`Name`) - Identifier for the processor used in error messages and debugging
+- `identity` (`Identity`) - Identifier for the processor used in error messages and debugging
 - `transformer` - Function that performs the transformation when condition is true
 - `condition` - Predicate function that determines if transformation should occur
 
@@ -48,7 +48,8 @@ Returns a `Processor[T]` that applies the transformation only when the condition
 
 ```go
 // Auto-verify trusted domains
-autoVerify := pipz.Mutate("auto-verify",
+autoVerify := pipz.Mutate(
+    pipz.NewIdentity("auto-verify", "Auto-verifies company email addresses"),
     func(ctx context.Context, user User) User {
         user.Verified = true
         user.VerifiedAt = time.Now()
@@ -60,7 +61,8 @@ autoVerify := pipz.Mutate("auto-verify",
 )
 
 // Apply discounts
-applyDiscount := pipz.Mutate("vip-discount",
+applyDiscount := pipz.Mutate(
+    pipz.NewIdentity("vip-discount", "Applies VIP discount to qualifying orders"),
     func(ctx context.Context, order Order) Order {
         order.Discount = order.Total * 0.2
         order.Total = order.Total - order.Discount
@@ -72,7 +74,8 @@ applyDiscount := pipz.Mutate("vip-discount",
 )
 
 // Feature flags
-betaFeature := pipz.Mutate("beta-enrichment",
+betaFeature := pipz.Mutate(
+    pipz.NewIdentity("beta-enrichment", "Adds beta score when feature enabled"),
     func(ctx context.Context, data Data) Data {
         data.BetaScore = calculateBetaScore(data)
         return data
@@ -83,7 +86,8 @@ betaFeature := pipz.Mutate("beta-enrichment",
 )
 
 // Conditional formatting
-formatPhone := pipz.Mutate("format-phone",
+formatPhone := pipz.Mutate(
+    pipz.NewIdentity("format-phone", "Formats US phone numbers"),
     func(ctx context.Context, contact Contact) Contact {
         // Format as (XXX) XXX-XXXX
         contact.Phone = fmt.Sprintf("(%s) %s-%s",
@@ -128,23 +132,37 @@ Mutate has minimal overhead:
 ## Common Patterns
 
 ```go
+// Define identities upfront
+var (
+    UserProcessingID = pipz.NewIdentity("user-processing", "User processing pipeline")
+    VerifyTrustedID  = pipz.NewIdentity("verify-trusted", "Verifies trusted domains")
+    ApplyRegionalID  = pipz.NewIdentity("apply-regional", "Applies regional settings")
+    PremiumFeaturesID = pipz.NewIdentity("premium-features", "Adds premium features")
+    OrderID          = pipz.NewIdentity("order", "Order processing pipeline")
+    ValidateID       = pipz.NewIdentity("validate", "Validates order")
+    LoyaltyDiscountID = pipz.NewIdentity("loyalty-discount", "Applies loyalty discount")
+    BulkDiscountID   = pipz.NewIdentity("bulk-discount", "Applies bulk discount")
+    CalculateTaxID   = pipz.NewIdentity("calculate-tax", "Calculates tax")
+)
+
 // Chain multiple conditional mutations
-pipeline := pipz.NewSequence[User]("user-processing",
-    pipz.Mutate("verify-trusted", markVerified, isTrustedDomain),
-    pipz.Mutate("apply-regional", applyGDPR, isEuropean),
-    pipz.Mutate("premium-features", addPremiumFeatures, isPremium),
+pipeline := pipz.NewSequence[User](UserProcessingID,
+    pipz.Mutate(VerifyTrustedID, markVerified, isTrustedDomain),
+    pipz.Mutate(ApplyRegionalID, applyGDPR, isEuropean),
+    pipz.Mutate(PremiumFeaturesID, addPremiumFeatures, isPremium),
 )
 
 // Combine with validation
-processOrder := pipz.NewSequence[Order]("order",
-    pipz.Apply("validate", validateOrder),
-    pipz.Mutate("loyalty-discount", applyLoyaltyDiscount, isLoyaltyMember),
-    pipz.Mutate("bulk-discount", applyBulkDiscount, isBulkOrder),
-    pipz.Apply("calculate-tax", calculateTax),
+processOrder := pipz.NewSequence[Order](OrderID,
+    pipz.Apply(ValidateID, validateOrder),
+    pipz.Mutate(LoyaltyDiscountID, applyLoyaltyDiscount, isLoyaltyMember),
+    pipz.Mutate(BulkDiscountID, applyBulkDiscount, isBulkOrder),
+    pipz.Apply(CalculateTaxID, calculateTax),
 )
 
 // Environment-based behavior
-debugEnrichment := pipz.Mutate("debug-data",
+debugEnrichment := pipz.Mutate(
+    pipz.NewIdentity("debug-data", "Adds debug information in development"),
     func(ctx context.Context, data Data) Data {
         data.DebugInfo = generateDebugInfo(data)
         return data
@@ -155,7 +173,8 @@ debugEnrichment := pipz.Mutate("debug-data",
 )
 
 // Default values
-applyDefaults := pipz.Mutate("defaults",
+applyDefaults := pipz.Mutate(
+    pipz.NewIdentity("defaults", "Applies default timeout"),
     func(ctx context.Context, cfg Config) Config {
         cfg.Timeout = 30 * time.Second
         return cfg
@@ -171,7 +190,8 @@ applyDefaults := pipz.Mutate("defaults",
 ### ❌ Don't use for operations that can fail
 ```go
 // WRONG - Parse can fail but Mutate can't handle errors
-mutate := pipz.Mutate("parse",
+mutate := pipz.Mutate(
+    pipz.NewIdentity("parse", "Parses JSON"),
     func(ctx context.Context, s string) Data {
         data, _ := json.Unmarshal([]byte(s), &Data{}) // Error ignored!
         return data
@@ -183,20 +203,24 @@ mutate := pipz.Mutate("parse",
 ### ✅ Use Apply for fallible operations
 ```go
 // RIGHT - Proper error handling
-apply := pipz.Apply("parse", func(ctx context.Context, s string) (Data, error) {
-    if s == "" {
-        return Data{}, nil // Skip parsing
-    }
-    var data Data
-    err := json.Unmarshal([]byte(s), &data)
-    return data, err
-})
+apply := pipz.Apply(
+    pipz.NewIdentity("parse", "Parses JSON with error handling"),
+    func(ctx context.Context, s string) (Data, error) {
+        if s == "" {
+            return Data{}, nil // Skip parsing
+        }
+        var data Data
+        err := json.Unmarshal([]byte(s), &data)
+        return data, err
+    },
+)
 ```
 
 ### ❌ Don't use when you always transform
 ```go
 // WRONG - Condition always true
-mutate := pipz.Mutate("always",
+mutate := pipz.Mutate(
+    pipz.NewIdentity("always", "Always transforms"),
     transform,
     func(ctx context.Context, data Data) bool { return true }, // Always!
 )
@@ -205,14 +229,18 @@ mutate := pipz.Mutate("always",
 ### ✅ Use Transform directly
 ```go
 // RIGHT - No condition needed
-transform := pipz.Transform("always", transform)
+transform := pipz.Transform(
+    pipz.NewIdentity("always", "Always transforms"),
+    transform,
+)
 ```
 
 ## Advanced Usage
 
 ```go
 // Complex conditions
-smartRouting := pipz.Mutate("smart-route",
+smartRouting := pipz.Mutate(
+    pipz.NewIdentity("smart-route", "Routes high priority requests to express during business hours"),
     func(ctx context.Context, req Request) Request {
         req.Route = "express"
         req.SLA = time.Hour
@@ -228,7 +256,8 @@ smartRouting := pipz.Mutate("smart-route",
 )
 
 // Stateful conditions (be careful with concurrency)
-rateLimiter := pipz.Mutate("rate-limit",
+rateLimiter := pipz.Mutate(
+    pipz.NewIdentity("rate-limit", "Applies rate limiting based on user quota"),
     func(ctx context.Context, req Request) Request {
         req.RateLimited = false
         return req

@@ -19,9 +19,9 @@ const (
 )
 
 // RateLimiter controls the rate of processing to protect downstream services.
-// RateLimiter uses a token bucket algorithm to enforce rate limits, allowing
-// controlled bursts while maintaining a steady average rate. This is essential
-// for protecting external APIs, databases, and other rate-sensitive resources.
+// RateLimiter wraps a processor and uses a token bucket algorithm to enforce
+// rate limits, allowing controlled bursts while maintaining a steady average rate.
+// This is essential for protecting external APIs, databases, and other rate-sensitive resources.
 //
 // CRITICAL: RateLimiter is a STATEFUL connector that maintains an internal token bucket.
 // Create it once and reuse it - do NOT create a new RateLimiter for each request,
@@ -30,13 +30,13 @@ const (
 // ❌ WRONG - Creating per request (useless):
 //
 //	func handleRequest(req Request) Response {
-//	    limiter := pipz.NewRateLimiter("api", 100, 10)  // NEW limiter each time!
-//	    return limiter.Process(ctx, req)                // Always allows through
+//	    limiter := pipz.NewRateLimiter(LimiterID, 100, 10, apiCall)  // NEW limiter each time!
+//	    return limiter.Process(ctx, req)                             // Always allows through
 //	}
 //
 // ✅ RIGHT - Create once, reuse:
 //
-//	var apiLimiter = pipz.NewRateLimiter("api", 100, 10)  // Shared instance
+//	var apiLimiter = pipz.NewRateLimiter(LimiterID, 100, 10, apiCall)  // Shared instance
 //
 //	func handleRequest(req Request) Response {
 //	    return apiLimiter.Process(ctx, req)  // Actually rate limits
@@ -61,48 +61,47 @@ const (
 //
 // Example:
 //
-//	// Define names as constants
-//	const (
-//	    ConnectorAPILimiter    = "api-limiter"
-//	    ConnectorGlobalLimiter = "global-limiter"
+//	var (
+//	    APILimiterID = pipz.NewIdentity("api-limiter", "Rate limits Stripe API calls")
+//	    ChargeID     = pipz.NewIdentity("charge", "Process payment charge")
 //	)
 //
-//	// Create limiters once and reuse
-//	var (
-//	    // Global rate limit for entire system
-//	    globalLimiter = pipz.NewRateLimiter(ConnectorGlobalLimiter, 10000, 1000)
-//
-//	    // Service-specific limit (e.g., Stripe API)
-//	    apiLimiter = pipz.NewRateLimiter(ConnectorAPILimiter, 100, 10)
+//	// Create limiter wrapping the API call
+//	var stripeLimiter = pipz.NewRateLimiter(APILimiterID, 100, 10,
+//	    pipz.Apply(ChargeID, processStripeCharge),
 //	)
 //
 //	// Use in pipeline
 //	func createPaymentPipeline() pipz.Chainable[Payment] {
-//	    return pipz.NewSequence("payment-pipeline",
-//	        globalLimiter,                           // System-wide limit
-//	        apiLimiter,                              // Service-specific limit
-//	        pipz.Apply("charge", processPayment),   // Actual operation
+//	    return pipz.NewSequence(PipelineID,
+//	        validatePayment,
+//	        stripeLimiter,  // Rate-limited API call
+//	        confirmPayment,
 //	    )
 //	}
 type RateLimiter[T any] struct {
-	lastRefill time.Time    // last refill time (24 bytes)
-	clock      clockz.Clock // interface (16 bytes)
-	name       Name         // string (16 bytes)
-	mode       string       // "wait" or "drop" (16 bytes)
-	rate       float64      // tokens per second (8 bytes)
-	tokens     float64      // current tokens (8 bytes)
-	mu         sync.Mutex   // mutex (8 bytes)
-	burst      int          // maximum tokens (8 bytes)
+	processor  Chainable[T]  // wrapped processor
+	lastRefill time.Time     // last refill time
+	clock      clockz.Clock  // clock interface
+	identity   Identity      // identity struct
+	mode       string        // "wait" or "drop"
+	rate       float64       // tokens per second
+	tokens     float64       // current tokens
+	mu         sync.Mutex    // mutex
+	burst      int           // maximum tokens
+	closeOnce  sync.Once     // ensures Close is idempotent
+	closeErr   error         // cached close error
 }
 
-// NewRateLimiter creates a new RateLimiter connector.
+// NewRateLimiter creates a new RateLimiter connector wrapping the given processor.
 // The ratePerSecond parameter sets the sustained rate limit.
 // The burst parameter sets the maximum burst size.
-func NewRateLimiter[T any](name Name, ratePerSecond float64, burst int) *RateLimiter[T] {
+func NewRateLimiter[T any](identity Identity, ratePerSecond float64, burst int, processor Chainable[T]) *RateLimiter[T] {
 	now := clockz.RealClock.Now()
 
 	return &RateLimiter[T]{
-		name:       name,
+		identity:   identity,
+		processor:  processor,
 		rate:       ratePerSecond,
 		burst:      burst,
 		tokens:     float64(burst), // Start with full bucket
@@ -162,7 +161,7 @@ func (r *RateLimiter[T]) calculateWaitTime() time.Duration {
 
 // Process implements the Chainable interface.
 func (r *RateLimiter[T]) Process(ctx context.Context, data T) (result T, err error) {
-	defer recoverFromPanic(&result, &err, r.name, data)
+	defer recoverFromPanic(&result, &err, r.identity, data)
 
 	for {
 		r.mu.Lock()
@@ -170,7 +169,8 @@ func (r *RateLimiter[T]) Process(ctx context.Context, data T) (result T, err err
 		if r.canTakeToken() {
 			// Emit allowed signal
 			capitan.Info(ctx, SignalRateLimiterAllowed,
-				FieldName.Field(string(r.name)),
+				FieldName.Field(r.identity.Name()),
+				FieldIdentityID.Field(r.identity.ID().String()),
 				FieldTokens.Field(r.tokens),
 				FieldRate.Field(r.rate),
 				FieldBurst.Field(r.burst),
@@ -178,7 +178,22 @@ func (r *RateLimiter[T]) Process(ctx context.Context, data T) (result T, err err
 			)
 
 			r.mu.Unlock()
-			return data, nil
+			// Execute the wrapped processor
+			result, err = r.processor.Process(ctx, data)
+			if err != nil {
+				var pipeErr *Error[T]
+				if errors.As(err, &pipeErr) {
+					pipeErr.Path = append([]Identity{r.identity}, pipeErr.Path...)
+					return result, pipeErr
+				}
+				return result, &Error[T]{
+					Timestamp: time.Now(),
+					InputData: data,
+					Err:       err,
+					Path:      []Identity{r.identity},
+				}
+			}
+			return result, nil
 		}
 
 		switch mode {
@@ -187,7 +202,8 @@ func (r *RateLimiter[T]) Process(ctx context.Context, data T) (result T, err err
 
 			// Emit throttled signal
 			capitan.Warn(ctx, SignalRateLimiterThrottled,
-				FieldName.Field(string(r.name)),
+				FieldName.Field(r.identity.Name()),
+				FieldIdentityID.Field(r.identity.ID().String()),
 				FieldWaitTime.Field(waitTime.Seconds()),
 				FieldTokens.Field(r.tokens),
 				FieldRate.Field(r.rate),
@@ -202,7 +218,7 @@ func (r *RateLimiter[T]) Process(ctx context.Context, data T) (result T, err err
 				return data, &Error[T]{
 					Err:       ctx.Err(),
 					InputData: data,
-					Path:      []Name{r.name},
+					Path:      []Identity{r.identity},
 					Timeout:   errors.Is(ctx.Err(), context.DeadlineExceeded),
 					Canceled:  errors.Is(ctx.Err(), context.Canceled),
 					Timestamp: r.clock.Now(),
@@ -217,7 +233,7 @@ func (r *RateLimiter[T]) Process(ctx context.Context, data T) (result T, err err
 				return data, &Error[T]{
 					Err:       ctx.Err(),
 					InputData: data,
-					Path:      []Name{r.name},
+					Path:      []Identity{r.identity},
 					Timeout:   errors.Is(ctx.Err(), context.DeadlineExceeded),
 					Canceled:  errors.Is(ctx.Err(), context.Canceled),
 					Timestamp: r.clock.Now(),
@@ -227,7 +243,8 @@ func (r *RateLimiter[T]) Process(ctx context.Context, data T) (result T, err err
 		case modeDrop:
 			// Emit dropped signal
 			capitan.Error(ctx, SignalRateLimiterDropped,
-				FieldName.Field(string(r.name)),
+				FieldName.Field(r.identity.Name()),
+				FieldIdentityID.Field(r.identity.ID().String()),
 				FieldTokens.Field(r.tokens),
 				FieldRate.Field(r.rate),
 				FieldBurst.Field(r.burst),
@@ -239,7 +256,7 @@ func (r *RateLimiter[T]) Process(ctx context.Context, data T) (result T, err err
 			return data, &Error[T]{
 				Err:       fmt.Errorf("rate limit exceeded"),
 				InputData: data,
-				Path:      []Name{r.name},
+				Path:      []Identity{r.identity},
 				Timestamp: r.clock.Now(),
 			}
 
@@ -248,7 +265,7 @@ func (r *RateLimiter[T]) Process(ctx context.Context, data T) (result T, err err
 			return data, &Error[T]{
 				Err:       fmt.Errorf("invalid rate limiter mode: %s", mode),
 				InputData: data,
-				Path:      []Name{r.name},
+				Path:      []Identity{r.identity},
 				Timestamp: r.clock.Now(),
 			}
 		}
@@ -312,11 +329,28 @@ func (r *RateLimiter[T]) GetMode() string {
 	return r.mode
 }
 
-// Name returns the name of this connector.
-func (r *RateLimiter[T]) Name() Name {
+// Identity returns the identity of this connector.
+func (r *RateLimiter[T]) Identity() Identity {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.name
+	return r.identity
+}
+
+// Schema returns a Node representing this connector in the pipeline schema.
+func (r *RateLimiter[T]) Schema() Node {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return Node{
+		Identity: r.identity,
+		Type:     "ratelimiter",
+		Flow:     RateLimiterFlow{Processor: r.processor.Schema()},
+		Metadata: map[string]any{
+			"rate":  r.rate,
+			"burst": r.burst,
+			"mode":  r.mode,
+		},
+	}
 }
 
 // WithClock sets the clock implementation for testing purposes.
@@ -338,7 +372,11 @@ func (r *RateLimiter[T]) GetAvailableTokens() float64 {
 	return r.tokens
 }
 
-// Close gracefully shuts down the connector.
-func (*RateLimiter[T]) Close() error {
-	return nil
+// Close gracefully shuts down the connector and its wrapped processor.
+// Close is idempotent - multiple calls return the same result.
+func (r *RateLimiter[T]) Close() error {
+	r.closeOnce.Do(func() {
+		r.closeErr = r.processor.Close()
+	})
+	return r.closeErr
 }

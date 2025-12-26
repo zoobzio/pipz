@@ -74,14 +74,14 @@ func BenchmarkPipelineLength(b *testing.B) {
 			// Create pipeline with specified length
 			processors := make([]pipz.Chainable[ShoppingCart], length)
 			for i := 0; i < length; i++ {
-				processors[i] = pipz.Transform(pipz.Name("step"+strconv.Itoa(i)),
+				processors[i] = pipz.Transform(pipz.NewIdentity("step"+strconv.Itoa(i), ""),
 					func(_ context.Context, cart ShoppingCart) ShoppingCart {
 						cart.Total += 0.01 // Add small processing fee
 						return cart
 					})
 			}
 
-			pipeline := pipz.NewSequence("pipeline", processors...)
+			pipeline := pipz.NewSequence(pipz.NewIdentity("pipeline", ""), processors...)
 
 			b.ResetTimer()
 			b.ReportAllocs()
@@ -103,13 +103,13 @@ func BenchmarkBranchingPatterns(b *testing.B) {
 	data := ClonableInt(42)
 
 	// Simple processors for composition
-	double := pipz.Transform("double", func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 })
-	add10 := pipz.Transform("add10", func(_ context.Context, n ClonableInt) ClonableInt { return n + 10 })
-	subtract5 := pipz.Transform("subtract5", func(_ context.Context, n ClonableInt) ClonableInt { return n - 5 })
-	multiply3 := pipz.Transform("multiply3", func(_ context.Context, n ClonableInt) ClonableInt { return n * 3 })
+	double := pipz.Transform(pipz.NewIdentity("double", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 })
+	add10 := pipz.Transform(pipz.NewIdentity("add10", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n + 10 })
+	subtract5 := pipz.Transform(pipz.NewIdentity("subtract5", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n - 5 })
+	multiply3 := pipz.Transform(pipz.NewIdentity("multiply3", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n * 3 })
 
 	b.Run("Sequential_Chain", func(b *testing.B) {
-		pipeline := pipz.NewSequence("sequential",
+		pipeline := pipz.NewSequence(pipz.NewIdentity("sequential", ""),
 			double, add10, subtract5, multiply3,
 		)
 
@@ -126,7 +126,7 @@ func BenchmarkBranchingPatterns(b *testing.B) {
 	})
 
 	b.Run("Concurrent_Four_Branches", func(b *testing.B) {
-		pipeline := pipz.NewConcurrent("concurrent",
+		pipeline := pipz.NewConcurrent(pipz.NewIdentity("concurrent", ""),
 			nil,
 			double, add10, subtract5, multiply3,
 		)
@@ -144,17 +144,17 @@ func BenchmarkBranchingPatterns(b *testing.B) {
 	})
 
 	b.Run("Race_Four_Branches", func(b *testing.B) {
-		pipeline := pipz.NewRace("race",
-			pipz.Transform("fast", func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 }),
-			pipz.Transform("slow1", func(_ context.Context, n ClonableInt) ClonableInt {
+		pipeline := pipz.NewRace(pipz.NewIdentity("race", ""),
+			pipz.Transform(pipz.NewIdentity("fast", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 }),
+			pipz.Transform(pipz.NewIdentity("slow1", ""), func(_ context.Context, n ClonableInt) ClonableInt {
 				time.Sleep(time.Microsecond)
 				return n + 10
 			}),
-			pipz.Transform("slow2", func(_ context.Context, n ClonableInt) ClonableInt {
+			pipz.Transform(pipz.NewIdentity("slow2", ""), func(_ context.Context, n ClonableInt) ClonableInt {
 				time.Sleep(2 * time.Microsecond)
 				return n - 5
 			}),
-			pipz.Transform("slowest", func(_ context.Context, n ClonableInt) ClonableInt {
+			pipz.Transform(pipz.NewIdentity("slowest", ""), func(_ context.Context, n ClonableInt) ClonableInt {
 				time.Sleep(3 * time.Microsecond)
 				return n * 3
 			}),
@@ -173,12 +173,12 @@ func BenchmarkBranchingPatterns(b *testing.B) {
 	})
 
 	b.Run("Contest_First_Acceptable", func(b *testing.B) {
-		pipeline := pipz.NewContest("contest",
-			func(_ context.Context, n ClonableInt) bool { return n > 100 },                                  // Accept results > 100
-			pipz.Transform("small", func(_ context.Context, n ClonableInt) ClonableInt { return n + 5 }),    // Won't meet condition
-			pipz.Transform("medium", func(_ context.Context, n ClonableInt) ClonableInt { return n + 50 }),  // Won't meet condition
-			pipz.Transform("large", func(_ context.Context, n ClonableInt) ClonableInt { return n + 100 }),  // Will meet condition
-			pipz.Transform("xlarge", func(_ context.Context, n ClonableInt) ClonableInt { return n + 200 }), // Would meet but slower
+		pipeline := pipz.NewContest(pipz.NewIdentity("contest", ""),
+			func(_ context.Context, n ClonableInt) bool { return n > 100 },                                                       // Accept results > 100
+			pipz.Transform(pipz.NewIdentity("small", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n + 5 }),   // Won't meet condition
+			pipz.Transform(pipz.NewIdentity("medium", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n + 50 }), // Won't meet condition
+			pipz.Transform(pipz.NewIdentity("large", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n + 100 }), // Will meet condition
+			pipz.Transform(pipz.NewIdentity("xlarge", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n + 200 }),// Would meet but slower
 		)
 
 		b.ResetTimer()
@@ -195,10 +195,10 @@ func BenchmarkBranchingPatterns(b *testing.B) {
 
 	b.Run("Nested_Sequential_In_Concurrent", func(b *testing.B) {
 		// Create two sequential pipelines to run concurrently
-		seq1 := pipz.NewSequence("seq1", double, add10)
-		seq2 := pipz.NewSequence("seq2", subtract5, multiply3)
+		seq1 := pipz.NewSequence(pipz.NewIdentity("seq1", ""), double, add10)
+		seq2 := pipz.NewSequence(pipz.NewIdentity("seq2", ""), subtract5, multiply3)
 
-		pipeline := pipz.NewConcurrent("nested", nil, seq1, seq2)
+		pipeline := pipz.NewConcurrent(pipz.NewIdentity("nested", ""), nil, seq1, seq2)
 
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -214,9 +214,9 @@ func BenchmarkBranchingPatterns(b *testing.B) {
 
 	b.Run("Nested_Concurrent_In_Sequential", func(b *testing.B) {
 		// Sequential pipeline with concurrent step in the middle
-		concurrent := pipz.NewConcurrent("middle", nil, double, add10)
+		concurrent := pipz.NewConcurrent(pipz.NewIdentity("middle", ""), nil, double, add10)
 
-		pipeline := pipz.NewSequence("nested",
+		pipeline := pipz.NewSequence(pipz.NewIdentity("nested", ""),
 			subtract5,
 			concurrent,
 			multiply3,
@@ -247,9 +247,9 @@ func BenchmarkComplexWorkflows(b *testing.B) {
 		}
 
 		// Simulate a complete API client workflow
-		pipeline := pipz.NewSequence[Request]("api-client",
+		pipeline := pipz.NewSequence[Request](pipz.NewIdentity("api-client", ""),
 			// Validate request
-			pipz.Apply("validate", func(_ context.Context, req Request) (Request, error) {
+			pipz.Apply(pipz.NewIdentity("validate", ""), func(_ context.Context, req Request) (Request, error) {
 				if req.URL == "" {
 					return req, errors.New("URL required")
 				}
@@ -257,34 +257,33 @@ func BenchmarkComplexWorkflows(b *testing.B) {
 			}),
 
 			// Add authentication
-			pipz.Transform("auth", func(_ context.Context, req Request) Request {
+			pipz.Transform(pipz.NewIdentity("auth", ""), func(_ context.Context, req Request) Request {
 				req.URL += "?token=auth_token"
 				return req
 			}),
 
-			// Rate limiting
-			pipz.NewRateLimiter[Request]("rate-limit", 1000.0, 100),
-
-			// Circuit breaker + retry
-			pipz.NewCircuitBreaker[Request]("circuit-breaker",
-				pipz.NewRetry[Request]("retry",
-					// Simulate API call
-					pipz.Apply("api-call", func(_ context.Context, req Request) (Request, error) {
-						// Simulate occasional failures
-						if req.Data%10 == 0 {
-							return req, errors.New("API error")
-						}
-						req.Data *= 2 // Simulate response processing
-						return req, nil
-					}),
-					3,
+			// Rate limiting wrapping circuit breaker + retry
+			pipz.NewRateLimiter[Request](pipz.NewIdentity("rate-limit", ""), 1000.0, 100,
+				pipz.NewCircuitBreaker[Request](pipz.NewIdentity("circuit-breaker", ""),
+					pipz.NewRetry[Request](pipz.NewIdentity("retry", ""),
+						// Simulate API call
+						pipz.Apply(pipz.NewIdentity("api-call", ""), func(_ context.Context, req Request) (Request, error) {
+							// Simulate occasional failures
+							if req.Data%10 == 0 {
+								return req, errors.New("API error")
+							}
+							req.Data *= 2 // Simulate response processing
+							return req, nil
+						}),
+						3,
+					),
+					5,
+					time.Minute,
 				),
-				5,
-				time.Minute,
 			),
 
 			// Process response
-			pipz.Transform("process", func(_ context.Context, req Request) Request {
+			pipz.Transform(pipz.NewIdentity("process", ""), func(_ context.Context, req Request) Request {
 				req.Data += 100
 				return req
 			}),
@@ -317,9 +316,9 @@ func BenchmarkComplexWorkflows(b *testing.B) {
 		var processedCount int64
 
 		// Complex event processing pipeline
-		pipeline := pipz.NewSequence[Event]("event-processing",
+		pipeline := pipz.NewSequence[Event](pipz.NewIdentity("event-processing", ""),
 			// Validate event
-			pipz.Apply("validate", func(_ context.Context, event Event) (Event, error) {
+			pipz.Apply(pipz.NewIdentity("validate", ""), func(_ context.Context, event Event) (Event, error) {
 				if event.ID == "" {
 					return event, errors.New("event ID required")
 				}
@@ -327,11 +326,11 @@ func BenchmarkComplexWorkflows(b *testing.B) {
 			}),
 
 			// Filter by type
-			pipz.NewFilter[Event]("type-filter",
+			pipz.NewFilter[Event](pipz.NewIdentity("type-filter", ""),
 				func(_ context.Context, event Event) bool {
 					return event.Type != "ignored"
 				},
-				pipz.Transform("mark-accepted", func(_ context.Context, event Event) Event {
+				pipz.Transform(pipz.NewIdentity("mark-accepted", ""), func(_ context.Context, event Event) Event {
 					if event.Data == nil {
 						event.Data = make(map[string]interface{})
 					}
@@ -341,7 +340,7 @@ func BenchmarkComplexWorkflows(b *testing.B) {
 			),
 
 			// Route by priority
-			pipz.NewSwitch[Event, string]("priority-router",
+			pipz.NewSwitch[Event](pipz.NewIdentity("priority-router", ""),
 				func(_ context.Context, event Event) string {
 					if event.Priority > 9 {
 						return "critical"
@@ -351,7 +350,7 @@ func BenchmarkComplexWorkflows(b *testing.B) {
 					return "normal"
 				},
 			).AddRoute("critical",
-				pipz.Transform("critical", func(_ context.Context, event Event) Event {
+				pipz.Transform(pipz.NewIdentity("critical", ""), func(_ context.Context, event Event) Event {
 					if event.Data == nil {
 						event.Data = make(map[string]interface{})
 					}
@@ -359,7 +358,7 @@ func BenchmarkComplexWorkflows(b *testing.B) {
 					return event
 				}),
 			).AddRoute("high",
-				pipz.Transform("high-priority", func(_ context.Context, event Event) Event {
+				pipz.Transform(pipz.NewIdentity("high-priority", ""), func(_ context.Context, event Event) Event {
 					if event.Data == nil {
 						event.Data = make(map[string]interface{})
 					}
@@ -367,7 +366,7 @@ func BenchmarkComplexWorkflows(b *testing.B) {
 					return event
 				}),
 			).AddRoute("normal",
-				pipz.Transform("normal", func(_ context.Context, event Event) Event {
+				pipz.Transform(pipz.NewIdentity("normal", ""), func(_ context.Context, event Event) Event {
 					if event.Data == nil {
 						event.Data = make(map[string]interface{})
 					}
@@ -377,9 +376,9 @@ func BenchmarkComplexWorkflows(b *testing.B) {
 			),
 
 			// Parallel enrichment
-			pipz.NewSequence[Event]("enrichment",
+			pipz.NewSequence[Event](pipz.NewIdentity("enrichment", ""),
 				// Add timestamp
-				pipz.Transform("timestamp", func(_ context.Context, event Event) Event {
+				pipz.Transform(pipz.NewIdentity("timestamp", ""), func(_ context.Context, event Event) Event {
 					if event.Data == nil {
 						event.Data = make(map[string]interface{})
 					}
@@ -388,7 +387,7 @@ func BenchmarkComplexWorkflows(b *testing.B) {
 				}),
 
 				// Add metadata
-				pipz.Transform("metadata", func(_ context.Context, event Event) Event {
+				pipz.Transform(pipz.NewIdentity("metadata", ""), func(_ context.Context, event Event) Event {
 					if event.Data == nil {
 						event.Data = make(map[string]interface{})
 					}
@@ -401,7 +400,7 @@ func BenchmarkComplexWorkflows(b *testing.B) {
 			),
 
 			// Final processing
-			pipz.Transform("finalize", func(_ context.Context, event Event) Event {
+			pipz.Transform(pipz.NewIdentity("finalize", ""), func(_ context.Context, event Event) Event {
 				atomic.AddInt64(&processedCount, 1)
 				if event.Data == nil {
 					event.Data = make(map[string]interface{})
@@ -441,11 +440,11 @@ func BenchmarkComplexWorkflows(b *testing.B) {
 		}
 
 		// Complex data transformation pipeline
-		pipeline := pipz.NewSequence[Record]("data-transform",
+		pipeline := pipz.NewSequence[Record](pipz.NewIdentity("data-transform", ""),
 			// Validation with fallback
-			pipz.NewFallback[Record]("validation",
+			pipz.NewFallback[Record](pipz.NewIdentity("validation", ""),
 				// Strict validation
-				pipz.Apply("strict-validate", func(_ context.Context, r Record) (Record, error) {
+				pipz.Apply(pipz.NewIdentity("strict-validate", ""), func(_ context.Context, r Record) (Record, error) {
 					if r.Name == "" || r.Email == "" || r.Score < 0 {
 						return r, errors.New("strict validation failed")
 					}
@@ -453,7 +452,7 @@ func BenchmarkComplexWorkflows(b *testing.B) {
 					return r, nil
 				}),
 				// Lenient validation
-				pipz.Apply("lenient-validate", func(_ context.Context, r Record) (Record, error) {
+				pipz.Apply(pipz.NewIdentity("lenient-validate", ""), func(_ context.Context, r Record) (Record, error) {
 					if r.ID <= 0 {
 						return r, errors.New("ID required")
 					}
@@ -463,25 +462,25 @@ func BenchmarkComplexWorkflows(b *testing.B) {
 			),
 
 			// Conditional cleanup
-			pipz.NewFilter[Record]("needs-cleanup",
+			pipz.NewFilter[Record](pipz.NewIdentity("needs-cleanup", ""),
 				func(_ context.Context, r Record) bool { return !r.Valid },
-				pipz.NewSequence[Record]("cleanup",
+				pipz.NewSequence[Record](pipz.NewIdentity("cleanup", ""),
 					// Fix name
-					pipz.Transform("fix-name", func(_ context.Context, r Record) Record {
+					pipz.Transform(pipz.NewIdentity("fix-name", ""), func(_ context.Context, r Record) Record {
 						if r.Name == "" {
 							r.Name = "Unknown-" + strconv.Itoa(r.ID)
 						}
 						return r
 					}),
 					// Fix email
-					pipz.Transform("fix-email", func(_ context.Context, r Record) Record {
+					pipz.Transform(pipz.NewIdentity("fix-email", ""), func(_ context.Context, r Record) Record {
 						if r.Email == "" || !strings.Contains(r.Email, "@") {
 							r.Email = "user" + strconv.Itoa(r.ID) + "@example.com"
 						}
 						return r
 					}),
 					// Fix score
-					pipz.Transform("fix-score", func(_ context.Context, r Record) Record {
+					pipz.Transform(pipz.NewIdentity("fix-score", ""), func(_ context.Context, r Record) Record {
 						if r.Score < 0 {
 							r.Score = 0
 						}
@@ -491,21 +490,21 @@ func BenchmarkComplexWorkflows(b *testing.B) {
 			),
 
 			// Normalization
-			pipz.Transform("normalize", func(_ context.Context, r Record) Record {
+			pipz.Transform(pipz.NewIdentity("normalize", ""), func(_ context.Context, r Record) Record {
 				r.Name = strings.TrimSpace(strings.ToTitle(r.Name))
 				r.Email = strings.ToLower(strings.TrimSpace(r.Email))
 				return r
 			}),
 
 			// Enrichment with race condition (fastest wins)
-			pipz.NewSequence[Record]("enrichment-race",
+			pipz.NewSequence[Record](pipz.NewIdentity("enrichment-race", ""),
 				// Fast local enrichment
-				pipz.Transform("local-enrich", func(_ context.Context, r Record) Record {
+				pipz.Transform(pipz.NewIdentity("local-enrich", ""), func(_ context.Context, r Record) Record {
 					r.Tags = append(r.Tags, "local", "fast")
 					return r
 				}),
 				// Slower database enrichment
-				pipz.Transform("db-enrich", func(_ context.Context, r Record) Record {
+				pipz.Transform(pipz.NewIdentity("db-enrich", ""), func(_ context.Context, r Record) Record {
 					time.Sleep(time.Microsecond) // Simulate DB delay
 					r.Tags = append(r.Tags, "database", "complete")
 					r.Score *= 1.1 // DB has more accurate scoring
@@ -514,7 +513,7 @@ func BenchmarkComplexWorkflows(b *testing.B) {
 			),
 
 			// Final scoring
-			pipz.Transform("final-score", func(_ context.Context, r Record) Record {
+			pipz.Transform(pipz.NewIdentity("final-score", ""), func(_ context.Context, r Record) Record {
 				// Boost score based on tags
 				for _, tag := range r.Tags {
 					if tag == "complete" {
@@ -559,10 +558,10 @@ func BenchmarkDynamicPipelines(b *testing.B) {
 
 	b.Run("Static_Pipeline", func(b *testing.B) {
 		// Static pipeline for comparison
-		pipeline := pipz.NewSequence("static",
-			pipz.Transform("step1", func(_ context.Context, n ClonableInt) ClonableInt { return n + 1 }),
-			pipz.Transform("step2", func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 }),
-			pipz.Transform("step3", func(_ context.Context, n ClonableInt) ClonableInt { return n - 5 }),
+		pipeline := pipz.NewSequence(pipz.NewIdentity("static", ""),
+			pipz.Transform(pipz.NewIdentity("step1", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n + 1 }),
+			pipz.Transform(pipz.NewIdentity("step2", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 }),
+			pipz.Transform(pipz.NewIdentity("step3", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n - 5 }),
 		)
 
 		data := ClonableInt(42)
@@ -581,11 +580,11 @@ func BenchmarkDynamicPipelines(b *testing.B) {
 
 	b.Run("Dynamic_Pipeline_No_Changes", func(b *testing.B) {
 		// Dynamic pipeline but no actual changes during benchmark
-		seq := pipz.NewSequence[ClonableInt]("dynamic")
+		seq := pipz.NewSequence[ClonableInt](pipz.NewIdentity("dynamic", ""))
 		seq.Register(
-			pipz.Transform("step1", func(_ context.Context, n ClonableInt) ClonableInt { return n + 1 }),
-			pipz.Transform("step2", func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 }),
-			pipz.Transform("step3", func(_ context.Context, n ClonableInt) ClonableInt { return n - 5 }),
+			pipz.Transform(pipz.NewIdentity("step1", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n + 1 }),
+			pipz.Transform(pipz.NewIdentity("step2", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 }),
+			pipz.Transform(pipz.NewIdentity("step3", ""), func(_ context.Context, n ClonableInt) ClonableInt { return n - 5 }),
 		)
 
 		data := ClonableInt(42)
@@ -603,8 +602,11 @@ func BenchmarkDynamicPipelines(b *testing.B) {
 	})
 
 	b.Run("Dynamic_Pipeline_With_Modifications", func(b *testing.B) {
-		seq := pipz.NewSequence[ClonableInt]("dynamic-mod")
-		seq.Register(pipz.Transform("step1", func(_ context.Context, n ClonableInt) ClonableInt { return n + 1 }))
+		step1ID := pipz.NewIdentity("step1", "")
+		step2ID := pipz.NewIdentity("step2", "")
+
+		seq := pipz.NewSequence[ClonableInt](pipz.NewIdentity("dynamic-mod", ""))
+		seq.Register(pipz.Transform(step1ID, func(_ context.Context, n ClonableInt) ClonableInt { return n + 1 }))
 
 		data := ClonableInt(42)
 
@@ -615,9 +617,9 @@ func BenchmarkDynamicPipelines(b *testing.B) {
 			// Occasionally modify the pipeline
 			if i%100 == 0 {
 				if seq.Len() == 1 {
-					seq.Register(pipz.Transform("step2", func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 }))
+					seq.Register(pipz.Transform(step2ID, func(_ context.Context, n ClonableInt) ClonableInt { return n * 2 }))
 				} else {
-					_ = seq.Remove("step2") //nolint:errcheck // Return value ignored in benchmark
+					_ = seq.Remove(step2ID) //nolint:errcheck // Return value ignored in benchmark
 				}
 			}
 
@@ -630,29 +632,41 @@ func BenchmarkDynamicPipelines(b *testing.B) {
 	})
 
 	b.Run("Pipeline_Modification_Operations", func(b *testing.B) {
-		seq := pipz.NewSequence[ClonableInt]("mod-ops")
+		// Pre-create Identity objects for step-0 through step-9
+		stepIDs := make([]pipz.Identity, 10)
+		for i := 0; i < 10; i++ {
+			stepIDs[i] = pipz.NewIdentity("step-"+strconv.Itoa(i), "")
+		}
+
+		// Track first registered Identity for After operations
+		var firstID pipz.Identity
+		seq := pipz.NewSequence[ClonableInt](pipz.NewIdentity("mod-ops", ""))
 
 		b.ResetTimer()
 		b.ReportAllocs()
 
 		for i := 0; i < b.N; i++ {
-			stepName := "step-" + strconv.Itoa(i%10)
-			processor := pipz.Transform(pipz.Name(stepName), func(_ context.Context, n ClonableInt) ClonableInt { return n + 1 })
+			stepIdx := i % 10
+			stepID := stepIDs[stepIdx]
+			processor := pipz.Transform(stepID, func(_ context.Context, n ClonableInt) ClonableInt { return n + 1 })
 
 			switch i % 4 {
 			case 0:
 				seq.Register(processor)
+				if seq.Len() == 1 {
+					firstID = stepID
+				}
 			case 1:
 				if seq.Len() > 0 {
-					_ = seq.Remove(pipz.Name(stepName)) //nolint:errcheck // Return value ignored in benchmark
+					_ = seq.Remove(stepID) //nolint:errcheck // Return value ignored in benchmark
 				}
 			case 2:
 				if seq.Len() > 0 {
-					_ = seq.Replace(pipz.Name(stepName), processor) //nolint:errcheck // Return value ignored in benchmark
+					_ = seq.Replace(stepID, processor) //nolint:errcheck // Return value ignored in benchmark
 				}
 			case 3:
 				if seq.Len() > 1 {
-					_ = seq.After(seq.Names()[0], processor) //nolint:errcheck // Return value ignored in benchmark
+					_ = seq.After(firstID, processor) //nolint:errcheck // Return value ignored in benchmark
 				}
 			}
 		}
@@ -670,7 +684,7 @@ func BenchmarkScalabilityPatterns(b *testing.B) {
 		b.Run("Concurrent_"+strconv.Itoa(concurrency)+"_Processors", func(b *testing.B) {
 			processors := make([]pipz.Chainable[ClonableInt], concurrency)
 			for i := 0; i < concurrency; i++ {
-				processors[i] = pipz.Transform(pipz.Name("proc"+strconv.Itoa(i)),
+				processors[i] = pipz.Transform(pipz.NewIdentity("proc"+strconv.Itoa(i), ""),
 					func(_ context.Context, n ClonableInt) ClonableInt {
 						// Add small delay to simulate work
 						for j := 0; j < 100; j++ {
@@ -680,7 +694,7 @@ func BenchmarkScalabilityPatterns(b *testing.B) {
 					})
 			}
 
-			pipeline := pipz.NewConcurrent("concurrent", nil, processors...)
+			pipeline := pipz.NewConcurrent(pipz.NewIdentity("concurrent", ""), nil, processors...)
 			data := ClonableInt(42)
 
 			b.ResetTimer()
@@ -701,16 +715,16 @@ func BenchmarkScalabilityPatterns(b *testing.B) {
 
 	for _, levels := range fallbackLevels {
 		b.Run("Fallback_"+strconv.Itoa(levels)+"_Levels", func(b *testing.B) {
-			var pipeline pipz.Chainable[ClonableInt] = pipz.Apply("final", func(_ context.Context, n ClonableInt) (ClonableInt, error) {
+			var pipeline pipz.Chainable[ClonableInt] = pipz.Apply(pipz.NewIdentity("final", ""), func(_ context.Context, n ClonableInt) (ClonableInt, error) {
 				return n + 1, nil
 			})
 
 			// Build nested fallbacks
 			for i := levels - 1; i >= 0; i-- {
-				failing := pipz.Apply(pipz.Name("fail"+strconv.Itoa(i)), func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
+				failing := pipz.Apply(pipz.NewIdentity("fail"+strconv.Itoa(i), ""), func(_ context.Context, _ ClonableInt) (ClonableInt, error) {
 					return 0, errors.New("simulated failure")
 				})
-				pipeline = pipz.NewFallback(pipz.Name("fallback"+strconv.Itoa(i)), failing, pipeline)
+				pipeline = pipz.NewFallback(pipz.NewIdentity("fallback"+strconv.Itoa(i), ""), failing, pipeline)
 			}
 
 			data := ClonableInt(42)

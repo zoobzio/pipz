@@ -55,7 +55,7 @@ import (
 type Filter[T any] struct {
 	processor Chainable[T]
 	condition func(context.Context, T) bool
-	name      Name
+	identity  Identity
 	mu        sync.RWMutex
 	closeOnce sync.Once
 	closeErr  error
@@ -63,9 +63,9 @@ type Filter[T any] struct {
 
 // NewFilter creates a new Filter connector with the given condition and processor.
 // When condition returns true, processor is executed. When false, data passes through unchanged.
-func NewFilter[T any](name Name, condition func(context.Context, T) bool, processor Chainable[T]) *Filter[T] {
+func NewFilter[T any](identity Identity, condition func(context.Context, T) bool, processor Chainable[T]) *Filter[T] {
 	return &Filter[T]{
-		name:      name,
+		identity:  identity,
 		condition: condition,
 		processor: processor,
 	}
@@ -74,7 +74,7 @@ func NewFilter[T any](name Name, condition func(context.Context, T) bool, proces
 // Process implements the Chainable interface.
 // Evaluates the condition and either executes the processor or passes data through unchanged.
 func (f *Filter[T]) Process(ctx context.Context, data T) (result T, err error) {
-	defer recoverFromPanic(&result, &err, f.name, data)
+	defer recoverFromPanic(&result, &err, f.identity, data)
 
 	f.mu.RLock()
 	condition := f.condition
@@ -86,7 +86,8 @@ func (f *Filter[T]) Process(ctx context.Context, data T) (result T, err error) {
 
 	// Emit evaluated signal
 	capitan.Info(ctx, SignalFilterEvaluated,
-		FieldName.Field(string(f.name)),
+		FieldName.Field(f.identity.Name()),
+		FieldIdentityID.Field(f.identity.ID().String()),
 		FieldPassed.Field(conditionMet),
 	)
 
@@ -98,10 +99,10 @@ func (f *Filter[T]) Process(ctx context.Context, data T) (result T, err error) {
 	// Condition true - execute processor
 	result, err = processor.Process(ctx, data)
 	if err != nil {
-		// Prepend this filter's name to the error path
+		// Prepend this filter's identity to the error path
 		var pipeErr *Error[T]
 		if errors.As(err, &pipeErr) {
-			pipeErr.Path = append([]Name{f.name}, pipeErr.Path...)
+			pipeErr.Path = append([]Identity{f.identity}, pipeErr.Path...)
 			return result, pipeErr
 		}
 		// Wrap non-pipeline errors
@@ -109,7 +110,7 @@ func (f *Filter[T]) Process(ctx context.Context, data T) (result T, err error) {
 			Timestamp: time.Now(),
 			InputData: data,
 			Err:       err,
-			Path:      []Name{f.name},
+			Path:      []Identity{f.identity},
 		}
 	}
 
@@ -149,11 +150,23 @@ func (f *Filter[T]) Processor() Chainable[T] {
 	return f.processor
 }
 
-// Name returns the name of this connector.
-func (f *Filter[T]) Name() Name {
+// Identity returns the identity of this connector.
+func (f *Filter[T]) Identity() Identity {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return f.name
+	return f.identity
+}
+
+// Schema returns a Node representing this connector in the pipeline schema.
+func (f *Filter[T]) Schema() Node {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	return Node{
+		Identity: f.identity,
+		Type:     "filter",
+		Flow:     FilterFlow{Processor: f.processor.Schema()},
+	}
 }
 
 // Close gracefully shuts down the connector and its child processor.

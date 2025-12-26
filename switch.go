@@ -3,7 +3,6 @@ package pipz
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -11,54 +10,48 @@ import (
 )
 
 // Condition determines routing based on input data.
-// Returns a route key of any comparable type for multi-way branching.
+// Returns a route key string for multi-way branching.
 //
-// Using generic keys instead of strings enables type-safe routing
-// beyond simple string matching. Define custom types for your routes:
+// Define string constants for type-safe routing:
 //
-//	type PaymentRoute string
 //	const (
-//	    RouteStandard   PaymentRoute = "standard"
-//	    RouteHighValue  PaymentRoute = "high_value"
-//	    RouteCrypto     PaymentRoute = "crypto"
-//	    RouteDefault    PaymentRoute = "default"
+//	    RouteStandard   = "standard"
+//	    RouteHighValue  = "high_value"
+//	    RouteCrypto     = "crypto"
 //	)
 //
 // Common patterns include routing by:
-//   - Typed enums for business states
-//   - Integer codes for priority levels
-//   - Custom types for domain concepts
-type Condition[T any, K comparable] func(context.Context, T) K
+//   - Status strings for workflow states
+//   - Region identifiers
+//   - Priority levels as strings
+//   - Feature flag names
+type Condition[T any] func(context.Context, T) string
 
 // Switch routes to different processors based on condition result.
 // Switch enables conditional processing where the path taken depends
 // on the input data. The condition function examines the data and
 // returns a route key that determines which processor to use.
 //
-// The key type K must be comparable (can be used as map key). This enables
-// type-safe routing with custom types, avoiding magic strings. If no route
-// exists for the returned key, the input passes through unchanged.
+// If no route exists for the returned key, the input passes through unchanged.
 //
 // Switch is perfect for:
-//   - Type-based processing with enum safety
 //   - Status-based workflows with defined states
-//   - Region-specific logic with typed regions
-//   - Priority handling with numeric levels
-//   - A/B testing with experiment types
+//   - Region-specific logic
+//   - Priority handling
+//   - A/B testing with experiment names
 //   - Dynamic routing tables that change at runtime
 //   - Feature flag controlled processing paths
 //
-// Example with type-safe keys:
+// Example:
 //
-//	type PaymentRoute string
 //	const (
-//	    RouteStandard   PaymentRoute = "standard"
-//	    RouteHighValue  PaymentRoute = "high_value"
-//	    RouteCrypto     PaymentRoute = "crypto"
+//	    RouteStandard   = "standard"
+//	    RouteHighValue  = "high_value"
+//	    RouteCrypto     = "crypto"
 //	)
 //
-//	switch := pipz.NewSwitch(
-//	    func(ctx context.Context, p Payment) PaymentRoute {
+//	router := pipz.NewSwitch(SwitchID,
+//	    func(ctx context.Context, p Payment) string {
 //	        if p.Amount > 10000 {
 //	            return RouteHighValue
 //	        } else if p.Method == "crypto" {
@@ -67,31 +60,31 @@ type Condition[T any, K comparable] func(context.Context, T) K
 //	        return RouteStandard
 //	    },
 //	)
-//	switch.AddRoute(RouteStandard, standardProcessor)
-//	switch.AddRoute(RouteHighValue, highValueProcessor)
-//	switch.AddRoute(RouteCrypto, cryptoProcessor)
-type Switch[T any, K comparable] struct {
-	condition Condition[T, K]
-	routes    map[K]Chainable[T]
-	name      Name
+//	router.AddRoute(RouteStandard, standardProcessor)
+//	router.AddRoute(RouteHighValue, highValueProcessor)
+//	router.AddRoute(RouteCrypto, cryptoProcessor)
+type Switch[T any] struct {
+	condition Condition[T]
+	routes    map[string]Chainable[T]
+	identity  Identity
 	mu        sync.RWMutex
 	closeOnce sync.Once
 	closeErr  error
 }
 
 // NewSwitch creates a new Switch connector with the given condition function.
-func NewSwitch[T any, K comparable](name Name, condition Condition[T, K]) *Switch[T, K] {
-	return &Switch[T, K]{
-		name:      name,
+func NewSwitch[T any](identity Identity, condition Condition[T]) *Switch[T] {
+	return &Switch[T]{
+		identity:  identity,
 		condition: condition,
-		routes:    make(map[K]Chainable[T]),
+		routes:    make(map[string]Chainable[T]),
 	}
 }
 
 // Process implements the Chainable interface.
 // If no route matches the condition result, the input is returned unchanged.
-func (s *Switch[T, K]) Process(ctx context.Context, data T) (result T, err error) {
-	defer recoverFromPanic(&result, &err, s.name, data)
+func (s *Switch[T]) Process(ctx context.Context, data T) (result T, err error) {
+	defer recoverFromPanic(&result, &err, s.identity, data)
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -102,8 +95,9 @@ func (s *Switch[T, K]) Process(ctx context.Context, data T) (result T, err error
 
 	// Emit routed signal
 	capitan.Info(ctx, SignalSwitchRouted,
-		FieldName.Field(string(s.name)),
-		FieldRouteKey.Field(fmt.Sprintf("%v", route)),
+		FieldName.Field(s.identity.Name()),
+		FieldIdentityID.Field(s.identity.ID().String()),
+		FieldRouteKey.Field(route),
 		FieldMatched.Field(exists),
 	)
 
@@ -117,8 +111,8 @@ func (s *Switch[T, K]) Process(ctx context.Context, data T) (result T, err error
 	if err != nil {
 		var pipeErr *Error[T]
 		if errors.As(err, &pipeErr) {
-			// Prepend this switch's name to the path
-			pipeErr.Path = append([]Name{s.name}, pipeErr.Path...)
+			// Prepend this switch's identity to the path
+			pipeErr.Path = append([]Identity{s.identity}, pipeErr.Path...)
 			return result, pipeErr
 		}
 		// Handle non-pipeline errors by wrapping them
@@ -126,14 +120,14 @@ func (s *Switch[T, K]) Process(ctx context.Context, data T) (result T, err error
 			Timestamp: time.Now(),
 			InputData: data,
 			Err:       err,
-			Path:      []Name{s.name},
+			Path:      []Identity{s.identity},
 		}
 	}
 	return result, nil
 }
 
 // AddRoute adds or updates a route in the switch.
-func (s *Switch[T, K]) AddRoute(key K, processor Chainable[T]) *Switch[T, K] {
+func (s *Switch[T]) AddRoute(key string, processor Chainable[T]) *Switch[T] {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.routes[key] = processor
@@ -141,7 +135,7 @@ func (s *Switch[T, K]) AddRoute(key K, processor Chainable[T]) *Switch[T, K] {
 }
 
 // RemoveRoute removes a route from the switch.
-func (s *Switch[T, K]) RemoveRoute(key K) *Switch[T, K] {
+func (s *Switch[T]) RemoveRoute(key string) *Switch[T] {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.routes, key)
@@ -149,7 +143,7 @@ func (s *Switch[T, K]) RemoveRoute(key K) *Switch[T, K] {
 }
 
 // SetCondition updates the condition function.
-func (s *Switch[T, K]) SetCondition(condition Condition[T, K]) *Switch[T, K] {
+func (s *Switch[T]) SetCondition(condition Condition[T]) *Switch[T] {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.condition = condition
@@ -157,11 +151,11 @@ func (s *Switch[T, K]) SetCondition(condition Condition[T, K]) *Switch[T, K] {
 }
 
 // Routes returns a copy of the current routes map.
-func (s *Switch[T, K]) Routes() map[K]Chainable[T] {
+func (s *Switch[T]) Routes() map[string]Chainable[T] {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	routes := make(map[K]Chainable[T], len(s.routes))
+	routes := make(map[string]Chainable[T], len(s.routes))
 	for k, v := range s.routes {
 		routes[k] = v
 	}
@@ -169,7 +163,7 @@ func (s *Switch[T, K]) Routes() map[K]Chainable[T] {
 }
 
 // HasRoute checks if a route exists for the given key.
-func (s *Switch[T, K]) HasRoute(key K) bool {
+func (s *Switch[T]) HasRoute(key string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	_, exists := s.routes[key]
@@ -177,34 +171,51 @@ func (s *Switch[T, K]) HasRoute(key K) bool {
 }
 
 // ClearRoutes removes all routes from the switch.
-func (s *Switch[T, K]) ClearRoutes() *Switch[T, K] {
+func (s *Switch[T]) ClearRoutes() *Switch[T] {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.routes = make(map[K]Chainable[T])
+	s.routes = make(map[string]Chainable[T])
 	return s
 }
 
 // SetRoutes replaces all routes in the switch atomically.
-func (s *Switch[T, K]) SetRoutes(routes map[K]Chainable[T]) *Switch[T, K] {
+func (s *Switch[T]) SetRoutes(routes map[string]Chainable[T]) *Switch[T] {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.routes = make(map[K]Chainable[T], len(routes))
+	s.routes = make(map[string]Chainable[T], len(routes))
 	for k, v := range routes {
 		s.routes[k] = v
 	}
 	return s
 }
 
-// Name returns the name of this connector.
-func (s *Switch[T, K]) Name() Name {
+// Identity returns the identity of this connector.
+func (s *Switch[T]) Identity() Identity {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.name
+	return s.identity
+}
+
+// Schema returns a Node representing this connector in the pipeline schema.
+func (s *Switch[T]) Schema() Node {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	routes := make(map[string]Node, len(s.routes))
+	for key, proc := range s.routes {
+		routes[key] = proc.Schema()
+	}
+
+	return Node{
+		Identity: s.identity,
+		Type:     "switch",
+		Flow:     SwitchFlow{Routes: routes},
+	}
 }
 
 // Close gracefully shuts down the connector and all its route processors.
 // Close is idempotent - multiple calls return the same result.
-func (s *Switch[T, K]) Close() error {
+func (s *Switch[T]) Close() error {
 	s.closeOnce.Do(func() {
 		s.mu.RLock()
 		defer s.mu.RUnlock()

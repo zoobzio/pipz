@@ -111,9 +111,9 @@ func TestRealWorld_ResilientAPIClient(t *testing.T) {
 	defer server.Close()
 
 	// Build a production-ready API client pipeline
-	apiClient := pipz.NewSequence[APIRequest]("resilient-api-client",
+	apiClient := pipz.NewSequence[APIRequest](pipz.NewIdentity("resilient-api-client", ""),
 		// Step 1: Request validation and preparation
-		pipz.Apply("validate-request", func(_ context.Context, req APIRequest) (APIRequest, error) {
+		pipz.Apply(pipz.NewIdentity("validate-request", ""), func(_ context.Context, req APIRequest) (APIRequest, error) {
 			if req.Method == "" {
 				return req, errors.New("method is required")
 			}
@@ -142,18 +142,16 @@ func TestRealWorld_ResilientAPIClient(t *testing.T) {
 		}),
 
 		// Step 2-6: Resilient API pipeline with rate limiting, circuit breaker, timeout, retry
-		pipz.NewSequence[APIRequest]("resilient-api",
-			// Step 2: Rate limiting (10 RPS with burst of 5)
-			pipz.NewRateLimiter[APIRequest]("api-rate-limit", 10.0, 5).SetMode("wait"),
-
+		// Rate limiter wrapping the entire resilient API chain (10 RPS with burst of 5)
+		pipz.NewRateLimiter[APIRequest](pipz.NewIdentity("api-rate-limit", ""), 10.0, 5,
 			// Step 3: Circuit breaker for API failures
-			pipz.NewCircuitBreaker[APIRequest]("api-circuit-breaker",
+			pipz.NewCircuitBreaker[APIRequest](pipz.NewIdentity("api-circuit-breaker", ""),
 				// Step 4: Timeout protection (30 seconds)
-				pipz.NewTimeout[APIRequest]("api-timeout",
+				pipz.NewTimeout[APIRequest](pipz.NewIdentity("api-timeout", ""),
 					// Step 5: Retry with exponential backoff
-					pipz.NewBackoff[APIRequest]("api-retry",
+					pipz.NewBackoff[APIRequest](pipz.NewIdentity("api-retry", ""),
 						// Step 6: Actual HTTP call
-						pipz.Apply("http-call", func(ctx context.Context, req APIRequest) (APIRequest, error) {
+						pipz.Apply(pipz.NewIdentity("http-call", ""), func(ctx context.Context, req APIRequest) (APIRequest, error) {
 							start := time.Now()
 
 							// Create HTTP request
@@ -211,10 +209,10 @@ func TestRealWorld_ResilientAPIClient(t *testing.T) {
 				5,           // failure threshold
 				time.Minute, // reset timeout
 			),
-		),
+		).SetMode("wait"),
 
 		// Step 7: Response processing and logging
-		pipz.Transform("process-response", func(_ context.Context, req APIRequest) APIRequest {
+		pipz.Transform(pipz.NewIdentity("process-response", ""), func(_ context.Context, req APIRequest) APIRequest {
 			if req.Metadata == nil {
 				req.Metadata = make(map[string]interface{})
 			}
@@ -232,9 +230,9 @@ func TestRealWorld_ResilientAPIClient(t *testing.T) {
 	)
 
 	// Add fallback for complete API failure
-	fallbackClient := pipz.NewFallback[APIRequest]("api-with-fallback",
+	fallbackClient := pipz.NewFallback[APIRequest](pipz.NewIdentity("api-with-fallback", ""),
 		apiClient,
-		pipz.Transform("cache-fallback", func(_ context.Context, req APIRequest) APIRequest {
+		pipz.Transform(pipz.NewIdentity("cache-fallback", ""), func(_ context.Context, req APIRequest) APIRequest {
 			if req.Metadata == nil {
 				req.Metadata = make(map[string]interface{})
 			}
@@ -343,9 +341,9 @@ func TestRealWorld_EventProcessingPipeline(t *testing.T) {
 	var enrichedEvents int64
 
 	// Build event processing pipeline
-	eventPipeline := pipz.NewSequence[Event]("event-processing",
+	eventPipeline := pipz.NewSequence[Event](pipz.NewIdentity("event-processing", ""),
 		// Step 1: Event validation
-		pipz.Apply("validate-event", func(_ context.Context, event Event) (Event, error) {
+		pipz.Apply(pipz.NewIdentity("validate-event", ""), func(_ context.Context, event Event) (Event, error) {
 			if event.ID == "" {
 				return event, errors.New("event ID is required")
 			}
@@ -366,7 +364,7 @@ func TestRealWorld_EventProcessingPipeline(t *testing.T) {
 		}),
 
 		// Step 2: Event filtering based on type and age
-		pipz.Apply("event-filter", func(_ context.Context, event Event) (Event, error) {
+		pipz.Apply(pipz.NewIdentity("event-filter", ""), func(_ context.Context, event Event) (Event, error) {
 			// Filter out old events (older than 1 hour)
 			if time.Since(event.Timestamp) > time.Hour {
 				atomic.AddInt64(&filteredEvents, 1)
@@ -388,11 +386,11 @@ func TestRealWorld_EventProcessingPipeline(t *testing.T) {
 		}),
 
 		// Step 3: Event enrichment based on type
-		pipz.NewSwitch[Event, string]("event-enrichment", func(_ context.Context, event Event) string {
+		pipz.NewSwitch[Event](pipz.NewIdentity("event-enrichment", ""), func(_ context.Context, event Event) string {
 			return event.Type // Route based on event type
 		}).
 			AddRoute("user.action",
-				pipz.Transform("enrich-user", func(_ context.Context, event Event) Event {
+				pipz.Transform(pipz.NewIdentity("enrich-user", ""), func(_ context.Context, event Event) Event {
 					atomic.AddInt64(&enrichedEvents, 1)
 					if event.Metadata == nil {
 						event.Metadata = make(map[string]interface{})
@@ -412,7 +410,7 @@ func TestRealWorld_EventProcessingPipeline(t *testing.T) {
 				}),
 			).
 			AddRoute("system.alert",
-				pipz.Transform("enrich-system", func(_ context.Context, event Event) Event {
+				pipz.Transform(pipz.NewIdentity("enrich-system", ""), func(_ context.Context, event Event) Event {
 					atomic.AddInt64(&enrichedEvents, 1)
 					if event.Metadata == nil {
 						event.Metadata = make(map[string]interface{})
@@ -431,14 +429,14 @@ func TestRealWorld_EventProcessingPipeline(t *testing.T) {
 			),
 
 		// Step 4: Event routing to different processors based on priority
-		pipz.NewSequence[Event]("event-routing",
+		pipz.NewSequence[Event](pipz.NewIdentity("event-routing", ""),
 			// High priority events get immediate processing
-			pipz.NewFilter[Event]("high-priority",
+			pipz.NewFilter[Event](pipz.NewIdentity("high-priority", ""),
 				func(_ context.Context, event Event) bool {
 					priority, ok := event.Data["priority"].(string)
 					return ok && priority == "high"
 				},
-				pipz.Transform("high-priority-process", func(_ context.Context, event Event) Event {
+				pipz.Transform(pipz.NewIdentity("high-priority-process", ""), func(_ context.Context, event Event) Event {
 					if event.Metadata == nil {
 						event.Metadata = make(map[string]interface{})
 					}
@@ -449,12 +447,12 @@ func TestRealWorld_EventProcessingPipeline(t *testing.T) {
 			),
 
 			// Normal priority events get standard processing
-			pipz.NewFilter[Event]("normal-priority",
+			pipz.NewFilter[Event](pipz.NewIdentity("normal-priority", ""),
 				func(_ context.Context, event Event) bool {
 					priority, ok := event.Data["priority"].(string)
 					return !ok || priority == "normal" || priority == ""
 				},
-				pipz.Transform("normal-priority-process", func(_ context.Context, event Event) Event {
+				pipz.Transform(pipz.NewIdentity("normal-priority-process", ""), func(_ context.Context, event Event) Event {
 					if event.Metadata == nil {
 						event.Metadata = make(map[string]interface{})
 					}
@@ -465,7 +463,7 @@ func TestRealWorld_EventProcessingPipeline(t *testing.T) {
 		),
 
 		// Step 5: Final event processing and storage preparation
-		pipz.Transform("finalize-event", func(_ context.Context, event Event) Event {
+		pipz.Transform(pipz.NewIdentity("finalize-event", ""), func(_ context.Context, event Event) Event {
 			atomic.AddInt64(&processedEvents, 1)
 			if event.Metadata == nil {
 				event.Metadata = make(map[string]interface{})
@@ -602,10 +600,10 @@ func TestRealWorld_EventProcessingPipeline(t *testing.T) {
 			if enrichType, ok := result.Metadata["enrichment_type"]; !ok || enrichType != "system" {
 				t.Errorf("event %s: expected system enrichment", result.ID)
 			}
-			if context, ok := result.Data["system_context"]; !ok {
+			if sysCtx, ok := result.Data["system_context"]; !ok {
 				t.Errorf("event %s: expected system_context data", result.ID)
 			} else {
-				t.Logf("Event %s enriched with context: %v", result.ID, context)
+				t.Logf("Event %s enriched with context: %v", result.ID, sysCtx)
 			}
 		}
 
@@ -632,9 +630,9 @@ func TestRealWorld_DataValidationPipeline(t *testing.T) {
 	}
 
 	// Build comprehensive validation pipeline
-	validationPipeline := pipz.NewSequence[UserRegistration]("user-validation",
+	validationPipeline := pipz.NewSequence[UserRegistration](pipz.NewIdentity("user-validation", ""),
 		// Step 1: Basic field validation
-		pipz.Apply("basic-validation", func(_ context.Context, user UserRegistration) (UserRegistration, error) {
+		pipz.Apply(pipz.NewIdentity("basic-validation", ""), func(_ context.Context, user UserRegistration) (UserRegistration, error) {
 			var validationErrors []string
 
 			if user.Email == "" {
@@ -666,7 +664,7 @@ func TestRealWorld_DataValidationPipeline(t *testing.T) {
 		}),
 
 		// Step 2: Email format validation
-		pipz.Apply("email-validation", func(_ context.Context, user UserRegistration) (UserRegistration, error) {
+		pipz.Apply(pipz.NewIdentity("email-validation", ""), func(_ context.Context, user UserRegistration) (UserRegistration, error) {
 			// Simple email validation
 			if !strings.Contains(user.Email, "@") || !strings.Contains(user.Email, ".") {
 				return user, errors.New("invalid email format")
@@ -685,9 +683,9 @@ func TestRealWorld_DataValidationPipeline(t *testing.T) {
 		}),
 
 		// Step 3: Password strength validation with fallback
-		pipz.NewFallback[UserRegistration]("password-validation",
+		pipz.NewFallback[UserRegistration](pipz.NewIdentity("password-validation", ""),
 			// Primary: Strict password validation
-			pipz.Apply("strict-password", func(_ context.Context, user UserRegistration) (UserRegistration, error) {
+			pipz.Apply(pipz.NewIdentity("strict-password", ""), func(_ context.Context, user UserRegistration) (UserRegistration, error) {
 				if len(user.Password) < 12 {
 					return user, errors.New("password too weak - must be at least 12 characters")
 				}
@@ -710,7 +708,7 @@ func TestRealWorld_DataValidationPipeline(t *testing.T) {
 			}),
 
 			// Fallback: Basic password validation
-			pipz.Apply("basic-password", func(_ context.Context, user UserRegistration) (UserRegistration, error) {
+			pipz.Apply(pipz.NewIdentity("basic-password", ""), func(_ context.Context, user UserRegistration) (UserRegistration, error) {
 				if len(user.Password) < 8 {
 					return user, errors.New("password must be at least 8 characters")
 				}
@@ -726,9 +724,9 @@ func TestRealWorld_DataValidationPipeline(t *testing.T) {
 		),
 
 		// Step 4: Concurrent validation checks
-		pipz.NewSequence[UserRegistration]("concurrent-validations",
+		pipz.NewSequence[UserRegistration](pipz.NewIdentity("concurrent-validations", ""),
 			// Age-based validation
-			pipz.Transform("age-validation", func(_ context.Context, user UserRegistration) UserRegistration {
+			pipz.Transform(pipz.NewIdentity("age-validation", ""), func(_ context.Context, user UserRegistration) UserRegistration {
 				if user.Metadata == nil {
 					user.Metadata = make(map[string]interface{})
 				}
@@ -744,7 +742,7 @@ func TestRealWorld_DataValidationPipeline(t *testing.T) {
 			}),
 
 			// Country-based validation
-			pipz.Transform("country-validation", func(_ context.Context, user UserRegistration) UserRegistration {
+			pipz.Transform(pipz.NewIdentity("country-validation", ""), func(_ context.Context, user UserRegistration) UserRegistration {
 				if user.Metadata == nil {
 					user.Metadata = make(map[string]interface{})
 				}
@@ -764,7 +762,7 @@ func TestRealWorld_DataValidationPipeline(t *testing.T) {
 		),
 
 		// Step 5: Final processing and cleanup
-		pipz.Transform("finalize-registration", func(_ context.Context, user UserRegistration) UserRegistration {
+		pipz.Transform(pipz.NewIdentity("finalize-registration", ""), func(_ context.Context, user UserRegistration) UserRegistration {
 			if user.Metadata == nil {
 				user.Metadata = make(map[string]interface{})
 			}

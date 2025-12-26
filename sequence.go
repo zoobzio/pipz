@@ -28,13 +28,13 @@ var (
 // Key features:
 //   - Thread-safe for concurrent access
 //   - Dynamic modification of processor chain
-//   - Named processors for debugging
+//   - Identity-based processors for debugging and visualization
 //   - Rich API for reordering and modification
 //   - Fail-fast execution with detailed errors
 //
 // Sequence is the primary way to chain processors together.
 type Sequence[T any] struct {
-	name       Name
+	identity   Identity
 	processors []Chainable[T]
 	mu         sync.RWMutex
 	closeOnce  sync.Once
@@ -49,24 +49,24 @@ type Sequence[T any] struct {
 // Example:
 //
 //	// Single line declaration
-//	const (
-//	    UserProcessingName = pipz.Name("user-processing")
-//	    ValidateName = pipz.Name("validate")
-//	    EnrichName = pipz.Name("enrich")
-//	    AuditName = pipz.Name("audit")
+//	var (
+//	    UserProcessingID = pipz.NewIdentity("user-processing", "Main user processing pipeline")
+//	    ValidateID = pipz.NewIdentity("validate", "Validates user input")
+//	    EnrichID = pipz.NewIdentity("enrich", "Enriches user with external data")
+//	    AuditID = pipz.NewIdentity("audit", "Logs user actions for audit")
 //	)
-//	sequence := pipz.NewSequence(UserProcessingName,
-//	    pipz.Effect(ValidateName, validateUser),
-//	    pipz.Apply(EnrichName, enrichUser),
-//	    pipz.Effect(AuditName, auditUser),
+//	sequence := pipz.NewSequence(UserProcessingID,
+//	    pipz.Effect(ValidateID, validateUser),
+//	    pipz.Apply(EnrichID, enrichUser),
+//	    pipz.Effect(AuditID, auditUser),
 //	)
 //
 //	// Or create empty and add later
-//	sequence := pipz.NewSequence[User](UserProcessingName)
+//	sequence := pipz.NewSequence[User](UserProcessingID)
 //	sequence.Register(validateUser, enrichUser)
-func NewSequence[T any](name Name, processors ...Chainable[T]) *Sequence[T] {
+func NewSequence[T any](identity Identity, processors ...Chainable[T]) *Sequence[T] {
 	return &Sequence[T]{
-		name:       name,
+		identity:   identity,
 		processors: slices.Clone(processors),
 	}
 }
@@ -111,7 +111,7 @@ func (c *Sequence[T]) Register(processors ...Chainable[T]) {
 //   - Check ctx.Err() in long-running processors
 //   - Pass context through to external calls
 func (c *Sequence[T]) Process(ctx context.Context, value T) (result T, err error) {
-	defer recoverFromPanic(&result, &err, c.name, value)
+	defer recoverFromPanic(&result, &err, c.identity, value)
 
 	start := time.Now()
 
@@ -135,7 +135,7 @@ func (c *Sequence[T]) Process(ctx context.Context, value T) (result T, err error
 			return result, &Error[T]{
 				Err:       ctx.Err(),
 				InputData: value,
-				Path:      []Name{c.name},
+				Path:      []Identity{c.identity},
 				Timeout:   errors.Is(ctx.Err(), context.DeadlineExceeded),
 				Canceled:  errors.Is(ctx.Err(), context.Canceled),
 				Timestamp: time.Now(),
@@ -145,8 +145,8 @@ func (c *Sequence[T]) Process(ctx context.Context, value T) (result T, err error
 			if err != nil {
 				var pipeErr *Error[T]
 				if errors.As(err, &pipeErr) {
-					// Prepend this sequence's name to the path
-					pipeErr.Path = append([]Name{c.name}, pipeErr.Path...)
+					// Prepend this sequence's identity to the path
+					pipeErr.Path = append([]Identity{c.identity}, pipeErr.Path...)
 					return result, pipeErr
 				}
 				// Handle non-pipeline errors by wrapping them
@@ -154,7 +154,7 @@ func (c *Sequence[T]) Process(ctx context.Context, value T) (result T, err error
 					Timestamp: time.Now(),
 					InputData: value,
 					Err:       err,
-					Path:      []Name{c.name},
+					Path:      []Identity{c.identity},
 				}
 			}
 		}
@@ -162,7 +162,8 @@ func (c *Sequence[T]) Process(ctx context.Context, value T) (result T, err error
 
 	// Emit completion signal
 	capitan.Info(ctx, SignalSequenceCompleted,
-		FieldName.Field(string(c.name)),
+		FieldName.Field(c.identity.Name()),
+		FieldIdentityID.Field(c.identity.ID().String()),
 		FieldProcessorCount.Field(len(processors)),
 		FieldDuration.Field(time.Since(start).Seconds()),
 	)
@@ -230,82 +231,99 @@ func (c *Sequence[T]) Pop() (Chainable[T], error) {
 }
 
 // Names returns the names of all processors in order.
-func (c *Sequence[T]) Names() []Name {
+func (c *Sequence[T]) Names() []string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	names := make([]Name, len(c.processors))
+	names := make([]string, len(c.processors))
 	for i, proc := range c.processors {
-		names[i] = proc.Name()
+		names[i] = proc.Identity().Name()
 	}
 	return names
 }
 
-// Remove removes the first processor with the specified name.
-func (c *Sequence[T]) Remove(name Name) error {
+// Remove removes the first processor with the specified identity.
+func (c *Sequence[T]) Remove(id Identity) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	for i, proc := range c.processors {
-		if proc.Name() == name {
+		if proc.Identity() == id {
 			c.processors = slices.Delete(c.processors, i, i+1)
 			return nil
 		}
 	}
 
-	return fmt.Errorf("processor %q not found", name)
+	return fmt.Errorf("processor %q not found", id.Name())
 }
 
-// Replace replaces the first processor with the specified name.
-func (c *Sequence[T]) Replace(name Name, processor Chainable[T]) error {
+// Replace replaces the first processor with the specified identity.
+func (c *Sequence[T]) Replace(id Identity, processor Chainable[T]) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	for i, proc := range c.processors {
-		if proc.Name() == name {
+		if proc.Identity() == id {
 			c.processors[i] = processor
 			return nil
 		}
 	}
 
-	return fmt.Errorf("processor %q not found", name)
+	return fmt.Errorf("processor %q not found", id.Name())
 }
 
-// After inserts processors after the first processor with the specified name.
-func (c *Sequence[T]) After(afterName Name, processors ...Chainable[T]) error {
+// After inserts processors after the first processor with the specified identity.
+func (c *Sequence[T]) After(afterID Identity, processors ...Chainable[T]) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	for i, proc := range c.processors {
-		if proc.Name() == afterName {
+		if proc.Identity() == afterID {
 			c.processors = slices.Insert(c.processors, i+1, processors...)
 			return nil
 		}
 	}
 
-	return fmt.Errorf("processor %q not found", afterName)
+	return fmt.Errorf("processor %q not found", afterID.Name())
 }
 
-// Before inserts processors before the first processor with the specified name.
-func (c *Sequence[T]) Before(beforeName Name, processors ...Chainable[T]) error {
+// Before inserts processors before the first processor with the specified identity.
+func (c *Sequence[T]) Before(beforeID Identity, processors ...Chainable[T]) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	for i, proc := range c.processors {
-		if proc.Name() == beforeName {
+		if proc.Identity() == beforeID {
 			c.processors = slices.Insert(c.processors, i, processors...)
 			return nil
 		}
 	}
 
-	return fmt.Errorf("processor %q not found", beforeName)
+	return fmt.Errorf("processor %q not found", beforeID.Name())
 }
 
-// Name returns the name of this sequence.
-func (c *Sequence[T]) Name() Name {
+// Identity returns the identity of this sequence.
+func (c *Sequence[T]) Identity() Identity {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.name
+	return c.identity
+}
+
+// Schema returns a Node representing this sequence in the pipeline schema.
+func (c *Sequence[T]) Schema() Node {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	steps := make([]Node, len(c.processors))
+	for i, proc := range c.processors {
+		steps[i] = proc.Schema()
+	}
+
+	return Node{
+		Identity: c.identity,
+		Type:     "sequence",
+		Flow:     SequenceFlow{Steps: steps},
+	}
 }
 
 // Close gracefully shuts down the connector and all its child processors.

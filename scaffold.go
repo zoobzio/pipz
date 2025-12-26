@@ -50,7 +50,7 @@ import (
 //	// Returns immediately, processors run in background
 //	result, err := scaffold.Process(ctx, order)
 type Scaffold[T Cloner[T]] struct {
-	name       Name
+	identity   Identity
 	processors []Chainable[T]
 	mu         sync.RWMutex
 	closeOnce  sync.Once
@@ -58,16 +58,16 @@ type Scaffold[T Cloner[T]] struct {
 }
 
 // NewScaffold creates a new Scaffold connector.
-func NewScaffold[T Cloner[T]](name Name, processors ...Chainable[T]) *Scaffold[T] {
+func NewScaffold[T Cloner[T]](identity Identity, processors ...Chainable[T]) *Scaffold[T] {
 	return &Scaffold[T]{
-		name:       name,
+		identity:   identity,
 		processors: processors,
 	}
 }
 
 // Process implements the Chainable interface.
 func (s *Scaffold[T]) Process(ctx context.Context, input T) (result T, err error) {
-	defer recoverFromPanic(&result, &err, s.name, input)
+	defer recoverFromPanic(&result, &err, s.identity, input)
 
 	s.mu.RLock()
 	processors := make([]Chainable[T], len(s.processors))
@@ -97,7 +97,8 @@ func (s *Scaffold[T]) Process(ctx context.Context, input T) (result T, err error
 
 	// Emit dispatched signal
 	capitan.Info(ctx, SignalScaffoldDispatched,
-		FieldName.Field(string(s.name)),
+		FieldName.Field(s.identity.Name()),
+		FieldIdentityID.Field(s.identity.ID().String()),
 		FieldProcessorCount.Field(len(processors)),
 	)
 
@@ -150,11 +151,28 @@ func (s *Scaffold[T]) SetProcessors(processors ...Chainable[T]) *Scaffold[T] {
 	return s
 }
 
-// Name returns the name of this connector.
-func (s *Scaffold[T]) Name() Name {
+// Identity returns the identity of this connector.
+func (s *Scaffold[T]) Identity() Identity {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.name
+	return s.identity
+}
+
+// Schema returns a Node representing this connector in the pipeline schema.
+func (s *Scaffold[T]) Schema() Node {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	processors := make([]Node, len(s.processors))
+	for i, proc := range s.processors {
+		processors[i] = proc.Schema()
+	}
+
+	return Node{
+		Identity: s.identity,
+		Type:     "scaffold",
+		Flow:     ScaffoldFlow{Processors: processors},
+	}
 }
 
 // Close gracefully shuts down the connector and all its child processors.

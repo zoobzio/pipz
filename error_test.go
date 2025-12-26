@@ -16,7 +16,7 @@ func TestError(t *testing.T) {
 		t.Run("Basic Error", func(t *testing.T) {
 			err := &Error[string]{
 				Err:       baseErr,
-				Path:      []Name{"sequence", "validate"},
+				Path:      []Identity{NewIdentity("sequence", ""), NewIdentity("validate", "")},
 				InputData: "test data",
 				Duration:  100 * time.Millisecond,
 				Timestamp: time.Now(),
@@ -37,7 +37,7 @@ func TestError(t *testing.T) {
 		t.Run("Connector With Processor Error", func(t *testing.T) {
 			err := &Error[string]{
 				Err:       baseErr,
-				Path:      []Name{"pipeline", "transform"},
+				Path:      []Identity{NewIdentity("pipeline", ""), NewIdentity("transform", "")},
 				InputData: "test",
 				Duration:  50 * time.Millisecond,
 				Timestamp: time.Now(),
@@ -55,7 +55,7 @@ func TestError(t *testing.T) {
 		t.Run("Timeout Error", func(t *testing.T) {
 			err := &Error[string]{
 				Err:       context.DeadlineExceeded,
-				Path:      []Name{"api", "slow_process"},
+				Path:      []Identity{NewIdentity("api", ""), NewIdentity("slow_process", "")},
 				InputData: "data",
 				Timeout:   true,
 				Duration:  5 * time.Second,
@@ -71,7 +71,7 @@ func TestError(t *testing.T) {
 		t.Run("Canceled Error", func(t *testing.T) {
 			err := &Error[string]{
 				Err:       context.Canceled,
-				Path:      []Name{"worker", "process"},
+				Path:      []Identity{NewIdentity("worker", ""), NewIdentity("process", "")},
 				InputData: "data",
 				Canceled:  true,
 				Duration:  200 * time.Millisecond,
@@ -87,7 +87,7 @@ func TestError(t *testing.T) {
 		t.Run("Single Path Element Error", func(t *testing.T) {
 			err := &Error[string]{
 				Err:       baseErr,
-				Path:      []Name{"http"},
+				Path:      []Identity{NewIdentity("http", "")},
 				InputData: "request data",
 				Duration:  75 * time.Millisecond,
 				Timestamp: time.Now(),
@@ -107,7 +107,7 @@ func TestError(t *testing.T) {
 		baseErr := errors.New("base error")
 		pipelineErr := &Error[int]{
 			Err:       baseErr,
-			Path:      []Name{"pipeline", "test"},
+			Path:      []Identity{NewIdentity("pipeline", ""), NewIdentity("test", "")},
 			InputData: 42,
 			Timestamp: time.Now(),
 		}
@@ -161,7 +161,7 @@ func TestError(t *testing.T) {
 				err := &Error[string]{
 					Err:       tt.err,
 					Timeout:   tt.timeout,
-					Path:      []Name{"test"},
+					Path:      []Identity{NewIdentity("test", "")},
 					Timestamp: time.Now(),
 				}
 
@@ -210,7 +210,7 @@ func TestError(t *testing.T) {
 				err := &Error[string]{
 					Err:       tt.err,
 					Canceled:  tt.canceled,
-					Path:      []Name{"test"},
+					Path:      []Identity{NewIdentity("test", "")},
 					Timestamp: time.Now(),
 				}
 
@@ -226,7 +226,7 @@ func TestError(t *testing.T) {
 		t.Run("String Type", func(t *testing.T) {
 			err := &Error[string]{
 				Err:       errors.New("failed"),
-				Path:      []Name{"test", "string_processor"},
+				Path:      []Identity{NewIdentity("test", ""), NewIdentity("string_processor", "")},
 				InputData: "hello world",
 				Timestamp: time.Now(),
 			}
@@ -246,7 +246,7 @@ func TestError(t *testing.T) {
 			user := User{Name: "Alice", Age: 30}
 			err := &Error[User]{
 				Err:       errors.New("failed"),
-				Path:      []Name{"test", "user_processor"},
+				Path:      []Identity{NewIdentity("test", ""), NewIdentity("user_processor", "")},
 				InputData: user,
 				Timestamp: time.Now(),
 			}
@@ -301,8 +301,8 @@ func TestError(t *testing.T) {
 	t.Run("PanicError", func(t *testing.T) {
 		t.Run("panicError implements error", func(t *testing.T) {
 			pe := &panicError{
-				processorName: "test_proc",
-				sanitized:     "test panic message",
+				identity:  NewIdentity("test_proc", ""),
+				sanitized: "test panic message",
 			}
 
 			expected := `panic in processor "test_proc": test panic message`

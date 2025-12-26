@@ -26,25 +26,25 @@ import (
 //
 // Example:
 //
-//	const ParseJSONName = pipz.Name("parse_json")
-//	parseJSON := pipz.Apply(ParseJSONName, func(ctx context.Context, raw string) (Data, error) {
+//	var ParseJSONID = pipz.NewIdentity("parse-json", "Parses JSON input into Data struct")
+//	parseJSON := pipz.Apply(ParseJSONID, func(ctx context.Context, raw string) (Data, error) {
 //	    var data Data
 //	    if err := json.Unmarshal([]byte(raw), &data); err != nil {
 //	        return Data{}, fmt.Errorf("invalid JSON: %w", err)
 //	    }
 //	    return data, nil
 //	})
-func Apply[T any](name Name, fn func(context.Context, T) (T, error)) Processor[T] {
+func Apply[T any](identity Identity, fn func(context.Context, T) (T, error)) Processor[T] {
 	return Processor[T]{
-		name: name,
+		identity: identity,
 		fn: func(ctx context.Context, value T) (result T, err error) {
-			defer recoverFromPanic(&result, &err, name, value)
+			defer recoverFromPanic(&result, &err, identity, value)
 			start := time.Now()
 			result, err = fn(ctx, value)
 			if err != nil {
 				var zero T
 				return zero, &Error[T]{
-					Path:      []Name{name},
+					Path:      []Identity{identity},
 					InputData: value,
 					Err:       err,
 					Timestamp: time.Now(),

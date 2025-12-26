@@ -31,13 +31,15 @@ import (
 //
 // Example:
 //
+//	var RetryID = pipz.NewIdentity("retry-db", "Retries database write")
 //	retry := pipz.NewRetry(
+//	    RetryID,
 //	    databaseWriter,
 //	    3,  // Try up to 3 times
 //	)
 type Retry[T any] struct {
 	processor   Chainable[T]
-	name        Name
+	identity    Identity
 	maxAttempts int
 	mu          sync.RWMutex
 	closeOnce   sync.Once
@@ -45,13 +47,13 @@ type Retry[T any] struct {
 }
 
 // NewRetry creates a new Retry connector.
-func NewRetry[T any](name Name, processor Chainable[T], maxAttempts int) *Retry[T] {
+func NewRetry[T any](identity Identity, processor Chainable[T], maxAttempts int) *Retry[T] {
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
 
 	return &Retry[T]{
-		name:        name,
+		identity:    identity,
 		processor:   processor,
 		maxAttempts: maxAttempts,
 	}
@@ -59,7 +61,7 @@ func NewRetry[T any](name Name, processor Chainable[T], maxAttempts int) *Retry[
 
 // Process implements the Chainable interface.
 func (r *Retry[T]) Process(ctx context.Context, data T) (result T, err error) {
-	defer recoverFromPanic(&result, &err, r.name, data)
+	defer recoverFromPanic(&result, &err, r.identity, data)
 	r.mu.RLock()
 	processor := r.processor
 	maxAttempts := r.maxAttempts
@@ -67,7 +69,7 @@ func (r *Retry[T]) Process(ctx context.Context, data T) (result T, err error) {
 
 	var lastErr error
 	var lastResult T
-	name := string(r.name)
+	name := r.identity.Name()
 
 	for i := 0; i < maxAttempts; i++ {
 		attempt := i + 1
@@ -75,6 +77,7 @@ func (r *Retry[T]) Process(ctx context.Context, data T) (result T, err error) {
 		// Emit attempt start signal
 		capitan.Info(ctx, SignalRetryAttemptStart,
 			FieldName.Field(name),
+			FieldIdentityID.Field(r.identity.ID().String()),
 			FieldAttempt.Field(attempt),
 			FieldMaxAttempts.Field(maxAttempts),
 		)
@@ -92,6 +95,7 @@ func (r *Retry[T]) Process(ctx context.Context, data T) (result T, err error) {
 		// Emit attempt fail signal
 		capitan.Warn(ctx, SignalRetryAttemptFail,
 			FieldName.Field(name),
+			FieldIdentityID.Field(r.identity.ID().String()),
 			FieldAttempt.Field(attempt),
 			FieldMaxAttempts.Field(maxAttempts),
 			FieldError.Field(err.Error()),
@@ -103,7 +107,7 @@ func (r *Retry[T]) Process(ctx context.Context, data T) (result T, err error) {
 			return data, &Error[T]{
 				Err:       ctx.Err(),
 				InputData: data,
-				Path:      []Name{r.name},
+				Path:      []Identity{r.identity},
 				Timeout:   errors.Is(ctx.Err(), context.DeadlineExceeded),
 				Canceled:  errors.Is(ctx.Err(), context.Canceled),
 				Timestamp: time.Now(),
@@ -114,6 +118,7 @@ func (r *Retry[T]) Process(ctx context.Context, data T) (result T, err error) {
 	// All attempts failed - emit exhausted signal
 	capitan.Error(ctx, SignalRetryExhausted,
 		FieldName.Field(name),
+		FieldIdentityID.Field(r.identity.ID().String()),
 		FieldMaxAttempts.Field(maxAttempts),
 		FieldError.Field(lastErr.Error()),
 	)
@@ -122,8 +127,8 @@ func (r *Retry[T]) Process(ctx context.Context, data T) (result T, err error) {
 	if lastErr != nil {
 		var pipeErr *Error[T]
 		if errors.As(lastErr, &pipeErr) {
-			// Prepend this retry's name to the path
-			pipeErr.Path = append([]Name{r.name}, pipeErr.Path...)
+			// Prepend this retry's identity to the path
+			pipeErr.Path = append([]Identity{r.identity}, pipeErr.Path...)
 			return lastResult, pipeErr
 		}
 		// Handle non-pipeline errors by wrapping them
@@ -131,7 +136,7 @@ func (r *Retry[T]) Process(ctx context.Context, data T) (result T, err error) {
 			Timestamp: time.Now(),
 			InputData: data,
 			Err:       lastErr,
-			Path:      []Name{r.name},
+			Path:      []Identity{r.identity},
 		}
 	}
 	return lastResult, nil
@@ -155,11 +160,26 @@ func (r *Retry[T]) GetMaxAttempts() int {
 	return r.maxAttempts
 }
 
-// Name returns the name of this connector.
-func (r *Retry[T]) Name() Name {
+// Identity returns the identity of this connector.
+func (r *Retry[T]) Identity() Identity {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.name
+	return r.identity
+}
+
+// Schema returns a Node representing this connector in the pipeline schema.
+func (r *Retry[T]) Schema() Node {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return Node{
+		Identity: r.identity,
+		Type:     "retry",
+		Flow:     RetryFlow{Processor: r.processor.Schema()},
+		Metadata: map[string]any{
+			"max_attempts": r.maxAttempts,
+		},
+	}
 }
 
 // Close gracefully shuts down the connector and its child processor.

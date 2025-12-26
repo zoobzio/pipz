@@ -20,12 +20,12 @@ Creates a processor from a function that can return an error.
 ## Function Signature
 
 ```go
-func Apply[T any](name Name, fn func(context.Context, T) (T, error)) Chainable[T]
+func Apply[T any](identity Identity, fn func(context.Context, T) (T, error)) Chainable[T]
 ```
 
 ## Parameters
 
-- `name` (`Name`) - Identifier for the processor used in error messages and debugging
+- `identity` (`Identity`) - Identifier for the processor used in error messages and debugging
 - `fn` - Processing function that takes a context and input, returns output or error
 
 ## Returns
@@ -43,33 +43,42 @@ Returns a `Chainable[T]` that can be composed with other processors.
 
 ```go
 // Validation
-validate := pipz.Apply("validate", func(ctx context.Context, user User) (User, error) {
-    if user.Email == "" {
-        return user, errors.New("email required")
-    }
-    if user.Age < 0 || user.Age > 150 {
-        return user, fmt.Errorf("invalid age: %d", user.Age)
-    }
-    return user, nil
-})
+validate := pipz.Apply(
+    pipz.NewIdentity("validate-user", "Validates user email and age fields"),
+    func(ctx context.Context, user User) (User, error) {
+        if user.Email == "" {
+            return user, errors.New("email required")
+        }
+        if user.Age < 0 || user.Age > 150 {
+            return user, fmt.Errorf("invalid age: %d", user.Age)
+        }
+        return user, nil
+    },
+)
 
 // External API call
-fetchData := pipz.Apply("fetch", func(ctx context.Context, id string) (Data, error) {
-    resp, err := http.Get(ctx, fmt.Sprintf("/api/data/%s", id))
-    if err != nil {
-        return Data{}, fmt.Errorf("fetch failed: %w", err)
-    }
-    return parseResponse(resp)
-})
+fetchData := pipz.Apply(
+    pipz.NewIdentity("fetch-data", "Fetches data from external API"),
+    func(ctx context.Context, id string) (Data, error) {
+        resp, err := http.Get(ctx, fmt.Sprintf("/api/data/%s", id))
+        if err != nil {
+            return Data{}, fmt.Errorf("fetch failed: %w", err)
+        }
+        return parseResponse(resp)
+    },
+)
 
 // Database operation
-saveUser := pipz.Apply("save", func(ctx context.Context, user User) (User, error) {
-    user.ID = uuid.New()
-    if err := db.Save(ctx, &user); err != nil {
-        return user, fmt.Errorf("database save failed: %w", err)
-    }
-    return user, nil
-})
+saveUser := pipz.Apply(
+    pipz.NewIdentity("save-user", "Saves user to database"),
+    func(ctx context.Context, user User) (User, error) {
+        user.ID = uuid.New()
+        if err := db.Save(ctx, &user); err != nil {
+            return user, fmt.Errorf("database save failed: %w", err)
+        }
+        return user, nil
+    },
+)
 ```
 
 ## Error Handling
@@ -122,36 +131,52 @@ Apply has minimal overhead for error handling:
 ## Common Patterns
 
 ```go
+// Define identities upfront
+var (
+    ValidationID     = pipz.NewIdentity("validation", "User validation pipeline")
+    CheckRequiredID  = pipz.NewIdentity("check-required", "Checks required fields")
+    CheckFormatID    = pipz.NewIdentity("check-format", "Validates field formats")
+    CheckUniqueID    = pipz.NewIdentity("check-unique", "Ensures uniqueness constraints")
+    APIRetryID       = pipz.NewIdentity("api-retry", "API with retry")
+    APICallID        = pipz.NewIdentity("api-call", "Calls external API")
+    SaveID           = pipz.NewIdentity("save", "Database save with fallback")
+    PrimaryDBID      = pipz.NewIdentity("primary-db", "Saves to primary database")
+    BackupDBID       = pipz.NewIdentity("backup-db", "Saves to backup database")
+    ParseJSONID      = pipz.NewIdentity("parse-json", "Parses and validates JSON configuration")
+)
+
 // Validation pipeline
-validation := pipz.NewSequence[User]("validation",
-    pipz.Apply("required", checkRequired),
-    pipz.Apply("format", checkFormat),
-    pipz.Apply("unique", checkUnique),
+validation := pipz.NewSequence[User](ValidationID,
+    pipz.Apply(CheckRequiredID, checkRequired),
+    pipz.Apply(CheckFormatID, checkFormat),
+    pipz.Apply(CheckUniqueID, checkUnique),
 )
 
 // API with retry
-reliableAPI := pipz.NewRetry("api-retry",
-    pipz.Apply("api-call", callExternalAPI),
+reliableAPI := pipz.NewRetry(APIRetryID,
+    pipz.Apply(APICallID, callExternalAPI),
     3,
 )
 
 // Database with fallback
-saveWithFallback := pipz.NewFallback("save",
-    pipz.Apply("primary-db", saveToPrimary),
-    pipz.Apply("backup-db", saveToBackup),
+saveWithFallback := pipz.NewFallback(SaveID,
+    pipz.Apply(PrimaryDBID, saveToPrimary),
+    pipz.Apply(BackupDBID, saveToBackup),
 )
 
 // Parse with validation
-parseAndValidate := pipz.Apply("parse-json", func(ctx context.Context, raw string) (Config, error) {
-    var config Config
-    if err := json.Unmarshal([]byte(raw), &config); err != nil {
-        return config, fmt.Errorf("invalid JSON: %w", err)
-    }
-    if config.Version == "" {
-        return config, errors.New("version required")
-    }
-    return config, nil
-})
+parseAndValidate := pipz.Apply(ParseJSONID,
+    func(ctx context.Context, raw string) (Config, error) {
+        var config Config
+        if err := json.Unmarshal([]byte(raw), &config); err != nil {
+            return config, fmt.Errorf("invalid JSON: %w", err)
+        }
+        if config.Version == "" {
+            return config, errors.New("version required")
+        }
+        return config, nil
+    },
+)
 ```
 
 ## Gotchas
@@ -159,39 +184,51 @@ parseAndValidate := pipz.Apply("parse-json", func(ctx context.Context, raw strin
 ### ❌ Don't ignore context
 ```go
 // WRONG - Ignoring context cancellation
-apply := pipz.Apply("slow", func(ctx context.Context, data Data) (Data, error) {
-    time.Sleep(10 * time.Second) // Blocks even if context cancelled
-    return data, nil
-})
+apply := pipz.Apply(
+    pipz.NewIdentity("slow-operation", "Slow operation that ignores context"),
+    func(ctx context.Context, data Data) (Data, error) {
+        time.Sleep(10 * time.Second) // Blocks even if context cancelled
+        return data, nil
+    },
+)
 ```
 
 ### ✅ Respect context cancellation
 ```go
 // RIGHT - Check context
-apply := pipz.Apply("slow", func(ctx context.Context, data Data) (Data, error) {
-    select {
-    case <-time.After(10 * time.Second):
-        return data, nil
-    case <-ctx.Done():
-        return data, ctx.Err()
-    }
-})
+apply := pipz.Apply(
+    pipz.NewIdentity("slow-operation", "Slow operation with context awareness"),
+    func(ctx context.Context, data Data) (Data, error) {
+        select {
+        case <-time.After(10 * time.Second):
+            return data, nil
+        case <-ctx.Done():
+            return data, ctx.Err()
+        }
+    },
+)
 ```
 
 ### ❌ Don't use for pure transforms
 ```go
 // WRONG - Unnecessary error handling
-apply := pipz.Apply("double", func(ctx context.Context, n int) (int, error) {
-    return n * 2, nil // Never fails!
-})
+apply := pipz.Apply(
+    pipz.NewIdentity("double", "Doubles the input"),
+    func(ctx context.Context, n int) (int, error) {
+        return n * 2, nil // Never fails!
+    },
+)
 ```
 
 ### ✅ Use Transform for infallible operations
 ```go
 // RIGHT - No error overhead
-transform := pipz.Transform("double", func(ctx context.Context, n int) int {
-    return n * 2
-})
+transform := pipz.Transform(
+    pipz.NewIdentity("double", "Doubles the input"),
+    func(ctx context.Context, n int) int {
+        return n * 2
+    },
+)
 ```
 
 ## See Also

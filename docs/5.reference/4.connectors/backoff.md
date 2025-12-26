@@ -24,7 +24,7 @@ Retry with exponential backoff for handling transient failures.
 
 ```go
 func NewBackoff[T any](
-    name Name,
+    identity Identity,
     processor Chainable[T],
     maxAttempts int,
     baseDelay time.Duration,
@@ -37,7 +37,7 @@ func NewBackoff[T any](
 
 ## Parameters
 
-- `name` (`Name`) - Identifier for debugging and error paths
+- `identity` (`Identity`) - Identifier for debugging and error paths
 - `processor` (`Chainable[T]`) - The processor to retry on failure
 - `maxAttempts` (`int`) - Maximum number of retry attempts (minimum 1)
 - `baseDelay` (`time.Duration`) - Initial delay between retries
@@ -140,20 +140,35 @@ Returns the current base delay setting.
 func (b *Backoff[T]) GetBaseDelay() time.Duration
 ```
 
-### Name
+### Identity
 
-Returns the name of this connector.
+Returns the identity of this connector.
 
 ```go
-func (b *Backoff[T]) Name() Name
+func (b *Backoff[T]) Identity() Identity
+```
+
+### Schema
+
+Returns the schema representation of this connector.
+
+```go
+func (b *Backoff[T]) Schema() Node
 ```
 
 ## Basic Usage
 
 ```go
+// Define identities upfront
+var (
+    APIRetryID = pipz.NewIdentity("api-retry", "Retry external API calls with exponential backoff")
+    CallAPIID  = pipz.NewIdentity("call-api", "Call external API")
+)
+
 // Retry API calls with exponential backoff
-apiCall := pipz.NewBackoff("api-retry",
-    pipz.Apply("call-api", func(ctx context.Context, req Request) (Response, error) {
+apiCall := pipz.NewBackoff(
+    APIRetryID,
+    pipz.Apply(CallAPIID, func(ctx context.Context, req Request) (Response, error) {
         return externalAPI.Call(ctx, req)
     }),
     5,                    // Max 5 attempts
@@ -168,19 +183,26 @@ apiCall := pipz.NewBackoff("api-retry",
 ### Network Request Handling
 
 ```go
+// Define identities upfront
+var (
+    HTTPBackoffID = pipz.NewIdentity("http-backoff", "HTTP client with exponential backoff for server errors")
+    HTTPRequestID = pipz.NewIdentity("http-request", "Execute HTTP request")
+)
+
 // Robust HTTP client with backoff
-httpClient := pipz.NewBackoff("http-backoff",
-    pipz.Apply("http-request", func(ctx context.Context, req HTTPRequest) (HTTPResponse, error) {
+httpClient := pipz.NewBackoff(
+    HTTPBackoffID,
+    pipz.Apply(HTTPRequestID, func(ctx context.Context, req HTTPRequest) (HTTPResponse, error) {
         resp, err := client.Do(req.ToHTTP())
         if err != nil {
             return HTTPResponse{}, err
         }
-        
+
         // Retry on 5xx errors
         if resp.StatusCode >= 500 {
             return HTTPResponse{}, fmt.Errorf("server error: %d", resp.StatusCode)
         }
-        
+
         return parseResponse(resp)
     }),
     4,                   // 4 attempts total
@@ -192,20 +214,27 @@ httpClient := pipz.NewBackoff("http-backoff",
 ### Database Operations
 
 ```go
+// Define identities upfront
+var (
+    DBRetryID = pipz.NewIdentity("db-retry", "Retry database operations with backoff for deadlocks")
+    UpdateID  = pipz.NewIdentity("update", "Update database record")
+)
+
 // Database operations with backoff for lock contention
-dbOperation := pipz.NewBackoff("db-retry",
-    pipz.Apply("update", func(ctx context.Context, data Record) (Record, error) {
+dbOperation := pipz.NewBackoff(
+    DBRetryID,
+    pipz.Apply(UpdateID, func(ctx context.Context, data Record) (Record, error) {
         tx, err := db.BeginTx(ctx, nil)
         if err != nil {
             return data, err
         }
         defer tx.Rollback()
-        
+
         // Perform operations
         if err := updateRecord(tx, data); err != nil {
             return data, err
         }
-        
+
         return data, tx.Commit()
     }),
     3,                  // 3 attempts for deadlocks
@@ -216,12 +245,21 @@ dbOperation := pipz.NewBackoff("db-retry",
 ### Message Queue Processing
 
 ```go
+// Define identities upfront
+var (
+    MessageRetryID  = pipz.NewIdentity("message-retry", "Retry message processing with exponential backoff")
+    ProcessMessageID = pipz.NewIdentity("process-message", "Parse, validate, and send message")
+    SendID          = pipz.NewIdentity("send", "Send message to queue")
+)
+
 // Retry message processing with increasing delays
-messageProcessor := pipz.NewBackoff("message-retry",
-    pipz.NewSequence("process-message",
+messageProcessor := pipz.NewBackoff(
+    MessageRetryID,
+    pipz.NewSequence(
+        ProcessMessageID,
         parseMessage,
         validateMessage,
-        pipz.Apply("send", func(ctx context.Context, msg Message) (Message, error) {
+        pipz.Apply(SendID, func(ctx context.Context, msg Message) (Message, error) {
             return queue.Send(ctx, msg)
         }),
     ),
@@ -234,9 +272,17 @@ messageProcessor := pipz.NewBackoff("message-retry",
 ### Combined with Circuit Breaker
 
 ```go
+// Define identities upfront
+var (
+    CircuitID = pipz.NewIdentity("circuit", "Circuit breaker for external service")
+    BackoffID = pipz.NewIdentity("backoff", "Exponential backoff for service calls")
+)
+
 // Backoff with circuit breaker for external services
-resilientService := pipz.NewCircuitBreaker("circuit",
-    pipz.NewBackoff("backoff",
+resilientService := pipz.NewCircuitBreaker(
+    CircuitID,
+    pipz.NewBackoff(
+        BackoffID,
         externalServiceCall,
         3,                    // Limited attempts before circuit opens
         200*time.Millisecond,
@@ -251,7 +297,15 @@ resilientService := pipz.NewCircuitBreaker("circuit",
 ### Dynamic Configuration
 
 ```go
-backoff := pipz.NewBackoff("dynamic", processor, 3, 1*time.Second)
+// Define identity upfront
+var DynamicID = pipz.NewIdentity("dynamic", "Dynamically configured backoff")
+
+backoff := pipz.NewBackoff(
+    DynamicID,
+    processor,
+    3,
+    1*time.Second,
+)
 
 // Adjust based on load
 if highLoad() {
@@ -264,14 +318,27 @@ if highLoad() {
 ### Environment-Based Configuration
 
 ```go
+// Define identities upfront
+var (
+    ProdBackoffID  = pipz.NewIdentity("prod-backoff", "Production backoff configuration")
+    StageBackoffID = pipz.NewIdentity("stage-backoff", "Staging backoff configuration")
+    DevBackoffID   = pipz.NewIdentity("dev-backoff", "Development backoff configuration")
+)
+
 func createBackoff(env string) *Backoff[Data] {
     switch env {
     case "production":
-        return pipz.NewBackoff("prod-backoff", processor, 5, 1*time.Second)
+        return pipz.NewBackoff(
+            ProdBackoffID,
+            processor, 5, 1*time.Second)
     case "staging":
-        return pipz.NewBackoff("stage-backoff", processor, 3, 500*time.Millisecond)
+        return pipz.NewBackoff(
+            StageBackoffID,
+            processor, 3, 500*time.Millisecond)
     default:
-        return pipz.NewBackoff("dev-backoff", processor, 2, 100*time.Millisecond)
+        return pipz.NewBackoff(
+            DevBackoffID,
+            processor, 2, 100*time.Millisecond)
     }
 }
 ```
@@ -309,12 +376,22 @@ if err != nil {
 | System load | Reduces pressure over time | Constant pressure |
 
 ```go
+// Define identities upfront
+var (
+    ExponentialID = pipz.NewIdentity("exponential", "Exponential backoff for overloaded systems")
+    FixedID       = pipz.NewIdentity("fixed", "Fixed delay retry for brief interruptions")
+)
+
 // Backoff: Good for overloaded systems
-backoff := pipz.NewBackoff("exponential", processor, 4, 1*time.Second)
+backoff := pipz.NewBackoff(
+    ExponentialID,
+    processor, 4, 1*time.Second)
 // Delays: 1s, 2s, 4s (total: 7s)
 
-// Retry: Good for brief interruptions  
-retry := pipz.NewRetry("fixed", processor, 4, 1*time.Second)
+// Retry: Good for brief interruptions
+retry := pipz.NewRetry(
+    FixedID,
+    processor, 4, 1*time.Second)
 // Delays: 1s, 1s, 1s (total: 3s)
 ```
 
@@ -330,32 +407,52 @@ retry := pipz.NewRetry("fixed", processor, 4, 1*time.Second)
 ### ❌ Don't use tiny base delays
 
 ```go
+// Define identity upfront
+var TooFastID = pipz.NewIdentity("too-fast", "Backoff with microsecond delays")
+
 // WRONG - Delays too small to be meaningful
-backoff := pipz.NewBackoff("too-fast", processor, 5, 1*time.Microsecond)
+backoff := pipz.NewBackoff(
+    TooFastID,
+    processor, 5, 1*time.Microsecond)
 // Results in: 1μs, 2μs, 4μs, 8μs - essentially no delay
 ```
 
 ### ✅ Use meaningful base delays
 
 ```go
+// Define identity upfront
+var ReasonableID = pipz.NewIdentity("reasonable", "Backoff with reasonable delays for system recovery")
+
 // RIGHT - Delays that allow recovery
-backoff := pipz.NewBackoff("reasonable", processor, 5, 100*time.Millisecond)
+backoff := pipz.NewBackoff(
+    ReasonableID,
+    processor, 5, 100*time.Millisecond)
 // Results in: 100ms, 200ms, 400ms, 800ms - gives system time to recover
 ```
 
 ### ❌ Don't use too many attempts
 
 ```go
+// Define identity upfront
+var ExcessiveID = pipz.NewIdentity("excessive", "Backoff with too many attempts")
+
 // WRONG - Could wait extremely long
-backoff := pipz.NewBackoff("excessive", processor, 10, 1*time.Second)
+backoff := pipz.NewBackoff(
+    ExcessiveID,
+    processor, 10, 1*time.Second)
 // Final delay would be 512 seconds (8.5 minutes)!
 ```
 
 ### ✅ Balance attempts with total delay
 
 ```go
+// Define identity upfront
+var BalancedID = pipz.NewIdentity("balanced", "Backoff with balanced attempts and delays")
+
 // RIGHT - Reasonable total delay
-backoff := pipz.NewBackoff("balanced", processor, 5, 500*time.Millisecond)
+backoff := pipz.NewBackoff(
+    BalancedID,
+    processor, 5, 500*time.Millisecond)
 // Max total: 500ms + 1s + 2s + 4s = 7.5s
 ```
 
@@ -376,8 +473,13 @@ for i := 0; i < maxAttempts; i++ {
 ### ✅ Respect context cancellation
 
 ```go
+// Define identity upfront
+var ContextAwareID = pipz.NewIdentity("context-aware", "Context-aware backoff")
+
 // RIGHT - Backoff handles this automatically
-backoff := pipz.NewBackoff("context-aware", processor, 5, 1*time.Second)
+backoff := pipz.NewBackoff(
+    ContextAwareID,
+    processor, 5, 1*time.Second)
 // Automatically stops on context cancellation
 ```
 
@@ -394,42 +496,58 @@ backoff := pipz.NewBackoff("context-aware", processor, 5, 1*time.Second)
 ## Testing
 
 ```go
+// Define identities upfront
+var (
+    FlakyID       = pipz.NewIdentity("flaky", "Flaky processor for testing")
+    TestID        = pipz.NewIdentity("test", "Test backoff processor")
+    SlowID        = pipz.NewIdentity("slow", "Always-failing processor")
+    TimeoutTestID = pipz.NewIdentity("timeout-test", "Backoff with timeout test")
+)
+
 func TestBackoff(t *testing.T) {
     attempts := 0
-    processor := pipz.Apply("flaky", func(ctx context.Context, n int) (int, error) {
-        attempts++
-        if attempts < 3 {
-            return 0, errors.New("transient error")
-        }
-        return n * 2, nil
-    })
-    
-    backoff := pipz.NewBackoff("test", processor, 5, 10*time.Millisecond)
-    
+    processor := pipz.Apply(
+        FlakyID,
+        func(ctx context.Context, n int) (int, error) {
+            attempts++
+            if attempts < 3 {
+                return 0, errors.New("transient error")
+            }
+            return n * 2, nil
+        })
+
+    backoff := pipz.NewBackoff(
+        TestID,
+        processor, 5, 10*time.Millisecond)
+
     start := time.Now()
     result, err := backoff.Process(context.Background(), 5)
     duration := time.Since(start)
-    
+
     assert.NoError(t, err)
     assert.Equal(t, 10, result)
     assert.Equal(t, 3, attempts)
-    
+
     // Verify exponential delays (10ms + 20ms = 30ms minimum)
     assert.GreaterOrEqual(t, duration, 30*time.Millisecond)
 }
 
 func TestBackoffTimeout(t *testing.T) {
-    processor := pipz.Apply("slow", func(ctx context.Context, n int) (int, error) {
-        return 0, errors.New("always fails")
-    })
-    
-    backoff := pipz.NewBackoff("timeout-test", processor, 10, 100*time.Millisecond)
-    
+    processor := pipz.Apply(
+        SlowID,
+        func(ctx context.Context, n int) (int, error) {
+            return 0, errors.New("always fails")
+        })
+
+    backoff := pipz.NewBackoff(
+        TimeoutTestID,
+        processor, 10, 100*time.Millisecond)
+
     ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
     defer cancel()
-    
+
     _, err := backoff.Process(ctx, 5)
-    
+
     var pipeErr *pipz.Error[int]
     require.Error(t, err)
     require.True(t, errors.As(err, &pipeErr))

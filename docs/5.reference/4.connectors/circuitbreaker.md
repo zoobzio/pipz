@@ -20,12 +20,12 @@ Prevents cascading failures by stopping requests to failing services and allowin
 
 ```go
 // Create circuit breaker with failure threshold and reset timeout
-func NewCircuitBreaker[T any](name Name, processor Chainable[T], failureThreshold int, resetTimeout time.Duration) *CircuitBreaker[T]
+func NewCircuitBreaker[T any](identity Identity, processor Chainable[T], failureThreshold int, resetTimeout time.Duration) *CircuitBreaker[T]
 ```
 
 ## Parameters
 
-- `name` (`Name`) - Identifier for the connector used in debugging
+- `identity` (`Identity`) - Identifier for the connector used in debugging
 - `processor` (`Chainable[T]`) - The processor to protect with circuit breaking
 - `failureThreshold` (`int`) - Number of consecutive failures before opening circuit
 - `resetTimeout` (`time.Duration`) - Time to wait before attempting recovery
@@ -54,7 +54,9 @@ Returns the same connector instance for method chaining.
 ```go
 // Use fake clock in tests
 fakeClock := clockz.NewFakeClock()
-cb := pipz.NewCircuitBreaker("test", processor, 3, 30*time.Second).
+cb := pipz.NewCircuitBreaker(
+    pipz.NewIdentity("test", "Test circuit breaker"),
+    processor, 3, 30*time.Second).
     WithClock(fakeClock)
 
 // Advance time in test to trigger state transitions
@@ -181,17 +183,25 @@ timeout := breaker.GetResetTimeout()          // Current reset timeout
 ## Example
 
 ```go
+// Define identities upfront
+var (
+    APIBreakerID    = pipz.NewIdentity("api-breaker", "Circuit breaker for external API")
+    ExternalAPIID   = pipz.NewIdentity("external-api", "Call external API")
+    ResilientAPIID  = pipz.NewIdentity("resilient-api", "Resilient API call pipeline")
+    RetryID         = pipz.NewIdentity("retry", "Retry API calls")
+)
+
 // Basic circuit breaker - open after 5 failures, try recovery after 30 seconds
-breaker := pipz.NewCircuitBreaker("api-breaker", 
-    pipz.Apply("external-api", callExternalAPI),
+breaker := pipz.NewCircuitBreaker(APIBreakerID,
+    pipz.Apply(ExternalAPIID, callExternalAPI),
     5,                    // Open after 5 consecutive failures
     30*time.Second,       // Try recovery after 30 seconds
 )
 
 // Use in a resilient pipeline
-resilientAPI := pipz.NewSequence("resilient-api",
+resilientAPI := pipz.NewSequence(ResilientAPIID,
     breaker,
-    pipz.NewRetry("retry", apiCall, 3),
+    pipz.NewRetry(RetryID, apiCall, 3),
 )
 
 // Runtime configuration
@@ -243,7 +253,8 @@ Don't use `CircuitBreaker` when:
 CircuitBreaker provides detailed error information:
 
 ```go
-breaker := pipz.NewCircuitBreaker("payment-breaker", paymentProcessor, 3, time.Minute)
+var PaymentBreakerID = pipz.NewIdentity("payment-breaker", "Circuit breaker for payment processing")
+breaker := pipz.NewCircuitBreaker(PaymentBreakerID, paymentProcessor, 3, time.Minute)
 
 _, err := breaker.Process(ctx, payment)
 if err != nil {
@@ -264,19 +275,33 @@ if err != nil {
 ## Common Patterns
 
 ```go
+// Define identities upfront
+var (
+    DBBreakerID      = pipz.NewIdentity("db-breaker", "Circuit breaker for database operations")
+    ExecuteQueryID   = pipz.NewIdentity("execute-query", "Execute database query")
+)
+
 // Database operations with circuit breaker
-dbConnection := pipz.NewCircuitBreaker("db-breaker",
-    pipz.Apply("execute-query", runDatabaseQuery),
+dbConnection := pipz.NewCircuitBreaker(DBBreakerID,
+    pipz.Apply(ExecuteQueryID, runDatabaseQuery),
     5,                    // Open after 5 database failures
     time.Minute,          // Try reconnection after 1 minute
 )
 
 // HTTP client with multiple protection layers
-resilientHTTP := pipz.NewSequence("protected-http",
-    pipz.NewTimeout("request-timeout", 
-        pipz.NewCircuitBreaker("http-breaker",
-            pipz.NewRetry("http-retry",
-                pipz.Apply("http-call", makeHTTPRequest),
+var (
+    ProtectedHTTPID  = pipz.NewIdentity("protected-http", "HTTP client with protection layers")
+    RequestTimeoutID = pipz.NewIdentity("request-timeout", "Request timeout wrapper")
+    HTTPBreakerID    = pipz.NewIdentity("http-breaker", "HTTP circuit breaker")
+    HTTPRetryID      = pipz.NewIdentity("http-retry", "HTTP retry handler")
+    HTTPCallID       = pipz.NewIdentity("http-call", "HTTP request call")
+)
+
+resilientHTTP := pipz.NewSequence(ProtectedHTTPID,
+    pipz.NewTimeout(RequestTimeoutID,
+        pipz.NewCircuitBreaker(HTTPBreakerID,
+            pipz.NewRetry(HTTPRetryID,
+                pipz.Apply(HTTPCallID, makeHTTPRequest),
                 3,
             ),
             10,                // Open after 10 failures
@@ -287,27 +312,39 @@ resilientHTTP := pipz.NewSequence("protected-http",
 )
 
 // Service mesh pattern
-serviceCall := pipz.NewFallback("service-mesh",
-    pipz.NewCircuitBreaker("primary-service",
+var (
+    ServiceMeshID     = pipz.NewIdentity("service-mesh", "Service mesh with fallback")
+    PrimaryServiceID  = pipz.NewIdentity("primary-service", "Primary service circuit breaker")
+    SecondaryServiceID = pipz.NewIdentity("secondary-service", "Secondary service circuit breaker")
+)
+
+serviceCall := pipz.NewFallback(ServiceMeshID,
+    pipz.NewCircuitBreaker(PrimaryServiceID,
         primaryServiceCall,
         5, 30*time.Second,
     ),
-    pipz.NewCircuitBreaker("secondary-service", 
+    pipz.NewCircuitBreaker(SecondaryServiceID,
         secondaryServiceCall,
         3, time.Minute,
     ),
 )
 
 // Microservice with graceful degradation
-userService := pipz.NewSwitch("user-service", checkServiceHealth).
-    AddRoute("healthy", 
-        pipz.NewCircuitBreaker("full-service",
+var (
+    UserServiceID  = pipz.NewIdentity("user-service", "User service router")
+    FullServiceID  = pipz.NewIdentity("full-service", "Full user service circuit breaker")
+    BasicServiceID = pipz.NewIdentity("basic-service", "Basic user service circuit breaker")
+)
+
+userService := pipz.NewSwitch(UserServiceID, checkServiceHealth).
+    AddRoute("healthy",
+        pipz.NewCircuitBreaker(FullServiceID,
             fullUserService,
             5, time.Minute,
         ),
     ).
     AddRoute("degraded",
-        pipz.NewCircuitBreaker("basic-service",
+        pipz.NewCircuitBreaker(BasicServiceID,
             basicUserService,
             10, 30*time.Second,  // More tolerant in degraded mode
         ),
@@ -320,15 +357,17 @@ userService := pipz.NewSwitch("user-service", checkServiceHealth).
 ```go
 // WRONG - New breaker each time, no shared state!
 func handleRequest(req Request) Response {
-    breaker := pipz.NewCircuitBreaker("api", apiCall, 5, time.Minute)
-    return breaker.Process(ctx, req) // Useless!
+    breakerID := pipz.NewIdentity("api", "API circuit breaker")
+    breaker := pipz.NewCircuitBreaker(breakerID, apiCall, 5, time.Minute)
+    return breaker.Process(ctx, req) // Useless! New Identity each call
 }
 ```
 
 ### ✅ Create once, reuse
 ```go
-// RIGHT - Shared state across requests
-var apiBreaker = pipz.NewCircuitBreaker("api", apiCall, 5, time.Minute)
+// RIGHT - Shared state across requests with package-level Identity
+var APIBreakerID = pipz.NewIdentity("api", "API circuit breaker")
+var apiBreaker = pipz.NewCircuitBreaker(APIBreakerID, apiCall, 5, time.Minute)
 
 func handleRequest(req Request) Response {
     return apiBreaker.Process(ctx, req)
@@ -338,8 +377,13 @@ func handleRequest(req Request) Response {
 ### ❌ Don't use for permanent errors
 ```go
 // WRONG - Validation errors aren't transient
-breaker := pipz.NewCircuitBreaker("validation",
-    pipz.Apply("validate", validateData), // Always fails for bad data
+var (
+    ValidationBreakerID = pipz.NewIdentity("validation", "Validation circuit breaker")
+    ValidateID          = pipz.NewIdentity("validate", "Validate data")
+)
+
+breaker := pipz.NewCircuitBreaker(ValidationBreakerID,
+    pipz.Apply(ValidateID, validateData), // Always fails for bad data
     3, time.Minute,
 )
 ```
@@ -347,8 +391,13 @@ breaker := pipz.NewCircuitBreaker("validation",
 ### ✅ Only protect transient failures
 ```go
 // RIGHT - Network calls can recover
-breaker := pipz.NewCircuitBreaker("network",
-    pipz.Apply("api", callExternalAPI),
+var (
+    NetworkBreakerID = pipz.NewIdentity("network", "Network circuit breaker")
+    APIID            = pipz.NewIdentity("api", "API call")
+)
+
+breaker := pipz.NewCircuitBreaker(NetworkBreakerID,
+    pipz.Apply(APIID, callExternalAPI),
     5, time.Minute,
 )
 ```
@@ -357,12 +406,20 @@ breaker := pipz.NewCircuitBreaker("network",
 
 ```go
 // Circuit breaker with custom recovery logic
-smartBreaker := pipz.NewHandle("smart-breaker",
-    pipz.NewCircuitBreaker("circuit", 
+var (
+    SmartBreakerID    = pipz.NewIdentity("smart-breaker", "Smart circuit breaker with recovery")
+    CircuitID         = pipz.NewIdentity("circuit", "Inner circuit breaker")
+    RecoveryHandlerID = pipz.NewIdentity("recovery-handler", "Error recovery router")
+    NotifyOpsID       = pipz.NewIdentity("notify-ops", "Notify operations team")
+    LogErrorID        = pipz.NewIdentity("log-error", "Log error")
+)
+
+smartBreaker := pipz.NewHandle(SmartBreakerID,
+    pipz.NewCircuitBreaker(CircuitID,
         riskyOperation,
         5, time.Minute,
     ),
-    pipz.NewSwitch("recovery-handler",
+    pipz.NewSwitch(RecoveryHandlerID,
         func(ctx context.Context, err *pipz.Error[Data]) string {
             if strings.Contains(err.Err.Error(), "circuit breaker is open") {
                 return "circuit-open"
@@ -370,18 +427,24 @@ smartBreaker := pipz.NewHandle("smart-breaker",
             return "other-error"
         },
     ).
-    AddRoute("circuit-open", 
-        pipz.Effect("notify-ops", notifyOperations),
+    AddRoute("circuit-open",
+        pipz.Effect(NotifyOpsID, notifyOperations),
     ).
     AddRoute("other-error",
-        pipz.Effect("log-error", logError),
+        pipz.Effect(LogErrorID, logError),
     ),
 )
 
 // Multi-tier circuit breaking
-tieredBreaker := pipz.NewSequence("tiered-protection",
-    pipz.NewCircuitBreaker("service-breaker",     // Service-level protection
-        pipz.NewCircuitBreaker("endpoint-breaker", // Endpoint-level protection
+var (
+    TieredProtectionID = pipz.NewIdentity("tiered-protection", "Multi-tier circuit breaking")
+    ServiceBreakerID   = pipz.NewIdentity("service-breaker", "Service-level circuit breaker")
+    EndpointBreakerID  = pipz.NewIdentity("endpoint-breaker", "Endpoint-level circuit breaker")
+)
+
+tieredBreaker := pipz.NewSequence(TieredProtectionID,
+    pipz.NewCircuitBreaker(ServiceBreakerID,     // Service-level protection
+        pipz.NewCircuitBreaker(EndpointBreakerID, // Endpoint-level protection
             endpointCall,
             3, 30*time.Second,
         ),
@@ -450,14 +513,20 @@ func (a *AdaptiveCircuitBreaker[T]) Process(ctx context.Context, data T) (T, err
 }
 
 // Circuit breaker with health checks
-healthAwareBreaker := pipz.NewSequence("health-aware",
-    pipz.Apply("health-check", func(ctx context.Context, req Request) (Request, error) {
+var (
+    HealthAwareID       = pipz.NewIdentity("health-aware", "Health-aware circuit breaker")
+    HealthCheckID       = pipz.NewIdentity("health-check", "Service health check")
+    ProtectedServiceID  = pipz.NewIdentity("protected-service", "Protected service circuit breaker")
+)
+
+healthAwareBreaker := pipz.NewSequence(HealthAwareID,
+    pipz.Apply(HealthCheckID, func(ctx context.Context, req Request) (Request, error) {
         if !healthChecker.IsHealthy() {
             return req, errors.New("service unhealthy")
         }
         return req, nil
     }),
-    pipz.NewCircuitBreaker("protected-service",
+    pipz.NewCircuitBreaker(ProtectedServiceID,
         serviceCall,
         5, time.Minute,
     ),

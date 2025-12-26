@@ -20,15 +20,15 @@ Retries a processor up to a specified number of attempts, with optional exponent
 
 ```go
 // Simple retry without delays
-func NewRetry[T any](name Name, processor Chainable[T], maxAttempts int) *Retry[T]
+func NewRetry[T any](identity Identity, processor Chainable[T], maxAttempts int) *Retry[T]
 
 // Retry with exponential backoff
-func NewBackoff[T any](name Name, processor Chainable[T], maxAttempts int, baseDelay time.Duration) *Retry[T]
+func NewBackoff[T any](identity Identity, processor Chainable[T], maxAttempts int, baseDelay time.Duration) *Retry[T]
 ```
 
 ## Parameters
 
-- `name` (`Name`) - Identifier for the connector used in debugging
+- `identity` (`Identity`) - Identity containing name and description for debugging and documentation
 - `processor` - The processor to retry on failure
 - `maxAttempts` - Maximum number of attempts (minimum 1)
 - `baseDelay` - (Backoff only) Initial delay between attempts
@@ -55,10 +55,15 @@ Returns the same connector instance for method chaining.
 
 **Example:**
 ```go
+// Define identity
+var TestBackoffID = pipz.NewIdentity("test", "test backoff with fake clock")
+
 // Use fake clock in tests
 fakeClock := clockz.NewFakeClock()
-backoff := pipz.NewBackoff("test", processor, 3, 100*time.Millisecond).
-    WithClock(fakeClock)
+backoff := pipz.NewBackoff(
+    TestBackoffID,
+    processor, 3, 100*time.Millisecond,
+).WithClock(fakeClock)
 
 // Advance time in test to trigger delays
 fakeClock.Advance(200 * time.Millisecond)
@@ -81,33 +86,54 @@ fakeClock.Advance(200 * time.Millisecond)
 ## Example
 
 ```go
+// Define identities
+var (
+    APIRetryID      = pipz.NewIdentity("api-retry", "retry flaky API calls up to 3 times")
+    APICallID       = pipz.NewIdentity("api-call", "call external API")
+    ServiceRetryID  = pipz.NewIdentity("service-retry", "retry external service with exponential backoff")
+    ExternalSvcID   = pipz.NewIdentity("external-service", "call external service")
+    SaveRetryID     = pipz.NewIdentity("save-retry", "retry order save operation")
+    SaveFlowID      = pipz.NewIdentity("save-flow", "validate, calculate, and persist order")
+    ValidateID      = pipz.NewIdentity("validate", "validate order data")
+    CalculateID     = pipz.NewIdentity("calculate", "calculate order totals")
+    PersistID       = pipz.NewIdentity("persist", "save order to database")
+    GraduatedID     = pipz.NewIdentity("graduated-retry", "graduated retry: quick attempts then slow backoff")
+    QuickRetryID    = pipz.NewIdentity("quick-retry", "2 quick retry attempts without delay")
+    SlowRetryID     = pipz.NewIdentity("slow-retry", "3 slower retry attempts with backoff")
+)
+
 // Simple retry
-reliableAPI := pipz.NewRetry("api-retry",
-    pipz.Apply("api-call", callFlakyAPI),
+reliableAPI := pipz.NewRetry(
+    APIRetryID,
+    pipz.Apply(APICallID, callFlakyAPI),
     3, // Try up to 3 times
 )
 
 // Retry with backoff
-resilientService := pipz.NewBackoff("service-retry",
-    pipz.Apply("external-service", callExternalService),
+resilientService := pipz.NewBackoff(
+    ServiceRetryID,
+    pipz.Apply(ExternalSvcID, callExternalService),
     5,                        // Max 5 attempts
     100*time.Millisecond,     // 100ms, 200ms, 400ms, 800ms delays
 )
 
 // Retry a complex operation
-saveWithRetry := pipz.NewRetry("save-retry",
-    pipz.NewSequence[Order]("save-flow",
-        pipz.Apply("validate", validateOrder),
-        pipz.Apply("calculate", calculateTotals),
-        pipz.Apply("persist", saveToDatabase),
+saveWithRetry := pipz.NewRetry(
+    SaveRetryID,
+    pipz.NewSequence(
+        SaveFlowID,
+        pipz.Apply(ValidateID, validateOrder),
+        pipz.Apply(CalculateID, calculateTotals),
+        pipz.Apply(PersistID, saveToDatabase),
     ),
     3,
 )
 
 // Graduated retry strategy
-smartRetry := pipz.NewFallback("graduated-retry",
-    pipz.NewRetry("quick-retry", processor, 2),              // 2 quick attempts
-    pipz.NewBackoff("slow-retry", processor, 3, time.Second), // Then slower
+smartRetry := pipz.NewFallback(
+    GraduatedID,
+    pipz.NewRetry(QuickRetryID, processor, 2),
+    pipz.NewBackoff(SlowRetryID, processor, 3, time.Second),
 )
 ```
 
@@ -141,18 +167,32 @@ Don't use `Retry` when:
 
 ### ❌ Don't retry non-idempotent operations
 ```go
+// Define identities
+var (
+    ChargeRetryID = pipz.NewIdentity("charge", "retry payment charge")
+    PaymentID     = pipz.NewIdentity("payment", "charge card")
+)
+
 // WRONG - Each retry charges the card again!
-retry := pipz.NewRetry("charge",
-    pipz.Apply("payment", chargeCard),
+retry := pipz.NewRetry(
+    ChargeRetryID,
+    pipz.Apply(PaymentID, chargeCard),
     3,
 )
 ```
 
 ### ✅ Make operations idempotent first
 ```go
+// Define identities
+var (
+    IdempotentChargeID = pipz.NewIdentity("charge", "retry idempotent payment charge")
+    IdempotentPayID    = pipz.NewIdentity("payment", "charge card with idempotency key")
+)
+
 // RIGHT - Use idempotency key
-retry := pipz.NewRetry("charge",
-    pipz.Apply("payment", func(ctx context.Context, payment Payment) (Payment, error) {
+retry := pipz.NewRetry(
+    IdempotentChargeID,
+    pipz.Apply(IdempotentPayID, func(ctx context.Context, payment Payment) (Payment, error) {
         payment.IdempotencyKey = generateIdempotencyKey(payment)
         return chargeCardIdempotent(ctx, payment)
     }),
@@ -162,9 +202,16 @@ retry := pipz.NewRetry("charge",
 
 ### ❌ Don't retry validation errors
 ```go
+// Define identities
+var (
+    ValidateRetryID = pipz.NewIdentity("validate", "retry email validation")
+    CheckEmailID    = pipz.NewIdentity("check", "check email format")
+)
+
 // WRONG - Will never succeed
-retry := pipz.NewRetry("validate",
-    pipz.Apply("check", func(ctx context.Context, email string) (string, error) {
+retry := pipz.NewRetry(
+    ValidateRetryID,
+    pipz.Apply(CheckEmailID, func(ctx context.Context, email string) (string, error) {
         if !strings.Contains(email, "@") {
             return "", errors.New("invalid email") // Permanent error!
         }
@@ -176,9 +223,16 @@ retry := pipz.NewRetry("validate",
 
 ### ✅ Only retry transient errors
 ```go
+// Define identities
+var (
+    SmartRetryID = pipz.NewIdentity("smart", "smart retry that distinguishes transient from permanent errors")
+    APICheckID   = pipz.NewIdentity("api", "call API with error type checking")
+)
+
 // RIGHT - Check error type
-retry := pipz.NewRetry("smart",
-    pipz.Apply("api", func(ctx context.Context, req Request) (Response, error) {
+retry := pipz.NewRetry(
+    SmartRetryID,
+    pipz.Apply(APICheckID, func(ctx context.Context, req Request) (Response, error) {
         resp, err := callAPI(ctx, req)
         if err != nil {
             if isPermanentError(err) {
@@ -197,7 +251,10 @@ retry := pipz.NewRetry("smart",
 Retry enriches errors with attempt information:
 
 ```go
-retry := pipz.NewRetry("api", flakyProcessor, 3)
+// Define identity
+var APIRetryID = pipz.NewIdentity("api", "retry flaky API processor")
+
+retry := pipz.NewRetry(APIRetryID, flakyProcessor, 3)
 _, err := retry.Process(ctx, input)
 if err != nil {
     // Error message includes retry information
@@ -208,24 +265,42 @@ if err != nil {
 ## Common Patterns
 
 ```go
+// Define identities
+var (
+    HTTPClientID    = pipz.NewIdentity("http-client", "HTTP client with exponential backoff retry")
+    RequestID       = pipz.NewIdentity("request", "make HTTP request")
+    DBOpID          = pipz.NewIdentity("db-op", "database operation with quick retry for deadlocks")
+    QueryID         = pipz.NewIdentity("query", "run database query")
+    CascadingID     = pipz.NewIdentity("cascading", "cascading retry strategy with validation and progressive delays")
+    ValidateDataID  = pipz.NewIdentity("validate", "validate data")
+    QuickOpID       = pipz.NewIdentity("quick", "quick operation with immediate retry")
+    SlowOpID        = pipz.NewIdentity("slow", "slow operation with exponential backoff")
+    CircuitID       = pipz.NewIdentity("circuit", "circuit breaker with retry protection")
+    CheckCircuitID  = pipz.NewIdentity("check-circuit", "check if circuit is open")
+    ProtectedCallID = pipz.NewIdentity("protected-call", "retry protected operation")
+)
+
 // Network operations with backoff
-httpClient := pipz.NewBackoff("http-client",
-    pipz.Apply("request", makeHTTPRequest),
+httpClient := pipz.NewBackoff(
+    HTTPClientID,
+    pipz.Apply(RequestID, makeHTTPRequest),
     5,
     500*time.Millisecond, // 0.5s, 1s, 2s, 4s
 )
 
 // Database operations with quick retry
-dbOperation := pipz.NewRetry("db-op",
-    pipz.Apply("query", runDatabaseQuery),
+dbOperation := pipz.NewRetry(
+    DBOpID,
+    pipz.Apply(QueryID, runDatabaseQuery),
     3, // Handle transient deadlocks
 )
 
 // Cascading retry strategy
-cascadingRetry := pipz.NewSequence[Data]("cascading",
-    pipz.Apply("validate", validate),
-    pipz.NewRetry("quick", quickOperation, 2),
-    pipz.NewBackoff("slow", slowOperation, 5, time.Second),
+cascadingRetry := pipz.NewSequence(
+    CascadingID,
+    pipz.Apply(ValidateDataID, validate),
+    pipz.NewRetry(QuickOpID, quickOperation, 2),
+    pipz.NewBackoff(SlowOpID, slowOperation, 5, time.Second),
 )
 
 // Retry with circuit breaker pattern
@@ -234,8 +309,9 @@ type CircuitBreaker struct {
     mu       sync.Mutex
 }
 
-circuitBreaker := pipz.NewSequence[Request]("circuit",
-    pipz.Apply("check-circuit", func(ctx context.Context, req Request) (Request, error) {
+circuitBreaker := pipz.NewSequence(
+    CircuitID,
+    pipz.Apply(CheckCircuitID, func(ctx context.Context, req Request) (Request, error) {
         cb.mu.Lock()
         defer cb.mu.Unlock()
         if cb.failures > 10 {
@@ -243,16 +319,28 @@ circuitBreaker := pipz.NewSequence[Request]("circuit",
         }
         return req, nil
     }),
-    pipz.NewRetry("protected-call", protectedOperation, 3),
+    pipz.NewRetry(ProtectedCallID, protectedOperation, 3),
 )
 ```
 
 ## Advanced Patterns
 
 ```go
+// Define identities
+var (
+    CustomBackoffID   = pipz.NewIdentity("custom", "custom backoff with rate limit awareness")
+    OperationID       = pipz.NewIdentity("operation", "operation with rate limit handling")
+    IntelligentID     = pipz.NewIdentity("intelligent", "intelligent retry with error-specific strategies")
+    ErrorRouterID     = pipz.NewIdentity("error-router", "route to retry strategy based on error type")
+    TimeoutRetryID    = pipz.NewIdentity("timeout-retry", "retry timeout errors aggressively")
+    RateLimitRetryID  = pipz.NewIdentity("rate-retry", "retry rate limit errors with long backoff")
+    GeneralRetryID    = pipz.NewIdentity("general-retry", "retry other errors conservatively")
+)
+
 // Custom backoff strategy
-customBackoff := pipz.NewBackoff("custom",
-    pipz.Apply("operation", func(ctx context.Context, data Data) (Data, error) {
+customBackoff := pipz.NewBackoff(
+    CustomBackoffID,
+    pipz.Apply(OperationID, func(ctx context.Context, data Data) (Data, error) {
         // Check for specific error types
         result, err := operation(ctx, data)
         if err != nil {
@@ -273,9 +361,11 @@ customBackoff := pipz.NewBackoff("custom",
 )
 
 // Retry with different strategies per error
-intelligentRetry := pipz.NewHandle("intelligent",
+intelligentRetry := pipz.NewHandle(
+    IntelligentID,
     processor,
-    pipz.NewSwitch("error-router",
+    pipz.NewSwitch(
+        ErrorRouterID,
         func(ctx context.Context, err *pipz.Error[Data]) string {
             if err.Timeout {
                 return "timeout"
@@ -286,9 +376,9 @@ intelligentRetry := pipz.NewHandle("intelligent",
             return "other"
         },
     ).
-    AddRoute("timeout", pipz.NewRetry("timeout-retry", processor, 5)).
-    AddRoute("rate-limit", pipz.NewBackoff("rate-retry", processor, 3, 30*time.Second)).
-    AddRoute("other", pipz.NewRetry("general-retry", processor, 2)),
+    AddRoute("timeout", pipz.NewRetry(TimeoutRetryID, processor, 5)).
+    AddRoute("rate-limit", pipz.NewBackoff(RateLimitRetryID, processor, 3, 30*time.Second)).
+    AddRoute("other", pipz.NewRetry(GeneralRetryID, processor, 2)),
 )
 ```
 

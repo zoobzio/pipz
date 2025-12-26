@@ -12,8 +12,8 @@ import (
 // plainErrorProcessor is a test helper that returns plain errors (not Error[T] types).
 // This is needed to test the non-pipeline error wrapping in fallback.go lines 97-102.
 type plainErrorProcessor[T any] struct {
-	name Name
-	err  error
+	identity Identity
+	err      error
 }
 
 func (p *plainErrorProcessor[T]) Process(_ context.Context, _ T) (T, error) {
@@ -21,8 +21,15 @@ func (p *plainErrorProcessor[T]) Process(_ context.Context, _ T) (T, error) {
 	return zero, p.err
 }
 
-func (p *plainErrorProcessor[T]) Name() Name {
-	return p.name
+func (p *plainErrorProcessor[T]) Identity() Identity {
+	return p.identity
+}
+
+func (p *plainErrorProcessor[T]) Schema() Node {
+	return Node{
+		Identity: p.identity,
+		Type:     "plain_error_processor",
+	}
 }
 
 func (*plainErrorProcessor[T]) Close() error {
@@ -31,14 +38,14 @@ func (*plainErrorProcessor[T]) Close() error {
 
 func TestFallback(t *testing.T) {
 	t.Run("Primary Success", func(t *testing.T) {
-		primary := Transform("primary", func(_ context.Context, n int) int {
+		primary := Transform(NewIdentity("primary", ""), func(_ context.Context, n int) int {
 			return n * 2
 		})
-		fallback := Transform("fallback", func(_ context.Context, n int) int {
+		fallback := Transform(NewIdentity("fallback", ""), func(_ context.Context, n int) int {
 			return n * 3
 		})
 
-		fb := NewFallback("test-fallback", primary, fallback)
+		fb := NewFallback(NewIdentity("test-fallback", ""), primary, fallback)
 
 		result, err := fb.Process(context.Background(), 5)
 		if err != nil {
@@ -50,14 +57,14 @@ func TestFallback(t *testing.T) {
 	})
 
 	t.Run("Primary Fails Uses Fallback", func(t *testing.T) {
-		primary := Apply("primary", func(_ context.Context, _ int) (int, error) {
+		primary := Apply(NewIdentity("primary", ""), func(_ context.Context, _ int) (int, error) {
 			return 0, errors.New("primary failed")
 		})
-		fallback := Transform("fallback", func(_ context.Context, n int) int {
+		fallback := Transform(NewIdentity("fallback", ""), func(_ context.Context, n int) int {
 			return n * 3
 		})
 
-		fb := NewFallback("test-fallback", primary, fallback)
+		fb := NewFallback(NewIdentity("test-fallback", ""), primary, fallback)
 
 		result, err := fb.Process(context.Background(), 5)
 		if err != nil {
@@ -69,14 +76,14 @@ func TestFallback(t *testing.T) {
 	})
 
 	t.Run("Both Fail", func(t *testing.T) {
-		primary := Apply("primary", func(_ context.Context, _ int) (int, error) {
+		primary := Apply(NewIdentity("primary", ""), func(_ context.Context, _ int) (int, error) {
 			return 0, errors.New("primary failed")
 		})
-		fallback := Apply("fallback", func(_ context.Context, _ int) (int, error) {
+		fallback := Apply(NewIdentity("fallback", ""), func(_ context.Context, _ int) (int, error) {
 			return 0, errors.New("fallback failed")
 		})
 
-		fb := NewFallback("test-fallback", primary, fallback)
+		fb := NewFallback(NewIdentity("test-fallback", ""), primary, fallback)
 
 		_, err := fb.Process(context.Background(), 5)
 		if err == nil {
@@ -87,22 +94,22 @@ func TestFallback(t *testing.T) {
 		}
 	})
 
-	t.Run("Name Method", func(t *testing.T) {
-		primary := Transform("noop", func(_ context.Context, n int) int { return n })
-		fallback := Transform("noop", func(_ context.Context, n int) int { return n })
-		fb := NewFallback("my-fallback", primary, fallback)
-		if fb.Name() != "my-fallback" {
-			t.Errorf("expected 'my-fallback', got %q", fb.Name())
+	t.Run("Identity Method", func(t *testing.T) {
+		primary := Transform(NewIdentity("noop", ""), func(_ context.Context, n int) int { return n })
+		fallback := Transform(NewIdentity("noop", ""), func(_ context.Context, n int) int { return n })
+		fb := NewFallback(NewIdentity("my-fallback", ""), primary, fallback)
+		if fb.Identity().Name() != "my-fallback" {
+			t.Errorf("expected 'my-fallback', got %q", fb.Identity().Name())
 		}
 	})
 
 	t.Run("Configuration Methods", func(t *testing.T) {
-		primary1 := Transform("p1", func(_ context.Context, n int) int { return n })
-		primary2 := Transform("p2", func(_ context.Context, n int) int { return n * 2 })
-		fallback1 := Transform("f1", func(_ context.Context, n int) int { return n })
-		fallback2 := Transform("f2", func(_ context.Context, n int) int { return n * 3 })
+		primary1 := Transform(NewIdentity("p1", ""), func(_ context.Context, n int) int { return n })
+		primary2 := Transform(NewIdentity("p2", ""), func(_ context.Context, n int) int { return n * 2 })
+		fallback1 := Transform(NewIdentity("f1", ""), func(_ context.Context, n int) int { return n })
+		fallback2 := Transform(NewIdentity("f2", ""), func(_ context.Context, n int) int { return n * 3 })
 
-		fb := NewFallback("test", primary1, fallback1)
+		fb := NewFallback(NewIdentity("test", ""), primary1, fallback1)
 
 		// Test getters - just verify they return something (can't compare functions)
 		if fb.GetPrimary() == nil {
@@ -126,20 +133,20 @@ func TestFallback(t *testing.T) {
 	})
 
 	t.Run("Multiple Fallbacks", func(t *testing.T) {
-		first := Apply("first", func(_ context.Context, _ int) (int, error) {
+		first := Apply(NewIdentity("first", ""), func(_ context.Context, _ int) (int, error) {
 			return 0, errors.New("first failed")
 		})
-		second := Apply("second", func(_ context.Context, _ int) (int, error) {
+		second := Apply(NewIdentity("second", ""), func(_ context.Context, _ int) (int, error) {
 			return 0, errors.New("second failed")
 		})
-		third := Transform("third", func(_ context.Context, n int) int {
+		third := Transform(NewIdentity("third", ""), func(_ context.Context, n int) int {
 			return n * 10 // This should succeed
 		})
-		fourth := Transform("fourth", func(_ context.Context, n int) int {
+		fourth := Transform(NewIdentity("fourth", ""), func(_ context.Context, n int) int {
 			return n * 100 // Should not be reached
 		})
 
-		fb := NewFallback("multi-fallback", first, second, third, fourth)
+		fb := NewFallback(NewIdentity("multi-fallback", ""), first, second, third, fourth)
 
 		result, err := fb.Process(context.Background(), 5)
 		if err != nil {
@@ -151,17 +158,17 @@ func TestFallback(t *testing.T) {
 	})
 
 	t.Run("All Multiple Fallbacks Fail", func(t *testing.T) {
-		first := Apply("first", func(_ context.Context, _ int) (int, error) {
+		first := Apply(NewIdentity("first", ""), func(_ context.Context, _ int) (int, error) {
 			return 0, errors.New("first failed")
 		})
-		second := Apply("second", func(_ context.Context, _ int) (int, error) {
+		second := Apply(NewIdentity("second", ""), func(_ context.Context, _ int) (int, error) {
 			return 0, errors.New("second failed")
 		})
-		third := Apply("third", func(_ context.Context, _ int) (int, error) {
+		third := Apply(NewIdentity("third", ""), func(_ context.Context, _ int) (int, error) {
 			return 0, errors.New("third failed")
 		})
 
-		fb := NewFallback("all-fail", first, second, third)
+		fb := NewFallback(NewIdentity("all-fail", ""), first, second, third)
 
 		result, err := fb.Process(context.Background(), 5)
 		if err == nil {
@@ -181,12 +188,12 @@ func TestFallback(t *testing.T) {
 	})
 
 	t.Run("New API Methods", func(t *testing.T) {
-		first := Transform("first", func(_ context.Context, n int) int { return n * 2 })
-		second := Transform("second", func(_ context.Context, n int) int { return n * 3 })
-		third := Transform("third", func(_ context.Context, n int) int { return n * 4 })
-		fourth := Transform("fourth", func(_ context.Context, n int) int { return n * 5 })
+		first := Transform(NewIdentity("first", ""), func(_ context.Context, n int) int { return n * 2 })
+		second := Transform(NewIdentity("second", ""), func(_ context.Context, n int) int { return n * 3 })
+		third := Transform(NewIdentity("third", ""), func(_ context.Context, n int) int { return n * 4 })
+		fourth := Transform(NewIdentity("fourth", ""), func(_ context.Context, n int) int { return n * 5 })
 
-		fb := NewFallback("test", first, second)
+		fb := NewFallback(NewIdentity("test", ""), first, second)
 
 		// Test Len
 		if fb.Len() != 2 {
@@ -212,7 +219,7 @@ func TestFallback(t *testing.T) {
 		}
 
 		// Test InsertAt
-		fifth := Transform("fifth", func(_ context.Context, n int) int { return n * 6 })
+		fifth := Transform(NewIdentity("fifth", ""), func(_ context.Context, n int) int { return n * 6 })
 		fb.InsertAt(2, fifth) // Insert at position 2
 		if fb.Len() != 5 {
 			t.Errorf("expected length 5 after InsertAt, got %d", fb.Len())
@@ -243,12 +250,12 @@ func TestFallback(t *testing.T) {
 		}()
 
 		// This should panic
-		NewFallback[int]("empty")
+		NewFallback[int](NewIdentity("empty", ""))
 	})
 
 	t.Run("SetProcessors Panic Test", func(t *testing.T) {
-		first := Transform("first", func(_ context.Context, n int) int { return n })
-		fb := NewFallback("test", first)
+		first := Transform(NewIdentity("first", ""), func(_ context.Context, n int) int { return n })
+		fb := NewFallback(NewIdentity("test", ""), first)
 		defer func() {
 			if r := recover(); r == nil {
 				t.Error("expected panic when SetProcessors called with no processors")
@@ -262,11 +269,11 @@ func TestFallback(t *testing.T) {
 	})
 
 	t.Run("InsertAt Boundary Tests", func(t *testing.T) {
-		first := Transform("first", func(_ context.Context, n int) int { return n })
-		second := Transform("second", func(_ context.Context, n int) int { return n * 2 })
-		third := Transform("third", func(_ context.Context, n int) int { return n * 3 })
+		first := Transform(NewIdentity("first", ""), func(_ context.Context, n int) int { return n })
+		second := Transform(NewIdentity("second", ""), func(_ context.Context, n int) int { return n * 2 })
+		third := Transform(NewIdentity("third", ""), func(_ context.Context, n int) int { return n * 3 })
 
-		fb := NewFallback("test", first, second)
+		fb := NewFallback(NewIdentity("test", ""), first, second)
 
 		// Valid: Insert at beginning
 		fb.InsertAt(0, third)
@@ -275,7 +282,7 @@ func TestFallback(t *testing.T) {
 		}
 
 		// Valid: Insert at end
-		fourth := Transform("fourth", func(_ context.Context, n int) int { return n * 4 })
+		fourth := Transform(NewIdentity("fourth", ""), func(_ context.Context, n int) int { return n * 4 })
 		fb.InsertAt(3, fourth)
 		if fb.Len() != 4 {
 			t.Errorf("expected length 4 after InsertAt(3), got %d", fb.Len())
@@ -307,12 +314,12 @@ func TestFallback(t *testing.T) {
 	})
 
 	t.Run("RemoveAt Boundary Tests", func(t *testing.T) {
-		first := Transform("first", func(_ context.Context, n int) int { return n })
-		second := Transform("second", func(_ context.Context, n int) int { return n * 2 })
-		third := Transform("third", func(_ context.Context, n int) int { return n * 3 })
+		first := Transform(NewIdentity("first", ""), func(_ context.Context, n int) int { return n })
+		second := Transform(NewIdentity("second", ""), func(_ context.Context, n int) int { return n * 2 })
+		third := Transform(NewIdentity("third", ""), func(_ context.Context, n int) int { return n * 3 })
 
 		// Test removing from various positions
-		fb := NewFallback("test", first, second, third)
+		fb := NewFallback(NewIdentity("test", ""), first, second, third)
 
 		// Remove from middle
 		fb.RemoveAt(1)
@@ -322,7 +329,7 @@ func TestFallback(t *testing.T) {
 
 		// Test negative index - should panic
 		t.Run("Negative Index", func(t *testing.T) {
-			fb := NewFallback("test", first, second)
+			fb := NewFallback(NewIdentity("test", ""), first, second)
 			defer func() {
 				if r := recover(); r == nil {
 					t.Error("expected panic for negative index")
@@ -335,7 +342,7 @@ func TestFallback(t *testing.T) {
 
 		// Test index >= length - should panic
 		t.Run("Index Too Large", func(t *testing.T) {
-			fb := NewFallback("test", first, second)
+			fb := NewFallback(NewIdentity("test", ""), first, second)
 			defer func() {
 				if r := recover(); r == nil {
 					t.Error("expected panic for index >= length")
@@ -348,7 +355,7 @@ func TestFallback(t *testing.T) {
 
 		// Test removing last processor - should panic
 		t.Run("Remove Last Processor", func(t *testing.T) {
-			fb := NewFallback("test", first)
+			fb := NewFallback(NewIdentity("test", ""), first)
 			defer func() {
 				if r := recover(); r == nil {
 					t.Error("expected panic when removing last processor")
@@ -362,10 +369,10 @@ func TestFallback(t *testing.T) {
 
 	t.Run("SetFallback When Only One Processor", func(t *testing.T) {
 		// Test that SetFallback adds a second processor when there's only one
-		first := Transform("first", func(_ context.Context, n int) int { return n })
-		second := Transform("second", func(_ context.Context, n int) int { return n * 2 })
+		first := Transform(NewIdentity("first", ""), func(_ context.Context, n int) int { return n })
+		second := Transform(NewIdentity("second", ""), func(_ context.Context, n int) int { return n * 2 })
 
-		fb := NewFallback("test", first)
+		fb := NewFallback(NewIdentity("test", ""), first)
 		if fb.Len() != 1 {
 			t.Errorf("expected length 1 initially, got %d", fb.Len())
 		}
@@ -383,8 +390,8 @@ func TestFallback(t *testing.T) {
 	})
 
 	t.Run("GetFallback When Only One Processor", func(t *testing.T) {
-		first := Transform("first", func(_ context.Context, n int) int { return n })
-		fb := NewFallback("test", first)
+		first := Transform(NewIdentity("first", ""), func(_ context.Context, n int) int { return n })
+		fb := NewFallback(NewIdentity("test", ""), first)
 
 		// GetFallback should return nil when there's only one processor
 		if fb.GetFallback() != nil {
@@ -395,8 +402,8 @@ func TestFallback(t *testing.T) {
 	t.Run("GetPrimary With Empty Processors", func(t *testing.T) {
 		// This tests an edge case that shouldn't happen in normal use
 		// but ensures GetPrimary handles it gracefully
-		first := Transform("first", func(_ context.Context, n int) int { return n })
-		fb := NewFallback("test", first)
+		first := Transform(NewIdentity("first", ""), func(_ context.Context, n int) int { return n })
+		fb := NewFallback(NewIdentity("test", ""), first)
 
 		// GetPrimary should always return something for a valid Fallback
 		if fb.GetPrimary() == nil {
@@ -407,8 +414,8 @@ func TestFallback(t *testing.T) {
 	t.Run("GetPrimary Returns Nil Edge Case", func(t *testing.T) {
 		// This tests line 173 in fallback.go where GetPrimary returns nil
 		// We need to bypass constructor validation using reflection
-		first := Transform("first", func(_ context.Context, n int) int { return n })
-		fb := NewFallback("test", first)
+		first := Transform(NewIdentity("first", ""), func(_ context.Context, n int) int { return n })
+		fb := NewFallback(NewIdentity("test", ""), first)
 
 		// Use reflection to clear processors slice
 		fbValue := reflect.ValueOf(fb).Elem()
@@ -429,8 +436,8 @@ func TestFallback(t *testing.T) {
 		// in normal operation, we test the defensive code anyway
 
 		// Create a fallback with processors that succeed
-		p1 := Transform("p1", func(_ context.Context, n int) int { return n * 2 })
-		fb := NewFallback("test", p1)
+		p1 := Transform(NewIdentity("p1", ""), func(_ context.Context, n int) int { return n * 2 })
+		fb := NewFallback(NewIdentity("test", ""), p1)
 
 		// Process should succeed on first processor
 		result, err := fb.Process(context.Background(), 5)
@@ -446,14 +453,14 @@ func TestFallback(t *testing.T) {
 	})
 
 	t.Run("Fallback panic recovery", func(t *testing.T) {
-		panicProcessor := Apply("panic_processor", func(_ context.Context, _ int) (int, error) {
+		panicProcessor := Apply(NewIdentity("panic_processor", ""), func(_ context.Context, _ int) (int, error) {
 			panic("fallback processor panic")
 		})
-		successProcessor := Transform("success_processor", func(_ context.Context, n int) int {
+		successProcessor := Transform(NewIdentity("success_processor", ""), func(_ context.Context, n int) int {
 			return n * 2
 		})
 
-		fallback := NewFallback("panic_fallback", panicProcessor, successProcessor)
+		fallback := NewFallback(NewIdentity("panic_fallback", ""), panicProcessor, successProcessor)
 		result, err := fallback.Process(context.Background(), 42)
 
 		// Fallback should use the success processor
@@ -467,14 +474,14 @@ func TestFallback(t *testing.T) {
 	})
 
 	t.Run("All fallback processors panic", func(t *testing.T) {
-		panic1 := Apply("panic1", func(_ context.Context, _ int) (int, error) {
+		panic1 := Apply(NewIdentity("panic1", ""), func(_ context.Context, _ int) (int, error) {
 			panic("first processor panic")
 		})
-		panic2 := Apply("panic2", func(_ context.Context, _ int) (int, error) {
+		panic2 := Apply(NewIdentity("panic2", ""), func(_ context.Context, _ int) (int, error) {
 			panic("second processor panic")
 		})
 
-		fallback := NewFallback("all_panic_fallback", panic1, panic2)
+		fallback := NewFallback(NewIdentity("all_panic_fallback", ""), panic1, panic2)
 		result, err := fallback.Process(context.Background(), 42)
 
 		if result != 42 {
@@ -486,7 +493,7 @@ func TestFallback(t *testing.T) {
 			t.Fatal("expected pipz.Error")
 		}
 
-		if pipzErr.Path[0] != "all_panic_fallback" {
+		if pipzErr.Path[0].Name() != "all_panic_fallback" {
 			t.Errorf("expected path to start with 'all_panic_fallback', got %v", pipzErr.Path)
 		}
 
@@ -497,10 +504,10 @@ func TestFallback(t *testing.T) {
 
 	t.Run("Close Tests", func(t *testing.T) {
 		t.Run("Closes All Children", func(t *testing.T) {
-			p1 := newTrackingProcessor[int]("p1")
-			p2 := newTrackingProcessor[int]("p2")
+			p1 := newTrackingProcessor[int](NewIdentity("p1", ""))
+			p2 := newTrackingProcessor[int](NewIdentity("p2", ""))
 
-			f := NewFallback("test", p1, p2)
+			f := NewFallback(NewIdentity("test", ""), p1, p2)
 			err := f.Close()
 
 			if err != nil {
@@ -512,10 +519,10 @@ func TestFallback(t *testing.T) {
 		})
 
 		t.Run("Aggregates Errors", func(t *testing.T) {
-			p1 := newTrackingProcessor[int]("p1").WithCloseError(errors.New("p1 error"))
-			p2 := newTrackingProcessor[int]("p2").WithCloseError(errors.New("p2 error"))
+			p1 := newTrackingProcessor[int](NewIdentity("p1", "")).WithCloseError(errors.New("p1 error"))
+			p2 := newTrackingProcessor[int](NewIdentity("p2", "")).WithCloseError(errors.New("p2 error"))
 
-			f := NewFallback("test", p1, p2)
+			f := NewFallback(NewIdentity("test", ""), p1, p2)
 			err := f.Close()
 
 			if err == nil {
@@ -527,8 +534,8 @@ func TestFallback(t *testing.T) {
 		})
 
 		t.Run("Idempotency", func(t *testing.T) {
-			p := newTrackingProcessor[int]("p")
-			f := NewFallback("test", p)
+			p := newTrackingProcessor[int](NewIdentity("p", ""))
+			f := NewFallback(NewIdentity("test", ""), p)
 
 			_ = f.Close()
 			_ = f.Close()
@@ -547,10 +554,10 @@ func TestFallback(t *testing.T) {
 		// Create a processor that returns a plain error (not wrapped in Error[T])
 		// We'll implement this by creating a fake processor that doesn't use the pipz error wrapping
 		fakeProcessor := &plainErrorProcessor[int]{
-			name: "plain-error-proc",
-			err:  plainErr,
+			identity: NewIdentity("plain-error-proc", ""),
+			err:      plainErr,
 		}
-		fallback := NewFallback("error-wrapper", fakeProcessor)
+		fallback := NewFallback(NewIdentity("error-wrapper", ""), fakeProcessor)
 		result, err := fallback.Process(context.Background(), 42)
 
 		// Should return original input
@@ -571,7 +578,7 @@ func TestFallback(t *testing.T) {
 		if pipeErr.InputData != 42 {
 			t.Errorf("expected input data 42, got %d", pipeErr.InputData)
 		}
-		if len(pipeErr.Path) != 1 || pipeErr.Path[0] != "error-wrapper" {
+		if len(pipeErr.Path) != 1 || pipeErr.Path[0].Name() != "error-wrapper" {
 			t.Errorf("expected path [error-wrapper], got %v", pipeErr.Path)
 		}
 		if pipeErr.Timestamp.IsZero() {
@@ -584,11 +591,11 @@ func TestFallback(t *testing.T) {
 		// This is defensive code that's technically unreachable with current constructor
 		// but we test it for completeness
 
-		processor := Transform("success", func(_ context.Context, n int) int {
+		processor := Transform(NewIdentity("success", ""), func(_ context.Context, n int) int {
 			return n * 2
 		})
 
-		fallback := NewFallback("defensive", processor)
+		fallback := NewFallback(NewIdentity("defensive", ""), processor)
 
 		// Use reflection to create an edge case scenario
 		fbValue := reflect.ValueOf(fallback).Elem()
@@ -608,6 +615,33 @@ func TestFallback(t *testing.T) {
 		}
 		if result != 42 {
 			t.Errorf("expected original data 42, got %d", result)
+		}
+	})
+
+	t.Run("Schema", func(t *testing.T) {
+		primary := Transform(NewIdentity("primary", ""), func(_ context.Context, n int) int { return n })
+		backup := Transform(NewIdentity("backup", ""), func(_ context.Context, n int) int { return n })
+
+		fallback := NewFallback(NewIdentity("test-fallback", "Fallback connector"), primary, backup)
+
+		schema := fallback.Schema()
+
+		if schema.Identity.Name() != "test-fallback" {
+			t.Errorf("Schema Identity.Name() = %v, want %v", schema.Identity.Name(), "test-fallback")
+		}
+		if schema.Type != "fallback" {
+			t.Errorf("Schema Type = %v, want %v", schema.Type, "fallback")
+		}
+
+		flow, ok := FallbackKey.From(schema)
+		if !ok {
+			t.Fatal("Expected FallbackFlow")
+		}
+		if flow.Primary.Identity.Name() != "primary" {
+			t.Errorf("Flow.Primary.Identity.Name() = %v, want %v", flow.Primary.Identity.Name(), "primary")
+		}
+		if len(flow.Backups) != 1 {
+			t.Errorf("len(Flow.Backups) = %d, want 1", len(flow.Backups))
 		}
 	})
 }

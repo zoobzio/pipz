@@ -10,7 +10,7 @@ import (
 func TestTransform(t *testing.T) {
 	t.Run("Basic Transform", func(t *testing.T) {
 		// Create a simple string transformer
-		toUpper := Transform("to_upper", func(_ context.Context, s string) string {
+		toUpper := Transform(NewIdentity("to_upper", ""), func(_ context.Context, s string) string {
 			return strings.ToUpper(s)
 		})
 
@@ -25,7 +25,7 @@ func TestTransform(t *testing.T) {
 
 	t.Run("Transform Never Returns Error", func(t *testing.T) {
 		// Create a transformer that would panic in a normal function
-		divider := Transform("divide", func(_ context.Context, n int) int {
+		divider := Transform(NewIdentity("divide", ""), func(_ context.Context, n int) int {
 			if n == 0 {
 				return 0 // Transform can't return error, must handle internally
 			}
@@ -44,7 +44,7 @@ func TestTransform(t *testing.T) {
 
 	t.Run("Transform With Context Check", func(t *testing.T) {
 		// Transform can check context but can't return context errors
-		transformer := Transform("context_aware", func(ctx context.Context, s string) string {
+		transformer := Transform(NewIdentity("context_aware", ""), func(ctx context.Context, s string) string {
 			select {
 			case <-ctx.Done():
 				return "canceled"
@@ -64,7 +64,7 @@ func TestTransform(t *testing.T) {
 
 	t.Run("Transform panic recovery", func(t *testing.T) {
 		// Create a Transform that panics
-		panicTransform := Transform("panic_transform", func(_ context.Context, _ string) string {
+		panicTransform := Transform(NewIdentity("panic_transform", ""), func(_ context.Context, _ string) string {
 			panic("test panic in transform")
 		})
 
@@ -81,7 +81,7 @@ func TestTransform(t *testing.T) {
 			t.Fatal("expected pipz.Error")
 		}
 
-		if len(pipzErr.Path) != 1 || pipzErr.Path[0] != "panic_transform" {
+		if len(pipzErr.Path) != 1 || pipzErr.Path[0].Name() != "panic_transform" {
 			t.Errorf("expected path [panic_transform], got %v", pipzErr.Path)
 		}
 
@@ -98,6 +98,26 @@ func TestTransform(t *testing.T) {
 		expectedMsg := "panic occurred: test panic in transform"
 		if panicErr.sanitized != expectedMsg {
 			t.Errorf("expected %q, got %q", expectedMsg, panicErr.sanitized)
+		}
+	})
+
+	t.Run("Processor Close", func(t *testing.T) {
+		proc := Transform(NewIdentity("test", ""), func(_ context.Context, s string) string { return s })
+
+		err := proc.Close()
+
+		if err != nil {
+			t.Errorf("Close() = %v, want nil", err)
+		}
+	})
+
+	t.Run("Identity String", func(t *testing.T) {
+		id := NewIdentity("my-processor", "A description")
+
+		str := id.String()
+
+		if str != "my-processor" {
+			t.Errorf("String() = %v, want %v", str, "my-processor")
 		}
 	})
 }

@@ -12,12 +12,12 @@ import (
 func TestRetry(t *testing.T) {
 	t.Run("Success On First Try", func(t *testing.T) {
 		calls := 0
-		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, n int) (int, error) {
 			calls++
 			return n * 2, nil
 		})
 
-		retry := NewRetry("test-retry", processor, 3)
+		retry := NewRetry(NewIdentity("test-retry", ""), processor, 3)
 		result, err := retry.Process(context.Background(), 5)
 
 		if err != nil {
@@ -33,7 +33,7 @@ func TestRetry(t *testing.T) {
 
 	t.Run("Success After Retries", func(t *testing.T) {
 		calls := 0
-		processor := Apply("test", func(_ context.Context, n int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, n int) (int, error) {
 			calls++
 			if calls < 3 {
 				return 0, errors.New("temporary error")
@@ -41,7 +41,7 @@ func TestRetry(t *testing.T) {
 			return n * 2, nil
 		})
 
-		retry := NewRetry("test-retry", processor, 3)
+		retry := NewRetry(NewIdentity("test-retry", ""), processor, 3)
 		result, err := retry.Process(context.Background(), 5)
 
 		if err != nil {
@@ -57,12 +57,12 @@ func TestRetry(t *testing.T) {
 
 	t.Run("Exhausts Retries", func(t *testing.T) {
 		calls := 0
-		processor := Apply("test", func(_ context.Context, _ int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, _ int) (int, error) {
 			calls++
 			return 0, errors.New("permanent error")
 		})
 
-		retry := NewRetry("test-retry", processor, 3)
+		retry := NewRetry(NewIdentity("test-retry", ""), processor, 3)
 		_, err := retry.Process(context.Background(), 5)
 
 		if err == nil {
@@ -78,11 +78,11 @@ func TestRetry(t *testing.T) {
 	})
 
 	t.Run("Context Cancellation", func(t *testing.T) {
-		processor := Apply("test", func(_ context.Context, _ int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, _ int) (int, error) {
 			return 0, errors.New("error")
 		})
 
-		retry := NewRetry("test-retry", processor, 5)
+		retry := NewRetry(NewIdentity("test-retry", ""), processor, 5)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
@@ -103,8 +103,8 @@ func TestRetry(t *testing.T) {
 	})
 
 	t.Run("Configuration Methods", func(t *testing.T) {
-		processor := Transform("test", func(_ context.Context, n int) int { return n })
-		retry := NewRetry("test", processor, 3)
+		processor := Transform(NewIdentity("test", ""), func(_ context.Context, n int) int { return n })
+		retry := NewRetry(NewIdentity("test", ""), processor, 3)
 
 		if retry.GetMaxAttempts() != 3 {
 			t.Errorf("expected 3, got %d", retry.GetMaxAttempts())
@@ -124,24 +124,24 @@ func TestRetry(t *testing.T) {
 	})
 
 	t.Run("Name Method", func(t *testing.T) {
-		processor := Transform("noop", func(_ context.Context, n int) int { return n })
-		retry := NewRetry("my-retry", processor, 3)
-		if retry.Name() != "my-retry" {
-			t.Errorf("expected 'my-retry', got %q", retry.Name())
+		processor := Transform(NewIdentity("noop", ""), func(_ context.Context, n int) int { return n })
+		retry := NewRetry(NewIdentity("my-retry", ""), processor, 3)
+		if retry.Identity().Name() != "my-retry" {
+			t.Errorf("expected 'my-retry', got %q", retry.Identity().Name())
 		}
 	})
 
 	t.Run("Constructor With Invalid MaxAttempts", func(t *testing.T) {
-		processor := Transform("test", func(_ context.Context, n int) int { return n })
+		processor := Transform(NewIdentity("test", ""), func(_ context.Context, n int) int { return n })
 
 		// Test with 0 attempts - should be clamped to 1
-		retry := NewRetry("test", processor, 0)
+		retry := NewRetry(NewIdentity("test", ""), processor, 0)
 		if retry.GetMaxAttempts() != 1 {
 			t.Errorf("expected maxAttempts to be clamped to 1, got %d", retry.GetMaxAttempts())
 		}
 
 		// Test with negative attempts - should be clamped to 1
-		retry = NewRetry("test", processor, -5)
+		retry = NewRetry(NewIdentity("test", ""), processor, -5)
 		if retry.GetMaxAttempts() != 1 {
 			t.Errorf("expected maxAttempts to be clamped to 1, got %d", retry.GetMaxAttempts())
 		}
@@ -152,7 +152,7 @@ func TestRetry(t *testing.T) {
 		calls := 0
 		var cancelFunc context.CancelFunc
 
-		processor := Apply("test", func(_ context.Context, _ int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, _ int) (int, error) {
 			calls++
 			if calls == 1 {
 				// Cancel context after first attempt fails
@@ -161,7 +161,7 @@ func TestRetry(t *testing.T) {
 			return 0, errors.New("processor error")
 		})
 
-		retry := NewRetry("test-retry", processor, 5) // Allow multiple retries
+		retry := NewRetry(NewIdentity("test-retry", ""), processor, 5) // Allow multiple retries
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancelFunc = cancel // Store cancel function for use in processor
@@ -179,7 +179,7 @@ func TestRetry(t *testing.T) {
 				t.Errorf("expected canceled error, got %v", err)
 			}
 			// Should show the retry name in the path
-			if len(pipzErr.Path) == 0 || pipzErr.Path[0] != "test-retry" {
+			if len(pipzErr.Path) == 0 || pipzErr.Path[0].Name() != "test-retry" {
 				t.Errorf("expected retry name in error path, got %v", pipzErr.Path)
 			}
 		} else {
@@ -196,14 +196,14 @@ func TestRetry(t *testing.T) {
 		// Test timeout context cancellation between attempts
 		calls := 0
 
-		processor := Apply("test", func(_ context.Context, _ int) (int, error) {
+		processor := Apply(NewIdentity("test", ""), func(_ context.Context, _ int) (int, error) {
 			calls++
 			// Add delay to ensure timeout can occur
 			time.Sleep(50 * time.Millisecond)
 			return 0, errors.New("processor error")
 		})
 
-		retry := NewRetry("test-retry", processor, 5)
+		retry := NewRetry(NewIdentity("test-retry", ""), processor, 5)
 
 		// Create context that times out very quickly
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
@@ -231,11 +231,11 @@ func TestRetry(t *testing.T) {
 		// This is unlikely to happen in practice, but the code handles it defensively
 
 		// Create a retry with zero attempts (clamped to 1)
-		processor := Transform("success", func(_ context.Context, n int) int {
+		processor := Transform(NewIdentity("success", ""), func(_ context.Context, n int) int {
 			return n * 2 // Always succeeds
 		})
 
-		retry := NewRetry("test-retry", processor, 1)
+		retry := NewRetry(NewIdentity("test-retry", ""), processor, 1)
 		result, err := retry.Process(context.Background(), 5)
 
 		if err != nil {
@@ -249,9 +249,9 @@ func TestRetry(t *testing.T) {
 
 func TestRetryClose(t *testing.T) {
 	t.Run("Closes Child Processor", func(t *testing.T) {
-		p := newTrackingProcessor[int]("p")
+		p := newTrackingProcessor[int](NewIdentity("p", ""))
 
-		r := NewRetry("test", p, 3)
+		r := NewRetry(NewIdentity("test", ""), p, 3)
 		err := r.Close()
 
 		if err != nil {
@@ -263,9 +263,9 @@ func TestRetryClose(t *testing.T) {
 	})
 
 	t.Run("Propagates Close Error", func(t *testing.T) {
-		p := newTrackingProcessor[int]("p").WithCloseError(errors.New("close error"))
+		p := newTrackingProcessor[int](NewIdentity("p", "")).WithCloseError(errors.New("close error"))
 
-		r := NewRetry("test", p, 3)
+		r := NewRetry(NewIdentity("test", ""), p, 3)
 		err := r.Close()
 
 		if err == nil {
@@ -277,8 +277,8 @@ func TestRetryClose(t *testing.T) {
 	})
 
 	t.Run("Idempotency", func(t *testing.T) {
-		p := newTrackingProcessor[int]("p")
-		r := NewRetry("test", p, 3)
+		p := newTrackingProcessor[int](NewIdentity("p", ""))
+		r := NewRetry(NewIdentity("test", ""), p, 3)
 
 		_ = r.Close()
 		_ = r.Close()
@@ -293,13 +293,13 @@ func TestRetryContextCancellationBetweenAttempts(t *testing.T) {
 	t.Run("Context Cancellation Between Retry Attempts", func(t *testing.T) {
 		// This test covers lines 74-84 in retry.go where context is checked between attempts
 		attemptCount := atomic.Int32{}
-		processor := Apply("flaky", func(_ context.Context, _ int) (int, error) {
+		processor := Apply(NewIdentity("flaky", ""), func(_ context.Context, _ int) (int, error) {
 			attemptCount.Add(1)
 			// All attempts fail to trigger retry loop
 			return 0, errors.New("attempt failed")
 		})
 
-		retry := NewRetry("test-retry", processor, 5)
+		retry := NewRetry(NewIdentity("test-retry", ""), processor, 5)
 		// Create context that we'll cancel during retry
 		ctx, cancel := context.WithCancel(context.Background())
 		// Start retry in goroutine
@@ -334,7 +334,7 @@ func TestRetryContextCancellationBetweenAttempts(t *testing.T) {
 			if !pipeErr.IsCanceled() && !strings.Contains(err.Error(), "attempt failed") {
 				t.Errorf("expected canceled error or attempt failed, got: %v", err)
 			}
-			if len(pipeErr.Path) > 0 && pipeErr.Path[0] != "test-retry" {
+			if len(pipeErr.Path) > 0 && pipeErr.Path[0].Name() != "test-retry" {
 				t.Errorf("expected retry name in error path, got %v", pipeErr.Path)
 			}
 		}
@@ -351,13 +351,13 @@ func TestRetryBackoffContextTimeout(t *testing.T) {
 	t.Run("Backoff Context Timeout During Wait", func(t *testing.T) {
 		// This test covers BackoffRetry when context times out during backoff wait
 		attempts := atomic.Int32{}
-		processor := Apply("failing", func(_ context.Context, _ int) (int, error) {
+		processor := Apply(NewIdentity("failing", ""), func(_ context.Context, _ int) (int, error) {
 			attempts.Add(1)
 			return 0, errors.New("always fails")
 		})
 
 		// Create backoff retry with base delay that will cause timeout
-		backoff := NewBackoff("test-backoff", processor, 5, 20*time.Millisecond)
+		backoff := NewBackoff(NewIdentity("test-backoff", ""), processor, 5, 20*time.Millisecond)
 
 		// Use context with short timeout
 		ctx, cancel := context.WithTimeout(context.Background(), 35*time.Millisecond)
@@ -397,11 +397,11 @@ func TestRetryBackoffContextTimeout(t *testing.T) {
 		// This tests the defensive code at line 232 in retry.go where lastErr could theoretically be nil
 		// This is unlikely to happen in practice, but the code handles it defensively
 
-		processor := Transform("success", func(_ context.Context, n int) int {
+		processor := Transform(NewIdentity("success", ""), func(_ context.Context, n int) int {
 			return n * 3 // Always succeeds
 		})
 
-		backoff := NewBackoff("test-backoff", processor, 1, 10*time.Millisecond)
+		backoff := NewBackoff(NewIdentity("test-backoff", ""), processor, 1, 10*time.Millisecond)
 		result, err := backoff.Process(context.Background(), 7)
 
 		if err != nil {
@@ -414,7 +414,7 @@ func TestRetryBackoffContextTimeout(t *testing.T) {
 
 	t.Run("Retry panic recovery", func(t *testing.T) {
 		calls := 0
-		processor := Apply("panic_processor", func(_ context.Context, n int) (int, error) {
+		processor := Apply(NewIdentity("panic_processor", ""), func(_ context.Context, n int) (int, error) {
 			calls++
 			if calls < 2 {
 				panic("retry processor panic")
@@ -422,7 +422,7 @@ func TestRetryBackoffContextTimeout(t *testing.T) {
 			return n * 2, nil
 		})
 
-		retry := NewRetry("panic_retry", processor, 3)
+		retry := NewRetry(NewIdentity("panic_retry", ""), processor, 3)
 		result, err := retry.Process(context.Background(), 42)
 
 		// Should succeed on retry after panic recovery
@@ -441,12 +441,12 @@ func TestRetryBackoffContextTimeout(t *testing.T) {
 
 	t.Run("All retry attempts panic", func(t *testing.T) {
 		calls := 0
-		processor := Apply("panic_processor", func(_ context.Context, _ int) (int, error) {
+		processor := Apply(NewIdentity("panic_processor", ""), func(_ context.Context, _ int) (int, error) {
 			calls++
 			panic("retry processor panic")
 		})
 
-		retry := NewRetry("all_panic_retry", processor, 3)
+		retry := NewRetry(NewIdentity("all_panic_retry", ""), processor, 3)
 		result, err := retry.Process(context.Background(), 42)
 
 		if result != 0 {
@@ -458,7 +458,7 @@ func TestRetryBackoffContextTimeout(t *testing.T) {
 			t.Fatal("expected pipz.Error")
 		}
 
-		if pipzErr.Path[0] != "all_panic_retry" {
+		if pipzErr.Path[0].Name() != "all_panic_retry" {
 			t.Errorf("expected path to start with 'all_panic_retry', got %v", pipzErr.Path)
 		}
 
@@ -473,7 +473,7 @@ func TestRetryBackoffContextTimeout(t *testing.T) {
 
 	t.Run("Backoff panic recovery", func(t *testing.T) {
 		calls := 0
-		processor := Apply("panic_processor", func(_ context.Context, n int) (int, error) {
+		processor := Apply(NewIdentity("panic_processor", ""), func(_ context.Context, n int) (int, error) {
 			calls++
 			if calls < 2 {
 				panic("backoff processor panic")
@@ -481,7 +481,7 @@ func TestRetryBackoffContextTimeout(t *testing.T) {
 			return n * 2, nil
 		})
 
-		backoff := NewBackoff("panic_backoff", processor, 3, 10*time.Millisecond)
+		backoff := NewBackoff(NewIdentity("panic_backoff", ""), processor, 3, 10*time.Millisecond)
 		result, err := backoff.Process(context.Background(), 42)
 
 		// Should succeed on retry after panic recovery
@@ -495,6 +495,28 @@ func TestRetryBackoffContextTimeout(t *testing.T) {
 
 		if calls != 2 {
 			t.Errorf("expected 2 calls (1 panic + 1 success), got %d", calls)
+		}
+	})
+
+	t.Run("Schema", func(t *testing.T) {
+		proc := Transform(NewIdentity("inner-proc", ""), func(_ context.Context, n int) int { return n })
+		retry := NewRetry(NewIdentity("test-retry", "Retry connector"), proc, 3)
+
+		schema := retry.Schema()
+
+		if schema.Identity.Name() != "test-retry" {
+			t.Errorf("Schema Identity.Name() = %v, want %v", schema.Identity.Name(), "test-retry")
+		}
+		if schema.Type != "retry" {
+			t.Errorf("Schema Type = %v, want %v", schema.Type, "retry")
+		}
+
+		flow, ok := RetryKey.From(schema)
+		if !ok {
+			t.Fatal("Expected RetryFlow")
+		}
+		if flow.Processor.Identity.Name() != "inner-proc" {
+			t.Errorf("Flow.Processor.Identity.Name() = %v, want %v", flow.Processor.Identity.Name(), "inner-proc")
 		}
 	})
 }

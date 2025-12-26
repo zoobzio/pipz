@@ -139,6 +139,9 @@ var (
 // Common field keys using capitan primitive types.
 // All keys use primitive types to avoid custom struct serialization.
 var (
+	// Identity tracking field.
+	FieldIdentityID = capitan.NewStringKey("identity_id") // UUID of the component
+
 	// Common fields.
 	FieldName      = capitan.NewStringKey("name")       // Connector instance name
 	FieldError     = capitan.NewStringKey("error")      // Error message

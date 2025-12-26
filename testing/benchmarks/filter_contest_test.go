@@ -13,9 +13,9 @@ func BenchmarkFilter(b *testing.B) {
 	ctx := context.Background()
 
 	b.Run("ConditionFalse", func(b *testing.B) {
-		filter := pipz.NewFilter("bench-filter",
+		filter := pipz.NewFilter(pipz.NewIdentity("bench-filter", ""),
 			func(_ context.Context, data ClonableInt) bool { return data < 0 },
-			pipz.Transform("double", func(_ context.Context, data ClonableInt) ClonableInt { return data * 2 }))
+			pipz.Transform(pipz.NewIdentity("double", ""), func(_ context.Context, data ClonableInt) ClonableInt { return data * 2 }))
 
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -26,9 +26,9 @@ func BenchmarkFilter(b *testing.B) {
 	})
 
 	b.Run("ConditionTrue", func(b *testing.B) {
-		filter := pipz.NewFilter("bench-filter",
+		filter := pipz.NewFilter(pipz.NewIdentity("bench-filter", ""),
 			func(_ context.Context, data ClonableInt) bool { return data > 0 },
-			pipz.Transform("double", func(_ context.Context, data ClonableInt) ClonableInt { return data * 2 }))
+			pipz.Transform(pipz.NewIdentity("double", ""), func(_ context.Context, data ClonableInt) ClonableInt { return data * 2 }))
 
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -39,11 +39,11 @@ func BenchmarkFilter(b *testing.B) {
 	})
 
 	b.Run("ComplexCondition", func(b *testing.B) {
-		filter := pipz.NewFilter("complex-filter",
+		filter := pipz.NewFilter(pipz.NewIdentity("complex-filter", ""),
 			func(_ context.Context, data ClonableInt) bool {
 				return data%2 == 0 && data > 10 && data < 1000
 			},
-			pipz.Transform("complex", func(_ context.Context, data ClonableInt) ClonableInt {
+			pipz.Transform(pipz.NewIdentity("complex", ""), func(_ context.Context, data ClonableInt) ClonableInt {
 				return data*3 + 7
 			}))
 
@@ -65,21 +65,21 @@ func BenchmarkContest(b *testing.B) {
 			return true // Always return true for benchmarking
 		}
 
-		p1 := pipz.Transform("odd", func(_ context.Context, u User) User {
+		p1 := pipz.Transform(pipz.NewIdentity("odd", ""), func(_ context.Context, u User) User {
 			u.Age = 101
 			return u
 		})
-		p2 := pipz.Transform("even-slow", func(_ context.Context, u User) User {
+		p2 := pipz.Transform(pipz.NewIdentity("even-slow", ""), func(_ context.Context, u User) User {
 			time.Sleep(time.Microsecond)
 			u.Age = 100
 			return u
 		})
-		p3 := pipz.Transform("even-fast", func(_ context.Context, u User) User {
+		p3 := pipz.Transform(pipz.NewIdentity("even-fast", ""), func(_ context.Context, u User) User {
 			u.Age = 50
 			return u
 		})
 
-		contest := pipz.NewContest("bench-contest", condition, p1, p2, p3)
+		contest := pipz.NewContest(pipz.NewIdentity("bench-contest", ""), condition, p1, p2, p3)
 		data := User{ID: 1, Name: "Test", Email: "test@example.com", Age: 1}
 
 		b.ResetTimer()
@@ -96,20 +96,20 @@ func BenchmarkContest(b *testing.B) {
 			return false // Always return false for benchmarking
 		}
 
-		p1 := pipz.Transform("p1", func(_ context.Context, u User) User {
+		p1 := pipz.Transform(pipz.NewIdentity("p1", ""), func(_ context.Context, u User) User {
 			u.Age = 10
 			return u
 		})
-		p2 := pipz.Transform("p2", func(_ context.Context, u User) User {
+		p2 := pipz.Transform(pipz.NewIdentity("p2", ""), func(_ context.Context, u User) User {
 			u.Age = 20
 			return u
 		})
-		p3 := pipz.Transform("p3", func(_ context.Context, u User) User {
+		p3 := pipz.Transform(pipz.NewIdentity("p3", ""), func(_ context.Context, u User) User {
 			u.Age = 30
 			return u
 		})
 
-		contest := pipz.NewContest("bench-no-winner", condition, p1, p2, p3)
+		contest := pipz.NewContest(pipz.NewIdentity("bench-no-winner", ""), condition, p1, p2, p3)
 		data := User{ID: 1, Name: "Test", Email: "test@example.com", Age: 1}
 
 		b.ResetTimer()
@@ -126,13 +126,13 @@ func BenchmarkContest(b *testing.B) {
 		processors := make([]pipz.Chainable[User], 10)
 		for i := 0; i < 10; i++ {
 			val := i * 10
-			processors[i] = pipz.Transform("p", func(_ context.Context, u User) User {
+			processors[i] = pipz.Transform(pipz.NewIdentity("p", ""), func(_ context.Context, u User) User {
 				u.Age = val
 				return u
 			})
 		}
 
-		contest := pipz.NewContest("bench-complex", condition, processors...)
+		contest := pipz.NewContest(pipz.NewIdentity("bench-complex", ""), condition, processors...)
 		data := User{ID: 1, Name: "Test", Email: "test@example.com", Age: 1}
 
 		b.ResetTimer()
@@ -150,17 +150,17 @@ func BenchmarkContest(b *testing.B) {
 				return true
 			}
 
-			p1 := pipz.Transform("p1", func(_ context.Context, u User) User {
+			p1 := pipz.Transform(pipz.NewIdentity("p1", ""), func(_ context.Context, u User) User {
 				u.Age = 100
 				return u
 			})
-			p2 := pipz.Transform("p2", func(_ context.Context, u User) User {
+			p2 := pipz.Transform(pipz.NewIdentity("p2", ""), func(_ context.Context, u User) User {
 				time.Sleep(time.Microsecond)
 				u.Age = 200
 				return u
 			})
 
-			contest := pipz.NewContest("contest", condition, p1, p2)
+			contest := pipz.NewContest(pipz.NewIdentity("contest", ""), condition, p1, p2)
 			data := User{ID: 1, Name: "Test", Email: "test@example.com", Age: 1}
 
 			b.ResetTimer()
@@ -173,17 +173,17 @@ func BenchmarkContest(b *testing.B) {
 		})
 
 		b.Run("Race", func(b *testing.B) {
-			p1 := pipz.Transform("p1", func(_ context.Context, u User) User {
+			p1 := pipz.Transform(pipz.NewIdentity("p1", ""), func(_ context.Context, u User) User {
 				u.Age = 100
 				return u
 			})
-			p2 := pipz.Transform("p2", func(_ context.Context, u User) User {
+			p2 := pipz.Transform(pipz.NewIdentity("p2", ""), func(_ context.Context, u User) User {
 				time.Sleep(time.Microsecond)
 				u.Age = 200
 				return u
 			})
 
-			race := pipz.NewRace("race", p1, p2)
+			race := pipz.NewRace(pipz.NewIdentity("race", ""), p1, p2)
 			data := User{ID: 1, Name: "Test", Email: "test@example.com", Age: 1}
 
 			b.ResetTimer()

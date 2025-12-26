@@ -19,15 +19,15 @@ import (
 //
 // Example:
 //
-//	const UppercaseName = pipz.Name("uppercase")
-//	uppercase := pipz.Transform(UppercaseName, func(ctx context.Context, s string) string {
+//	var UppercaseID = pipz.NewIdentity("uppercase", "Converts text to uppercase")
+//	uppercase := pipz.Transform(UppercaseID, func(ctx context.Context, s string) string {
 //	    return strings.ToUpper(s)
 //	})
-func Transform[T any](name Name, fn func(context.Context, T) T) Processor[T] {
+func Transform[T any](identity Identity, fn func(context.Context, T) T) Processor[T] {
 	return Processor[T]{
-		name: name,
+		identity: identity,
 		fn: func(ctx context.Context, value T) (result T, err error) {
-			defer recoverFromPanic(&result, &err, name, value)
+			defer recoverFromPanic(&result, &err, identity, value)
 			result = fn(ctx, value)
 			return result, nil
 		},

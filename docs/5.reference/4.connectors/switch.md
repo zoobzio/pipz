@@ -19,37 +19,35 @@ Routes data to different processors based on a condition function.
 ## Function Signature
 
 ```go
-func NewSwitch[T any, K comparable](
-    name Name,
-    condition func(context.Context, T) K,
-) *Switch[T, K]
+func NewSwitch[T any](
+    identity Identity,
+    condition func(context.Context, T) string,
+) *Switch[T]
 ```
 
 ## Type Parameters
 
 - `T` - The data type being processed
-- `K` - The route key type (must be comparable: string, int, etc.)
 
 ## Parameters
 
-- `name` (`Name`) - Identifier for the connector used in debugging
-- `condition` - Function that examines data and returns a route key
+- `identity` (`Identity`) - Identifier with name and description for the connector used in debugging and observability
+- `condition` - Function that examines data and returns a route key string
 
 ## Condition Type
 
 The `Condition` type determines routing in Switch connectors:
 
 ```go
-type Condition[T any, K comparable] func(context.Context, T) K
+type Condition[T any] func(context.Context, T) string
 ```
 
 ### Type Parameters
 - `T` - The input data type to be examined
-- `K` - The route key type that will be returned (must be comparable)
 
 ### Function Signature
 - **Input**: Takes a context and data of type T
-- **Output**: Returns a route key of type K
+- **Output**: Returns a route key string
 - **Purpose**: Examines the input data and determines which route to take
 
 ### How It Works
@@ -71,15 +69,25 @@ func userTypeCondition(ctx context.Context, user User) string {
     return "regular"
 }
 
-// Enum-based routing
-func priorityCondition(ctx context.Context, task Task) Priority {
-    return task.Priority // Priority is an int-based enum
+// Priority routing with string keys
+func priorityCondition(ctx context.Context, task Task) string {
+    switch task.Priority {
+    case 3:
+        return "critical"
+    case 2:
+        return "high"
+    case 1:
+        return "medium"
+    default:
+        return "low"
+    }
 }
 
 // Computed routing key
-func loadBalanceCondition(ctx context.Context, req Request) int {
+func loadBalanceCondition(ctx context.Context, req Request) string {
     // Route based on request ID hash for load distribution
-    return int(req.ID % 3) // Routes to 0, 1, or 2
+    bucket := req.ID % 3
+    return fmt.Sprintf("bucket-%d", bucket) // Routes to "bucket-0", "bucket-1", "bucket-2"
 }
 
 // Context-aware routing
@@ -102,31 +110,47 @@ func featureCondition(ctx context.Context, data Data) string {
 
 ## Returns
 
-Returns a `*Switch[T, K]` that implements `Chainable[T]`.
+Returns a `*Switch[T]` that implements `Chainable[T]`.
 
 ## Methods
 
 ```go
 // Add a route
-AddRoute(key K, processor Chainable[T]) *Switch[T, K]
+AddRoute(key string, processor Chainable[T]) *Switch[T]
 
-// Set default route (optional)
-Default(processor Chainable[T]) *Switch[T, K]
+// Remove a route
+RemoveRoute(key string) *Switch[T]
+
+// Check if route exists
+HasRoute(key string) bool
+
+// Get all routes (copy)
+Routes() map[string]Chainable[T]
+
+// Clear all routes
+ClearRoutes() *Switch[T]
+
+// Replace all routes atomically
+SetRoutes(routes map[string]Chainable[T]) *Switch[T]
+
+// Update condition function
+SetCondition(condition Condition[T]) *Switch[T]
 ```
 
 ## Behavior
 
 - **Dynamic routing** - Routes determined at runtime based on data
-- **Type-safe keys** - Route keys are strongly typed
+- **String keys** - Route keys are strings for simplicity and serialization
 - **Chainable API** - Routes can be added fluently
-- **Default route** - Optional fallback for unmatched keys
-- **Error on no match** - Fails if no route matches and no default set
+- **Pass-through on no match** - Returns input unchanged if no route matches
+- **Thread-safe** - Routes can be modified during operation
 
 ## Example
 
 ```go
 // Route by user type
-userRouter := pipz.NewSwitch("user-router",
+userRouter := pipz.NewSwitch(
+    pipz.NewIdentity("user-router", "Routes users to appropriate handlers based on VIP/new/regular status"),
     func(ctx context.Context, user User) string {
         if user.IsVIP {
             return "vip"
@@ -141,35 +165,38 @@ AddRoute("vip", processVIPUser).
 AddRoute("new", processNewUser).
 AddRoute("regular", processRegularUser)
 
-// Route by enum
-type Priority int
-const (
-    Low Priority = iota
-    Medium
-    High
-    Critical
-)
-
-priorityRouter := pipz.NewSwitch("priority-router",
-    func(ctx context.Context, task Task) Priority {
-        return task.Priority
+// Route by priority level
+priorityRouter := pipz.NewSwitch(
+    pipz.NewIdentity("priority-router", "Routes tasks by priority level for appropriate processing"),
+    func(ctx context.Context, task Task) string {
+        switch task.Priority {
+        case 3:
+            return "critical"
+        case 2:
+            return "high"
+        case 1:
+            return "medium"
+        default:
+            return "low"
+        }
     },
 ).
-AddRoute(Critical, processCritical).
-AddRoute(High, processHigh).
-AddRoute(Medium, processMedium).
-AddRoute(Low, processLow)
+AddRoute("critical", processCritical).
+AddRoute("high", processHigh).
+AddRoute("medium", processMedium).
+AddRoute("low", processLow)
 
-// Route with default
-paymentRouter := pipz.NewSwitch("payment-router",
+// Route by payment method
+paymentRouter := pipz.NewSwitch(
+    pipz.NewIdentity("payment-router", "Routes payment processing based on payment method type"),
     func(ctx context.Context, payment Payment) string {
         return payment.Method
     },
 ).
 AddRoute("credit_card", processCreditCard).
 AddRoute("paypal", processPayPal).
-AddRoute("crypto", processCrypto).
-Default(processUnknownPayment) // Handles any other payment method
+AddRoute("crypto", processCrypto)
+// Unmatched methods pass through unchanged
 ```
 
 ## When to Use
@@ -192,37 +219,42 @@ Don't use `Switch` when:
 - Simple boolean conditions (use `Filter` or `Mutate`)
 - You just need if/else logic (use `Filter`)
 
-## Error Handling
+## Pass-Through Behavior
 
-Switch fails if no route matches:
+Switch passes through unchanged if no route matches:
 
 ```go
-router := pipz.NewSwitch("router",
+router := pipz.NewSwitch(
+    pipz.NewIdentity("router", "Routes data by type to appropriate processors"),
     func(ctx context.Context, data Data) string {
         return data.Type
     },
 ).
 AddRoute("typeA", processA).
 AddRoute("typeB", processB)
-// No default set!
 
 data := Data{Type: "typeC"}
-_, err := router.Process(ctx, data)
-// err: "no route found for key: typeC"
+result, err := router.Process(ctx, data)
+// err: nil
+// result: data (unchanged, passed through)
 ```
+
+This design allows Switch to be safely added to pipelines without requiring exhaustive route coverage.
 
 ## Common Patterns
 
 ```go
 // Multi-level routing
-mainRouter := pipz.NewSwitch("main-router",
+mainRouter := pipz.NewSwitch(
+    pipz.NewIdentity("main-router", "Primary service router for auth, payment, and shipping requests"),
     func(ctx context.Context, req Request) string {
         return req.Service
     },
 ).
 AddRoute("auth", authPipeline).
-AddRoute("payment", 
-    pipz.NewSwitch("payment-sub-router",
+AddRoute("payment",
+    pipz.NewSwitch(
+        pipz.NewIdentity("payment-sub-router", "Sub-router for different payment method types"),
         func(ctx context.Context, req Request) string {
             return req.PaymentType
         },
@@ -233,7 +265,8 @@ AddRoute("payment",
 AddRoute("shipping", shippingPipeline)
 
 // Error-based routing
-errorRouter := pipz.NewSwitch("error-router",
+errorRouter := pipz.NewSwitch(
+    pipz.NewIdentity("error-router", "Routes errors to appropriate handlers based on error type"),
     func(ctx context.Context, err *pipz.Error[Data]) string {
         switch {
         case err.Timeout:
@@ -253,7 +286,8 @@ AddRoute("validation", handleValidation).
 AddRoute("other", handleGenericError)
 
 // Feature flag routing
-featureRouter := pipz.NewSwitch("feature-router",
+featureRouter := pipz.NewSwitch(
+    pipz.NewIdentity("feature-router", "Routes between new and legacy algorithms based on feature flags"),
     func(ctx context.Context, data Data) string {
         if featureFlags.IsEnabled(ctx, "new_algorithm") {
             return "new"
@@ -269,7 +303,10 @@ AddRoute("old", oldAlgorithm)
 
 ```go
 // Dynamic route registration
-router := pipz.NewSwitch[Order, string]("dynamic", getOrderType)
+router := pipz.NewSwitch[Order](
+    pipz.NewIdentity("dynamic", "Dynamically configured router for order processing"),
+    getOrderType,
+)
 
 // Register routes from configuration
 for _, route := range config.Routes {
@@ -278,12 +315,13 @@ for _, route := range config.Routes {
 }
 
 // Computed routing keys
-complexRouter := pipz.NewSwitch("complex",
+complexRouter := pipz.NewSwitch(
+    pipz.NewIdentity("complex", "Routes events by region and calculated score for distributed processing"),
     func(ctx context.Context, event Event) string {
         // Complex routing logic
         score := calculateScore(event)
         region := detectRegion(event.IP)
-        
+
         return fmt.Sprintf("%s:%d", region, score/10)
     },
 ).
@@ -294,7 +332,8 @@ AddRoute("eu:1", mediumPriorityEU).
 Default(genericProcessor)
 
 // Percentage-based routing (A/B testing)
-abRouter := pipz.NewSwitch("ab-test",
+abRouter := pipz.NewSwitch(
+    pipz.NewIdentity("ab-test", "A/B test router directing 10% of users to experimental flow"),
     func(ctx context.Context, user User) string {
         hash := hashUserID(user.ID)
         if hash%100 < 10 { // 10% of users
@@ -309,38 +348,11 @@ AddRoute("control", standardFlow)
 
 ## Gotchas
 
-### ❌ Don't forget to handle all cases
-```go
-// WRONG - Missing routes will cause runtime errors
-switch := pipz.NewSwitch("incomplete",
-    func(ctx context.Context, data Data) string {
-        return data.Type // Could be "A", "B", "C", or "D"
-    },
-).
-AddRoute("A", processA).
-AddRoute("B", processB)
-// Missing C and D - will fail at runtime!
-```
-
-### ✅ Add all routes or use Default
-```go
-// RIGHT - Handle all cases
-switch := pipz.NewSwitch("complete",
-    func(ctx context.Context, data Data) string {
-        return data.Type
-    },
-).
-AddRoute("A", processA).
-AddRoute("B", processB).
-AddRoute("C", processC).
-AddRoute("D", processD).
-Default(processUnknown) // Safety net
-```
-
 ### ❌ Don't use Switch for simple boolean logic
 ```go
 // WRONG - Overkill for boolean
-switch := pipz.NewSwitch("overkill",
+switch := pipz.NewSwitch(
+    pipz.NewIdentity("overkill", "Over-engineered router for simple boolean condition"),
     func(ctx context.Context, user User) string {
         if user.IsActive {
             return "active"
@@ -355,7 +367,8 @@ AddRoute("inactive", processInactive)
 ### ✅ Use Filter for simple conditions
 ```go
 // RIGHT - Simpler with Filter
-filter := pipz.NewFilter("simple",
+filter := pipz.NewFilter(
+    pipz.NewIdentity("simple", "Processes active users"),
     func(ctx context.Context, user User) bool {
         return user.IsActive
     },
@@ -365,13 +378,14 @@ filter := pipz.NewFilter("simple",
 
 ### ❌ Don't use opaque route keys
 ```go
-// WRONG - What do these numbers mean?
-switch := pipz.NewSwitch("opaque",
-    func(ctx context.Context, order Order) int {
+// WRONG - What do these mean?
+switch := pipz.NewSwitch(
+    pipz.NewIdentity("opaque", "Routes orders by value threshold with unclear keys"),
+    func(ctx context.Context, order Order) string {
         if order.Total > 1000 {
-            return 1 // Magic number!
+            return "1" // Magic value!
         }
-        return 2 // Another magic number!
+        return "2" // Another magic value!
     },
 )
 ```
@@ -379,7 +393,8 @@ switch := pipz.NewSwitch("opaque",
 ### ✅ Use meaningful, self-documenting keys
 ```go
 // RIGHT - Clear intent
-switch := pipz.NewSwitch("clear",
+switch := pipz.NewSwitch(
+    pipz.NewIdentity("clear", "Routes orders based on total value using descriptive keys"),
     func(ctx context.Context, order Order) string {
         if order.Total > 1000 {
             return "high-value"
@@ -389,13 +404,46 @@ switch := pipz.NewSwitch("clear",
 )
 ```
 
+### ❌ Don't assume unmatched routes fail
+```go
+// WRONG - Expecting an error
+router := pipz.NewSwitch(
+    pipz.NewIdentity("router", "Routes by type"),
+    func(ctx context.Context, data Data) string {
+        return data.Type
+    },
+).AddRoute("known", processKnown)
+
+_, err := router.Process(ctx, Data{Type: "unknown"})
+// err is nil! Data passes through unchanged
+```
+
+### ✅ Add explicit handling if needed
+```go
+// RIGHT - Validate in condition or use a catch-all route
+router := pipz.NewSwitch(
+    pipz.NewIdentity("router", "Routes by type with unknown handling"),
+    func(ctx context.Context, data Data) string {
+        switch data.Type {
+        case "typeA", "typeB":
+            return data.Type
+        default:
+            return "unknown"
+        }
+    },
+).
+AddRoute("typeA", processA).
+AddRoute("typeB", processB).
+AddRoute("unknown", handleUnknown)
+```
+
 ## Best Practices
 
-1. **Use enums or constants** for route keys to avoid typos
-2. **Always consider a Default** route for safety
+1. **Use constants** for route keys to avoid typos
+2. **Add a catch-all route** if you need to handle unknown cases explicitly
 3. **Keep routing logic simple** - complex conditions make debugging hard
 4. **Document route keys** if they're not self-evident
-5. **Test all routes** including the default case
+5. **Test all routes** including pass-through behavior for unmatched keys
 
 ## See Also
 

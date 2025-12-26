@@ -21,8 +21,13 @@ Sequences are mutable, managed chains of processors that provide introspection, 
 `Sequence` is the primary way to build sequential pipelines in pipz. Unlike simple processor composition, Sequence offers dynamic management:
 
 ```go
+// Define identities
+var (
+    OrderProcessingID = pipz.NewIdentity("order-processing", "sequential order processing pipeline")
+)
+
 // Create a sequence
-seq := pipz.NewSequence[Order]("order-processing")
+seq := pipz.NewSequence(OrderProcessingID)
 
 // Register processors
 seq.Register(
@@ -39,19 +44,27 @@ result, err := seq.Process(ctx, order)
 ## Creating Sequences
 
 ```go
+// Define identities upfront
+var (
+    UserRegistrationID = pipz.NewIdentity("user-registration", "user registration workflow")
+    ValidateUserID     = pipz.NewIdentity("validate", "validate user data")
+    EnrichUserID       = pipz.NewIdentity("enrich", "enrich user profile")
+    SaveUserID         = pipz.NewIdentity("save", "save user to database")
+    UserPipelineID     = pipz.NewIdentity("user-pipeline", "complete user processing pipeline")
+)
+
 // Create an empty sequence with a descriptive name
-sequence := pipz.NewSequence[User]("user-registration")
+sequence := pipz.NewSequence(UserRegistrationID)
 
 // Register processors (they must already be created)
-validateUser := pipz.Effect("validate", validateFunc)
-enrichUser := pipz.Apply("enrich", enrichFunc)
-saveUser := pipz.Apply("save", saveFunc)
+validateUser := pipz.Effect(ValidateUserID, validateFunc)
+enrichUser := pipz.Apply(EnrichUserID, enrichFunc)
+saveUser := pipz.Apply(SaveUserID, saveFunc)
 
 sequence.Register(validateUser, enrichUser, saveUser)
 
 // Or chain the calls
-sequence = pipz.NewSequence[User]("user-pipeline").
-    Register(validateUser, enrichUser, saveUser)
+sequence = pipz.NewSequence(UserPipelineID).Register(validateUser, enrichUser, saveUser)
 ```
 
 ## Introspection
@@ -63,17 +76,11 @@ Sequences provide visibility into their structure:
 names := sequence.Names()
 // ["validate", "enrich", "save"]
 
-// Find a specific processor
-processor, err := sequence.Find("validate")
-if err == nil {
-    fmt.Printf("Found processor: %s\n", processor.Name())
-}
-
 // Get sequence length
 count := sequence.Len()
 
 // Check if empty
-if sequence.IsEmpty() {
+if sequence.Len() == 0 {
     fmt.Println("No processors registered")
 }
 ```
@@ -88,60 +95,49 @@ Sequences can be modified at runtime - this is their key advantage:
 // Add to end (most common)
 sequence.Register(auditProcessor)
 
-// Add to beginning  
-sequence.PushHead(authProcessor)
+// Add to beginning
+sequence.Unshift(authProcessor)
 
 // Add multiple to beginning
-sequence.PushHead(preprocess, authenticate)
+sequence.Unshift(preprocess, authenticate)
 
 // Add to end explicitly
-sequence.PushTail(postprocess)
+sequence.Push(postprocess)
 
-// Insert at specific position
-err := sequence.InsertAt(2, authzProcessor)
+// Insert after a specific processor (by Identity)
+err := sequence.After(validateID, authzProcessor)
+
+// Insert before a specific processor (by Identity)
+err := sequence.Before(saveID, cacheProcessor)
 ```
 
 ### Removing Processors
 
 ```go
 // Remove from end
-processor, err := sequence.PopTail()
+processor, err := sequence.Pop()
 
 // Remove from beginning
-processor, err := sequence.PopHead()
+processor, err := sequence.Shift()
 
-// Remove at index
-err := sequence.RemoveAt(1)
+// Remove by Identity
+err := sequence.Remove(validateID)
 
 // Clear all
 sequence.Clear()
 ```
 
-### Reordering
-
-```go
-// Move to head
-err := sequence.MoveToHead(2)
-
-// Move to tail
-err := sequence.MoveToTail(1)
-
-// Move to specific position
-err := sequence.MoveTo(1, 3)
-
-// Swap positions
-err := sequence.Swap(0, 2)
-
-// Reverse order
-sequence.Reverse()
-```
-
 ### Replacing
 
 ```go
-// Replace processor at index
-newTransform := pipz.Transform("transform_v2", transformFunc)
-err := sequence.ReplaceAt(1, newTransform)
+// Define identities upfront
+var (
+    TransformV2ID = pipz.NewIdentity("transform_v2", "Updated transform logic")
+)
+
+// Replace processor by Identity
+newTransform := pipz.Transform(TransformV2ID, transformFunc)
+err := sequence.Replace(transformID, newTransform)
 ```
 
 ## Using Sequences with Other Connectors
@@ -149,12 +145,20 @@ err := sequence.ReplaceAt(1, newTransform)
 Sequences implement `Chainable[T]`, so they can be used anywhere a processor is expected:
 
 ```go
+// Define identities upfront
+var (
+    ValidationID         = pipz.NewIdentity("validation", "validate order items and payment")
+    ProcessingID         = pipz.NewIdentity("processing", "calculate tax and apply discounts")
+    MainID               = pipz.NewIdentity("main", "main order processing pipeline")
+    ReliableProcessingID = pipz.NewIdentity("reliable-processing", "retry main pipeline on failure")
+)
+
 // Create sub-sequences
-validation := pipz.NewSequence[Order]("validation", checkItems, checkPayment)
-processing := pipz.NewSequence[Order]("processing", calculateTax, applyDiscount)
+validation := pipz.NewSequence(ValidationID, checkItems, checkPayment)
+processing := pipz.NewSequence(ProcessingID, calculateTax, applyDiscount)
 
 // Combine in a parent sequence
-main := pipz.NewSequence[Order]("main")
+main := pipz.NewSequence(MainID)
 main.Register(
     validation,   // Already implements Chainable[T]
     processing,   // Already implements Chainable[T]
@@ -162,7 +166,7 @@ main.Register(
 )
 
 // Or use in other connectors
-withRetry := pipz.NewRetry("reliable-processing", main, 3)
+withRetry := pipz.NewRetry(ReliableProcessingID, main, 3)
 ```
 
 ## Use Cases
@@ -170,7 +174,12 @@ withRetry := pipz.NewRetry("reliable-processing", main, 3)
 ### Feature Flags
 
 ```go
-sequence := pipz.NewSequence[Request]("api-handler")
+// Define identities upfront
+var (
+    APIHandlerID = pipz.NewIdentity("api-handler", "API request handler with feature flag support")
+)
+
+sequence := pipz.NewSequence(APIHandlerID)
 sequence.Register(authenticate, validate)
 
 if featureFlags.IsEnabled("new-enrichment") {
@@ -186,16 +195,19 @@ sequence.Register(process)
 
 ```go
 func createSequence(variant string) *Sequence[Order] {
-    seq := pipz.NewSequence[Order]("order-flow-" + variant)
+    // Define identity with variant
+    orderFlowID := pipz.NewIdentity("order-flow-"+variant, "order flow for A/B test variant "+variant)
+
+    seq := pipz.NewSequence(orderFlowID)
     seq.Register(validateOrder)
-    
+
     switch variant {
     case "A":
         seq.Register(standardPricing)
     case "B":
         seq.Register(dynamicPricing)
     }
-    
+
     seq.Register(fulfillOrder)
     return seq
 }
@@ -204,22 +216,36 @@ func createSequence(variant string) *Sequence[Order] {
 ### Debug Mode
 
 ```go
-sequence := pipz.NewSequence[Data]("data-processor")
+// Define identities upfront
+var (
+    TransformID     = pipz.NewIdentity("transform", "transform data")
+    DataProcessorID = pipz.NewIdentity("data-processor", "data processor with optional debug logging")
+    DebugLogID      = pipz.NewIdentity("debug", "log debug information")
+)
+
+transform := pipz.Transform(TransformID, transformFunc)
+
+sequence := pipz.NewSequence(DataProcessorID)
 sequence.Register(transform)
 
 if debugMode {
     // Insert logging after transform
-    debugLog := pipz.Effect("debug", logFunc)
-    sequence.InsertAt(1, debugLog)
-    sequence.PushTail(debugLog) // Also log at end
+    debugLog := pipz.Effect(DebugLogID, logFunc)
+    sequence.After(TransformID, debugLog)
+    sequence.Push(debugLog) // Also log at end
 }
 ```
 
 ### Plugin Systems
 
 ```go
+// Define identities upfront
+var (
+    EventHandlerID = pipz.NewIdentity("event-handler", "event handler with dynamic plugin support")
+)
+
 // Core sequence
-sequence := pipz.NewSequence[Event]("event-handler")
+sequence := pipz.NewSequence(EventHandlerID)
 sequence.Register(parseEvent, validateEvent)
 
 // Load plugins
@@ -254,7 +280,7 @@ The internal `sync.RWMutex` ensures:
 
 Use Sequence when you need:
 - Runtime modification of processing steps
-- Introspection capabilities (Names, Find, Len)
+- Introspection capabilities (Names, Len)
 - Plugin architectures
 - Feature flag integration
 - Debug instrumentation
@@ -307,8 +333,8 @@ func (etl *ETLProcessor) Process(ctx context.Context, record Record) (Record, er
 ## Best Practices
 
 1. **Name your sequences** - The name appears in error paths for debugging
-2. **Check errors** - Modification methods return errors for invalid indices
-3. **Use Link() carefully** - It returns the sequence as a Chainable, hiding modification methods
+2. **Store Identity references** - Keep references to processor Identities so you can use Remove, Replace, After, and Before
+3. **Check errors** - Modification methods return errors when processors aren't found
 4. **Don't over-modify** - If you're constantly changing the sequence, consider using Switch instead
 5. **Test modifications** - Ensure your dynamic changes work as expected
 

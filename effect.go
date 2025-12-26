@@ -25,25 +25,25 @@ import (
 //
 // Example:
 //
-//	const AuditPaymentName = pipz.Name("audit_payment")
-//	auditLog := pipz.Effect(AuditPaymentName, func(ctx context.Context, payment Payment) error {
+//	var AuditPaymentID = pipz.NewIdentity("audit-payment", "Logs payment to audit trail")
+//	auditLog := pipz.Effect(AuditPaymentID, func(ctx context.Context, payment Payment) error {
 //	    return auditLogger.Log(ctx, "payment_processed", map[string]any{
 //	        "amount": payment.Amount,
 //	        "user_id": payment.UserID,
 //	        "timestamp": time.Now(),
 //	    })
 //	})
-func Effect[T any](name Name, fn func(context.Context, T) error) Processor[T] {
+func Effect[T any](identity Identity, fn func(context.Context, T) error) Processor[T] {
 	return Processor[T]{
-		name: name,
+		identity: identity,
 		fn: func(ctx context.Context, value T) (result T, err error) {
-			defer recoverFromPanic(&result, &err, name, value)
+			defer recoverFromPanic(&result, &err, identity, value)
 			start := time.Now()
 			result = value // Effect always returns original value
 			if err = fn(ctx, value); err != nil {
 				var zero T
 				return zero, &Error[T]{
-					Path:      []Name{name},
+					Path:      []Identity{identity},
 					InputData: value,
 					Err:       err,
 					Timestamp: time.Now(),
