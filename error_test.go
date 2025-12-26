@@ -358,6 +358,36 @@ func TestError(t *testing.T) {
 				panic:    "runtime.doPanic called",
 				expected: "panic occurred (stack trace sanitized)",
 			},
+			{
+				name:     "sync package sanitization",
+				panic:    "sync.Mutex deadlock detected",
+				expected: "panic occurred (stack trace sanitized)",
+			},
+			{
+				name:     "net package sanitization",
+				panic:    "net.Dial connection refused",
+				expected: "panic occurred (stack trace sanitized)",
+			},
+			{
+				name:     "os package sanitization",
+				panic:    "os.Open permission denied",
+				expected: "panic occurred (stack trace sanitized)",
+			},
+			{
+				name:     "fmt package sanitization",
+				panic:    "fmt.Sprintf format error",
+				expected: "panic occurred (stack trace sanitized)",
+			},
+			{
+				name:     "io package sanitization",
+				panic:    "io.EOF unexpected",
+				expected: "panic occurred (stack trace sanitized)",
+			},
+			{
+				name:     "0x without hex digits",
+				panic:    "error 0x not followed by hex",
+				expected: "panic occurred: error 0x not followed by hex",
+			},
 		}
 
 		for _, tc := range testCases {
