@@ -26,7 +26,23 @@ type Chainable[T any] interface {
 }
 ```
 
-Built-in processors, custom implementations, connectors—all the same interface. Mix and match freely.
+**Processors** wrap your functions:
+
+```go
+validate := pipz.Apply(ValidateID, validateOrder)    // can fail
+enrich := pipz.Transform(EnrichID, addTimestamp)     // pure transform
+notify := pipz.Effect(NotifyID, sendAlert)           // side effect
+```
+
+**Connectors** compose them:
+
+```go
+pipeline := pipz.NewSequence(PipelineID, validate, enrich, notify)
+resilient := pipz.NewFallback(FetchID, primaryDB, replicaDB)
+protected := pipz.NewCircuitBreaker(BreakerID, externalAPI, 5, 30*time.Second)
+```
+
+Both implement `Chainable[T]`, so connectors nest freely—wrap a sequence in a timeout, add retry around a circuit breaker, compose without limits.
 
 ## Install
 
