@@ -1,6 +1,8 @@
 module github.com/zoobzio/pipz
 
-go 1.23
+go 1.24
+
+toolchain go1.25.0
 
 retract (
 	v1.0.1 // Not part of the package
