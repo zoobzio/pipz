@@ -804,4 +804,72 @@ func TestRateLimiterEdgeCases(t *testing.T) {
 			t.Errorf("Second Close() = %v, want nil", err2)
 		}
 	})
+
+	t.Run("Processor Error Propagation", func(t *testing.T) {
+		expectedErr := errors.New("processor failed")
+		failingProc := Apply(NewIdentity("failing", ""), func(_ context.Context, _ int) (int, error) {
+			return 0, expectedErr
+		})
+
+		limiter := NewRateLimiter(NewIdentity("error-test", ""), 100.0, 10, failingProc)
+
+		result, err := limiter.Process(context.Background(), 42)
+		if err == nil {
+			t.Fatal("expected error from failing processor")
+		}
+
+		// Should return zero value on error
+		if result != 0 {
+			t.Errorf("expected 0, got %d", result)
+		}
+
+		// Error should be wrapped in Error[T]
+		var pipeErr *Error[int]
+		if !errors.As(err, &pipeErr) {
+			t.Fatalf("expected Error[int], got %T", err)
+		}
+
+		// Path should include rate limiter identity
+		if len(pipeErr.Path) == 0 || pipeErr.Path[0].Name() != "error-test" {
+			t.Errorf("expected path to start with 'error-test', got %v", pipeErr.Path)
+		}
+
+		// Underlying error should be preserved
+		if !errors.Is(pipeErr.Err, expectedErr) {
+			t.Errorf("expected underlying error %v, got %v", expectedErr, pipeErr.Err)
+		}
+	})
+
+	t.Run("Processor Pipeline Error Propagation", func(t *testing.T) {
+		// Test when processor returns an Error[T] (Apply wraps errors in Error[T])
+		// Path should be: [outer (rate limiter), pipeline-fail (Apply processor)]
+		failingProc := Apply(NewIdentity("pipeline-fail", ""), func(_ context.Context, _ int) (int, error) {
+			return 0, errors.New("inner pipeline error")
+		})
+
+		limiter := NewRateLimiter(NewIdentity("outer", ""), 100.0, 10, failingProc)
+
+		_, err := limiter.Process(context.Background(), 42)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+
+		var pipeErr *Error[int]
+		if !errors.As(err, &pipeErr) {
+			t.Fatalf("expected Error[int], got %T", err)
+		}
+
+		// Path should be prepended with rate limiter identity
+		// Apply creates Error[T] with path [pipeline-fail]
+		// RateLimiter prepends [outer] -> final path [outer, pipeline-fail]
+		if len(pipeErr.Path) < 2 {
+			t.Fatalf("expected path length >= 2, got %d", len(pipeErr.Path))
+		}
+		if pipeErr.Path[0].Name() != "outer" {
+			t.Errorf("expected first path element 'outer', got %q", pipeErr.Path[0].Name())
+		}
+		if pipeErr.Path[1].Name() != "pipeline-fail" {
+			t.Errorf("expected second path element 'pipeline-fail', got %q", pipeErr.Path[1].Name())
+		}
+	})
 }

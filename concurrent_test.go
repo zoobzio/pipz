@@ -3,6 +3,7 @@ package pipz
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -110,6 +111,48 @@ func TestConcurrent(t *testing.T) {
 
 		if err != nil {
 			t.Errorf("expected no error with new behavior, got %v", err)
+		}
+	})
+
+	t.Run("Context Cancellation With Reducer", func(t *testing.T) {
+		blocker := Effect(NewIdentity("slow", ""), func(ctx context.Context, _ TestData) error {
+			<-ctx.Done()
+			return ctx.Err()
+		})
+		fast := Transform(NewIdentity("fast", ""), func(_ context.Context, d TestData) TestData {
+			return TestData{Value: d.Value * 2, Counter: d.Counter}
+		})
+
+		var reducerCalled bool
+		reducer := func(original TestData, results map[Identity]TestData, errs map[Identity]error) TestData {
+			reducerCalled = true
+			// Return sum of whatever results we have plus original
+			sum := original.Value
+			for _, res := range results {
+				sum += res.Value
+			}
+			return TestData{Value: sum, Counter: original.Counter}
+		}
+
+		concurrent := NewConcurrent(NewIdentity("test-cancel-reducer", ""), reducer, blocker, fast)
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+
+		data := TestData{Value: 5}
+		result, err := concurrent.Process(ctx, data)
+
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+
+		if !reducerCalled {
+			t.Error("expected reducer to be called on context cancellation")
+		}
+
+		// Fast processor should complete before timeout, so we get its result
+		// 5 (original) + 10 (fast: 5*2) = 15
+		if result.Value != 15 {
+			t.Errorf("expected 15, got %d", result.Value)
 		}
 	})
 
@@ -318,6 +361,64 @@ func TestConcurrent(t *testing.T) {
 		// 1 success, 1 error = 1*100 + 1*10 = 110
 		if result.Value != 110 {
 			t.Errorf("expected 110, got %d", result.Value)
+		}
+	})
+
+	t.Run("Reducer receives panics as errors", func(t *testing.T) {
+		panicID := NewIdentity("panicking", "")
+		successID := NewIdentity("success", "")
+
+		p1 := Transform(panicID, func(_ context.Context, _ TestData) TestData {
+			panic("processor panic")
+		})
+		p2 := Transform(successID, func(_ context.Context, d TestData) TestData {
+			return TestData{Value: d.Value * 2, Counter: d.Counter}
+		})
+
+		var capturedErrs map[Identity]error
+		reducer := func(original TestData, results map[Identity]TestData, errs map[Identity]error) TestData {
+			capturedErrs = errs
+			sum := original.Value
+			for _, res := range results {
+				sum += res.Value
+			}
+			return TestData{Value: sum, Counter: original.Counter}
+		}
+
+		concurrent := NewConcurrent(NewIdentity("test-panic-reducer", ""), reducer, p1, p2)
+		data := TestData{Value: 5}
+
+		result, err := concurrent.Process(context.Background(), data)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Success processor: 5 * 2 = 10, plus original 5 = 15
+		if result.Value != 15 {
+			t.Errorf("expected 15, got %d", result.Value)
+		}
+
+		// Verify panic was captured as error
+		if len(capturedErrs) != 1 {
+			t.Fatalf("expected 1 error from panic, got %d", len(capturedErrs))
+		}
+
+		panicErr, ok := capturedErrs[panicID]
+		if !ok {
+			t.Fatal("expected error keyed by panicking processor identity")
+		}
+
+		if panicErr == nil {
+			t.Fatal("expected non-nil panic error")
+		}
+
+		// Verify error message contains panic info
+		errMsg := panicErr.Error()
+		if !strings.Contains(errMsg, "panic") {
+			t.Errorf("expected error to mention panic, got: %s", errMsg)
+		}
+		if !strings.Contains(errMsg, "panicking") {
+			t.Errorf("expected error to contain processor name, got: %s", errMsg)
 		}
 	})
 
