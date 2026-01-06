@@ -144,8 +144,8 @@ func main() {
 | -------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------- |
 | Uniform Interface    | Everything implements `Chainable[T]` for seamless composition                     | [Core Concepts](docs/2.learn/3.core-concepts.md)              |
 | Type-Safe Generics   | Full compile-time checking with zero reflection                                   | [Architecture](docs/2.learn/4.architecture.md)                |
-| Rich Error Context   | Path tracking, timestamps, and input capture on failure                           | [Safety & Reliability](docs/3.guides/8.safety-reliability.md) |
-| Panic Recovery       | Automatic recovery with security-conscious sanitization                           | [Safety & Reliability](docs/3.guides/8.safety-reliability.md) |
+| Rich Error Context   | Path tracking, timestamps, and input capture on failure                           | [Safety & Reliability](docs/3.guides/6.safety-reliability.md) |
+| Panic Recovery       | Automatic recovery with security-conscious sanitization                           | [Safety & Reliability](docs/3.guides/6.safety-reliability.md) |
 | Signal Observability | State change events via [capitan](https://github.com/zoobzio/capitan) integration | [Hooks](docs/2.learn/5.hooks.md)                              |
 | Pipeline Schemas     | `Schema()` exports structure for visualization and debugging                      | [Cheatsheet](docs/5.reference/1.cheatsheet.md)                |
 
@@ -240,25 +240,19 @@ The built-in primitives are the base vocabulary. Users add their own words follo
 
 ### Guides
 
-- [Installation](docs/3.guides/1.installation.md) — Setup and requirements
-- [First Pipeline](docs/3.guides/2.first-pipeline.md) — Step-by-step walkthrough
-- [Connector Selection](docs/3.guides/3.connector-selection.md) — Choosing the right connector
-- [Cloning](docs/3.guides/4.cloning.md) — Data isolation for parallel processing
-- [Best Practices](docs/3.guides/5.best-practices.md) — Patterns and recommendations
-- [Testing](docs/3.guides/6.testing.md) — Testing pipelines
-- [Performance](docs/3.guides/7.performance.md) — Optimization and benchmarking
-- [Safety & Reliability](docs/3.guides/8.safety-reliability.md) — Error handling, panics, timeouts
-- [Troubleshooting](docs/3.guides/9.troubleshooting.md) — Common issues and solutions
+- [Connector Selection](docs/3.guides/1.connector-selection.md) — Choosing the right connector
+- [Cloning](docs/3.guides/2.cloning.md) — Data isolation for parallel processing
+- [Best Practices](docs/3.guides/3.best-practices.md) — Patterns and recommendations
+- [Testing](docs/3.guides/4.testing.md) — Testing pipelines
+- [Performance](docs/3.guides/5.performance.md) — Optimization and benchmarking
+- [Safety & Reliability](docs/3.guides/6.safety-reliability.md) — Error handling, panics, timeouts
+- [Troubleshooting](docs/3.guides/7.troubleshooting.md) — Common issues and solutions
 
 ### Cookbook
 
-- [Resilient API Calls](docs/4.cookbook/1.resilient-api-calls.md) — Retry, fallback, circuit breakers
-- [Data Validation](docs/4.cookbook/2.data-validation-pipeline.md) — Input validation pipelines
-- [Event Processing](docs/4.cookbook/3.event-processing.md) — Async event handling
-- [ETL Pipelines](docs/4.cookbook/4.etl-pipelines.md) — Extract, transform, load patterns
-- [Bounded Parallelism](docs/4.cookbook/5.bounded-parallelism.md) — Worker pools and rate limiting
-- [Patterns](docs/4.cookbook/6.patterns.md) — Common composition patterns
-- [Observability](docs/4.cookbook/7.observability.md) — Logging, metrics, tracing
+- [Building Pipelines](docs/4.cookbook/1.building-pipelines.md) — Complete pipeline with validation, resilience, observability
+- [Library Resilience](docs/4.cookbook/2.library-resilience.md) — Expose resilience patterns via functional options
+- [Extensible Vocabulary](docs/4.cookbook/3.extensible-vocabulary.md) — Domain-specific APIs with composable primitives
 
 ### Reference
 
