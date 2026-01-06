@@ -305,7 +305,7 @@ func NewChaosProcessor[T any](name string, wrapped pipz.Chainable[T], config Cha
 		latencyMax:  config.LatencyMax,
 		timeoutRate: config.TimeoutRate,
 		panicRate:   config.PanicRate,
-		rng:         mathrand.New(mathrand.NewSource(seed)), //nolint:gosec // G404: Test utility uses weak RNG for deterministic chaos scenarios
+		rng:         mathrand.New(mathrand.NewSource(seed)), //#nosec G404 -- Test utility requires deterministic RNG for reproducible chaos scenarios
 	}
 }
 

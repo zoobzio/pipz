@@ -124,7 +124,7 @@ func TestConcurrent(t *testing.T) {
 		})
 
 		var reducerCalled bool
-		reducer := func(original TestData, results map[Identity]TestData, errs map[Identity]error) TestData {
+		reducer := func(original TestData, results map[Identity]TestData, _ map[Identity]error) TestData {
 			reducerCalled = true
 			// Return sum of whatever results we have plus original
 			sum := original.Value
