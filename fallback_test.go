@@ -3,10 +3,8 @@ package pipz
 import (
 	"context"
 	"errors"
-	"reflect"
 	"strings"
 	"testing"
-	"unsafe"
 )
 
 // plainErrorProcessor is a test helper that returns plain errors (not Error[T] types).
@@ -220,52 +218,60 @@ func TestFallback(t *testing.T) {
 
 		// Test InsertAt
 		fifth := Transform(NewIdentity("fifth", ""), func(_ context.Context, n int) int { return n * 6 })
-		fb.InsertAt(2, fifth) // Insert at position 2
+		if err := fb.InsertAt(2, fifth); err != nil {
+			t.Errorf("InsertAt(2) returned error: %v", err)
+		}
 		if fb.Len() != 5 {
 			t.Errorf("expected length 5 after InsertAt, got %d", fb.Len())
 		}
 
 		// Test RemoveAt
-		fb.RemoveAt(2) // Remove the one we just inserted
+		if err := fb.RemoveAt(2); err != nil {
+			t.Errorf("RemoveAt(2) returned error: %v", err)
+		}
 		if fb.Len() != 4 {
 			t.Errorf("expected length 4 after RemoveAt, got %d", fb.Len())
 		}
 
-		// Test RemoveAt with invalid index - should panic
-		defer func() {
-			if r := recover(); r == nil {
-				t.Errorf("expected panic for negative index")
-			}
-		}()
-		fb.RemoveAt(-1)
+		// Test RemoveAt with invalid index - should return error
+		if err := fb.RemoveAt(-1); !errors.Is(err, ErrIndexOutOfBounds) {
+			t.Errorf("expected ErrIndexOutOfBounds for negative index, got %v", err)
+		}
 	})
 
-	t.Run("Constructor Panic Tests", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r == nil {
-				t.Error("expected panic when NewFallback called with no processors")
-			} else if msg, ok := r.(string); !ok || !strings.Contains(msg, "at least one processor") {
-				t.Errorf("unexpected panic message: %v", r)
-			}
-		}()
+	t.Run("Empty Constructor Returns Error On Process", func(t *testing.T) {
+		// Empty construction is allowed, but Process() returns an error
+		fb := NewFallback[int](NewIdentity("empty", ""))
+		if fb == nil {
+			t.Fatal("expected non-nil Fallback")
+		}
 
-		// This should panic
-		NewFallback[int](NewIdentity("empty", ""))
+		_, err := fb.Process(context.Background(), 42)
+		if err == nil {
+			t.Error("expected error when processing with no processors")
+		}
+
+		var pipeErr *Error[int]
+		if !errors.As(err, &pipeErr) {
+			t.Errorf("expected Error[int], got %T", err)
+		}
 	})
 
-	t.Run("SetProcessors Panic Test", func(t *testing.T) {
+	t.Run("SetProcessors Empty Returns Error On Process", func(t *testing.T) {
 		first := Transform(NewIdentity("first", ""), func(_ context.Context, n int) int { return n })
 		fb := NewFallback(NewIdentity("test", ""), first)
-		defer func() {
-			if r := recover(); r == nil {
-				t.Error("expected panic when SetProcessors called with no processors")
-			} else if msg, ok := r.(string); !ok || !strings.Contains(msg, "at least one processor") {
-				t.Errorf("unexpected panic message: %v", r)
-			}
-		}()
 
-		// This should panic
+		// Setting empty processors is allowed
 		fb.SetProcessors()
+		if fb.Len() != 0 {
+			t.Errorf("expected length 0 after SetProcessors(), got %d", fb.Len())
+		}
+
+		// But Process() returns an error
+		_, err := fb.Process(context.Background(), 42)
+		if err == nil {
+			t.Error("expected error when processing with no processors")
+		}
 	})
 
 	t.Run("InsertAt Boundary Tests", func(t *testing.T) {
@@ -276,40 +282,34 @@ func TestFallback(t *testing.T) {
 		fb := NewFallback(NewIdentity("test", ""), first, second)
 
 		// Valid: Insert at beginning
-		fb.InsertAt(0, third)
+		if err := fb.InsertAt(0, third); err != nil {
+			t.Errorf("InsertAt(0) returned error: %v", err)
+		}
 		if fb.Len() != 3 {
 			t.Errorf("expected length 3 after InsertAt(0), got %d", fb.Len())
 		}
 
 		// Valid: Insert at end
 		fourth := Transform(NewIdentity("fourth", ""), func(_ context.Context, n int) int { return n * 4 })
-		fb.InsertAt(3, fourth)
+		if err := fb.InsertAt(3, fourth); err != nil {
+			t.Errorf("InsertAt(3) returned error: %v", err)
+		}
 		if fb.Len() != 4 {
 			t.Errorf("expected length 4 after InsertAt(3), got %d", fb.Len())
 		}
 
-		// Test negative index - should panic
+		// Test negative index - should return error
 		t.Run("Negative Index", func(t *testing.T) {
-			defer func() {
-				if r := recover(); r == nil {
-					t.Error("expected panic for negative index")
-				} else if msg, ok := r.(string); !ok || !strings.Contains(msg, "index out of bounds") {
-					t.Errorf("unexpected panic message: %v", r)
-				}
-			}()
-			fb.InsertAt(-1, first)
+			if err := fb.InsertAt(-1, first); !errors.Is(err, ErrIndexOutOfBounds) {
+				t.Errorf("expected ErrIndexOutOfBounds for negative index, got %v", err)
+			}
 		})
 
-		// Test index too large - should panic
+		// Test index too large - should return error
 		t.Run("Index Too Large", func(t *testing.T) {
-			defer func() {
-				if r := recover(); r == nil {
-					t.Error("expected panic for index too large")
-				} else if msg, ok := r.(string); !ok || !strings.Contains(msg, "index out of bounds") {
-					t.Errorf("unexpected panic message: %v", r)
-				}
-			}()
-			fb.InsertAt(10, first)
+			if err := fb.InsertAt(10, first); !errors.Is(err, ErrIndexOutOfBounds) {
+				t.Errorf("expected ErrIndexOutOfBounds for index too large, got %v", err)
+			}
 		})
 	})
 
@@ -322,48 +322,44 @@ func TestFallback(t *testing.T) {
 		fb := NewFallback(NewIdentity("test", ""), first, second, third)
 
 		// Remove from middle
-		fb.RemoveAt(1)
+		if err := fb.RemoveAt(1); err != nil {
+			t.Errorf("RemoveAt(1) returned error: %v", err)
+		}
 		if fb.Len() != 2 {
 			t.Errorf("expected length 2 after RemoveAt(1), got %d", fb.Len())
 		}
 
-		// Test negative index - should panic
+		// Test negative index - should return error
 		t.Run("Negative Index", func(t *testing.T) {
 			fb := NewFallback(NewIdentity("test", ""), first, second)
-			defer func() {
-				if r := recover(); r == nil {
-					t.Error("expected panic for negative index")
-				} else if msg, ok := r.(string); !ok || !strings.Contains(msg, "index out of bounds") {
-					t.Errorf("unexpected panic message: %v", r)
-				}
-			}()
-			fb.RemoveAt(-1)
+			if err := fb.RemoveAt(-1); !errors.Is(err, ErrIndexOutOfBounds) {
+				t.Errorf("expected ErrIndexOutOfBounds for negative index, got %v", err)
+			}
 		})
 
-		// Test index >= length - should panic
+		// Test index >= length - should return error
 		t.Run("Index Too Large", func(t *testing.T) {
 			fb := NewFallback(NewIdentity("test", ""), first, second)
-			defer func() {
-				if r := recover(); r == nil {
-					t.Error("expected panic for index >= length")
-				} else if msg, ok := r.(string); !ok || !strings.Contains(msg, "index out of bounds") {
-					t.Errorf("unexpected panic message: %v", r)
-				}
-			}()
-			fb.RemoveAt(2) // length is 2, so valid indices are 0 and 1
+			if err := fb.RemoveAt(2); !errors.Is(err, ErrIndexOutOfBounds) {
+				t.Errorf("expected ErrIndexOutOfBounds for index >= length, got %v", err)
+			}
 		})
 
-		// Test removing last processor - should panic
+		// Test removing last processor - allowed, but Process() returns error
 		t.Run("Remove Last Processor", func(t *testing.T) {
 			fb := NewFallback(NewIdentity("test", ""), first)
-			defer func() {
-				if r := recover(); r == nil {
-					t.Error("expected panic when removing last processor")
-				} else if msg, ok := r.(string); !ok || !strings.Contains(msg, "cannot remove last processor") {
-					t.Errorf("unexpected panic message: %v", r)
-				}
-			}()
-			fb.RemoveAt(0)
+			if err := fb.RemoveAt(0); err != nil {
+				t.Errorf("RemoveAt(0) returned error: %v", err)
+			}
+			if fb.Len() != 0 {
+				t.Errorf("expected length 0 after removing last processor, got %d", fb.Len())
+			}
+
+			// Process should return error when empty
+			_, err := fb.Process(context.Background(), 42)
+			if err == nil {
+				t.Error("expected error when processing with no processors")
+			}
 		})
 	})
 
@@ -412,20 +408,10 @@ func TestFallback(t *testing.T) {
 	})
 
 	t.Run("GetPrimary Returns Nil Edge Case", func(t *testing.T) {
-		// This tests line 173 in fallback.go where GetPrimary returns nil
-		// We need to bypass constructor validation using reflection
-		first := Transform(NewIdentity("first", ""), func(_ context.Context, n int) int { return n })
-		fb := NewFallback(NewIdentity("test", ""), first)
+		// This tests GetPrimary returning nil for empty Fallback
+		fb := NewFallback[int](NewIdentity("empty", ""))
 
-		// Use reflection to clear processors slice
-		fbValue := reflect.ValueOf(fb).Elem()
-		processorsField := fbValue.FieldByName("processors")
-
-		// Make the field settable using unsafe
-		processorsField = reflect.NewAt(processorsField.Type(), unsafe.Pointer(processorsField.UnsafeAddr())).Elem()
-		processorsField.Set(reflect.MakeSlice(processorsField.Type(), 0, 0))
-
-		// Now GetPrimary should return nil (line 173)
+		// GetPrimary should return nil for empty Fallback
 		if fb.GetPrimary() != nil {
 			t.Error("expected GetPrimary to return nil for empty processors")
 		}
@@ -586,35 +572,23 @@ func TestFallback(t *testing.T) {
 		}
 	})
 
-	t.Run("Empty Processor Defensive Code Coverage", func(t *testing.T) {
-		// This tests line 104 in fallback.go (return data, nil when lastErr == nil)
-		// This is defensive code that's technically unreachable with current constructor
-		// but we test it for completeness
+	t.Run("Empty Fallback Returns Error", func(t *testing.T) {
+		// Empty fallback returns error at Process() time
+		fallback := NewFallback[int](NewIdentity("empty", ""))
 
-		processor := Transform(NewIdentity("success", ""), func(_ context.Context, n int) int {
-			return n * 2
-		})
-
-		fallback := NewFallback(NewIdentity("defensive", ""), processor)
-
-		// Use reflection to create an edge case scenario
-		fbValue := reflect.ValueOf(fallback).Elem()
-		processorsField := fbValue.FieldByName("processors")
-
-		// Create a scenario where we have zero processors (bypassing constructor validation)
-		processorsField = reflect.NewAt(processorsField.Type(),
-			unsafe.Pointer(processorsField.UnsafeAddr())).Elem()
-		emptyProcessors := reflect.MakeSlice(processorsField.Type(), 0, 0)
-		processorsField.Set(emptyProcessors)
-
-		// Process should hit line 104 (return data, nil)
 		result, err := fallback.Process(context.Background(), 42)
 
-		if err != nil {
-			t.Errorf("expected nil error for empty processors, got %v", err)
+		if err == nil {
+			t.Error("expected error for empty processors")
 		}
-		if result != 42 {
-			t.Errorf("expected original data 42, got %d", result)
+		if result != 0 {
+			t.Errorf("expected zero value, got %d", result)
+		}
+
+		// Verify error type and message
+		var pipeErr *Error[int]
+		if !errors.As(err, &pipeErr) {
+			t.Errorf("expected Error[int], got %T", err)
 		}
 	})
 

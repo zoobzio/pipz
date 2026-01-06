@@ -160,9 +160,18 @@ func (c *Concurrent[T]) Process(ctx context.Context, input T) (result T, err err
 				// Always call wg.Done() even if Clone() or Process() panics
 				// This prevents deadlock in wg.Wait()
 				if r := recover(); r != nil {
-					// Panic occurred, but we must complete wg.Done()
-					// The goroutine can die after this, we just prevent deadlock
-					_ = r // Acknowledge the panic but continue
+					// Record panic as an error so the reducer can see it
+					if c.reducer != nil {
+						resultsMu.Lock()
+						errs[p.Identity()] = &panicError{
+							identity:  p.Identity(),
+							sanitized: sanitizePanicMessage(r),
+						}
+						errorCount.Add(1)
+						resultsMu.Unlock()
+					} else {
+						errorCount.Add(1)
+					}
 				}
 				wg.Done()
 			}()

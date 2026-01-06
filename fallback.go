@@ -3,6 +3,7 @@ package pipz
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -48,18 +49,14 @@ type Fallback[T any] struct {
 }
 
 // NewFallback creates a new Fallback connector that tries processors in order.
-// At least one processor must be provided. Each processor is tried in order
-// until one succeeds or all fail.
+// Each processor is tried in order until one succeeds or all fail.
+// If no processors are provided, Process() will return an error.
 //
 // Examples:
 //
 //	fallback := pipz.NewFallback(PaymentID, stripe, paypal, square)
 //	fallback := pipz.NewFallback(CacheID, redis, database)
 func NewFallback[T any](identity Identity, processors ...Chainable[T]) *Fallback[T] {
-	if len(processors) == 0 {
-		panic("NewFallback requires at least one processor")
-	}
-
 	return &Fallback[T]{
 		identity:   identity,
 		processors: processors,
@@ -75,6 +72,17 @@ func (f *Fallback[T]) Process(ctx context.Context, data T) (result T, err error)
 	processors := make([]Chainable[T], len(f.processors))
 	copy(processors, f.processors)
 	f.mu.RUnlock()
+
+	if len(processors) == 0 {
+		var zero T
+		return zero, &Error[T]{
+			Path:      []Identity{f.identity},
+			Err:       fmt.Errorf("no processors provided to Fallback"),
+			InputData: data,
+			Timestamp: time.Now(),
+			Duration:  0,
+		}
+	}
 
 	var lastErr error
 	name := f.identity.Name()
@@ -136,10 +144,8 @@ func (f *Fallback[T]) Process(ctx context.Context, data T) (result T, err error)
 }
 
 // SetProcessors replaces all processors with the provided ones.
+// If no processors are provided, Process() will return an error.
 func (f *Fallback[T]) SetProcessors(processors ...Chainable[T]) *Fallback[T] {
-	if len(processors) == 0 {
-		panic("SetProcessors requires at least one processor")
-	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.processors = make([]Chainable[T], len(processors))
@@ -156,28 +162,25 @@ func (f *Fallback[T]) AddFallback(processor Chainable[T]) *Fallback[T] {
 }
 
 // InsertAt inserts a processor at the specified index.
-func (f *Fallback[T]) InsertAt(index int, processor Chainable[T]) *Fallback[T] {
+func (f *Fallback[T]) InsertAt(index int, processor Chainable[T]) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if index < 0 || index > len(f.processors) {
-		panic("index out of bounds")
+		return ErrIndexOutOfBounds
 	}
 	f.processors = append(f.processors[:index], append([]Chainable[T]{processor}, f.processors[index:]...)...)
-	return f
+	return nil
 }
 
 // RemoveAt removes the processor at the specified index.
-func (f *Fallback[T]) RemoveAt(index int) *Fallback[T] {
+func (f *Fallback[T]) RemoveAt(index int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if index < 0 || index >= len(f.processors) {
-		panic("index out of bounds")
-	}
-	if len(f.processors) == 1 {
-		panic("cannot remove last processor from fallback")
+		return ErrIndexOutOfBounds
 	}
 	f.processors = append(f.processors[:index], f.processors[index+1:]...)
-	return f
+	return nil
 }
 
 // Identity returns the identity of this connector.

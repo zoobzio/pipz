@@ -462,8 +462,8 @@ Panic messages undergo security sanitization to prevent information leakage:
 
 ## See Also
 
-- [Handle](../3.processors/handle.md) - Observe and react to errors
+- [Handle](../4.connectors/handle.md) - Observe and react to errors
 - [Fallback](../4.connectors/fallback.md) - Automatic error recovery
 - [Retry](../4.connectors/retry.md) - Retry failed operations
 - [CircuitBreaker](../4.connectors/circuitbreaker.md) - Prevent cascading failures
-- [Safety and Reliability](../../3.guides/8.safety-reliability.md) - Complete panic recovery documentation
+- [Safety and Reliability](../../3.guides/6.safety-reliability.md) - Complete panic recovery documentation

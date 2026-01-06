@@ -6,7 +6,7 @@ published: 2025-12-13
 updated: 2025-12-13
 tags:
   - reference
-  - processors
+  - connectors
   - error-handling
   - cleanup
   - monitoring
@@ -129,7 +129,7 @@ The error handler receives `*Error[T]` with full context:
 
 ```go
 type Error[T any] struct {
-    Path      []Name        // Full path through processors
+    Path      []Identity    // Full path through processors
     Err       error         // Original error
     InputData T             // Input when error occurred
     Timeout   bool          // Was this a timeout?
@@ -356,7 +356,8 @@ handle := pipz.NewHandle(
 ```go
 // Clear separation of concerns
 // GOOD: Handle for cleanup, Fallback for recovery
-goodPattern := pipz.NewFallback("with-recovery",
+var WithRecoveryID = pipz.NewIdentity("with-recovery", "Pattern with cleanup and recovery")
+goodPattern := pipz.NewFallback(WithRecoveryID,
     pipz.NewHandle(
         pipz.NewIdentity("with-cleanup", "Operation with cleanup"),
         riskyOperation,

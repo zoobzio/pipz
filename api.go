@@ -11,7 +11,7 @@
 //
 //	go get github.com/zoobzio/pipz
 //
-// Requires Go 1.21+ for generic type constraints.
+// Requires Go 1.24+ for generic type constraints.
 //
 // # Core Concepts
 //
@@ -246,7 +246,7 @@
 // pipz provides rich error information through the Error[T] type:
 //
 //	type Error[T any] struct {
-//	    Path      []string      // Full path: ["pipeline", "validate", "parse_json"]
+//	    Path      []Identity    // Full path of Identity values through the pipeline
 //	    InputData T             // The input that caused the failure
 //	    Err       error         // The underlying error
 //	    Timestamp time.Time     // When the error occurred
@@ -261,7 +261,8 @@
 //	if err != nil {
 //	    var pipeErr *pipz.Error[Data]
 //	    if errors.As(err, &pipeErr) {
-//	        log.Printf("Failed at: %s", strings.Join(pipeErr.Path, " → "))
+//	        // pipeErr.Error() formats the path automatically
+//	        log.Printf("Pipeline error: %v", pipeErr)
 //	        log.Printf("Input data: %+v", pipeErr.InputData)
 //	        log.Printf("After: %v", pipeErr.Duration)
 //
