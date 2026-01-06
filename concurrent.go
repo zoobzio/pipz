@@ -231,8 +231,19 @@ func (c *Concurrent[T]) Process(ctx context.Context, input T) (result T, err err
 		)
 
 		if c.reducer != nil {
-			// Call reducer with whatever results we have so far
-			return c.reducer(input, results, errs), nil
+			// Copy maps while holding lock - goroutines may still be writing
+			resultsMu.Lock()
+			resultsCopy := make(map[Identity]T, len(results))
+			for k, v := range results {
+				resultsCopy[k] = v
+			}
+			errsCopy := make(map[Identity]error, len(errs))
+			for k, v := range errs {
+				errsCopy[k] = v
+			}
+			resultsMu.Unlock()
+
+			return c.reducer(input, resultsCopy, errsCopy), nil
 		}
 		return input, nil
 	}
