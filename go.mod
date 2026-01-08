@@ -18,8 +18,8 @@ retract (
 	v0.0.1 // Not part of the package
 )
 
-require github.com/zoobzio/clockz v0.0.2
+require github.com/zoobzio/clockz v1.0.0
 
-require github.com/zoobzio/capitan v0.1.0
+require github.com/zoobzio/capitan v1.0.0
 
 require github.com/google/uuid v1.6.0
